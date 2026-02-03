@@ -1,0 +1,15 @@
+# CODEOWNERS file for nenabot-main repository
+# This file defines the code owners for the repository
+# Code owners are automatically requested for review when someone opens a pull request
+# that modifies files that they own.
+#
+# Each line is a file pattern followed by one or more owners.
+# The pattern follows the same rules used in .gitignore files.
+# The last matching pattern takes precedence.
+#
+# More information: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+# All users from the People tab are listed as code owners
+# All 7 users are designated as owners
+* @jeanbaptistevanparys @Prajjwwol @Proxycon @aleksikirjavainen @thelinanguyen @ViolaS-git @vt422641
