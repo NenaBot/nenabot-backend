@@ -4,7 +4,7 @@ Repo for hosting Hardware Controls and Machine Vision code
 
 # GitHub Workflow & Contribution Guidelines
 
-This document outlines the standards for branching, committing, and managing Pull Requests within this repository.
+This section outlines the standards for branching, committing, and managing Pull Requests within this repository.
 
 ---
 
