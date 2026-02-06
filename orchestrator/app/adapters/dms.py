@@ -27,16 +27,13 @@ class DmsAdapter:
                     params={"packId": pack_id},
                     timeout=self._timeout
                 )
-                response.raise_for_status()
-                payload = response.json()
             else:
                 with httpx.Client(timeout=self._timeout) as client:
                     response = client.get(
                         f"{self._base_url}/dms/read",
                         params={"packId": pack_id}
                     )
-                    response.raise_for_status()
-                    payload = response.json()
-            return DmsResult(True, payload=payload)
+            response.raise_for_status()
+            return DmsResult(True, payload=response.json())
         except Exception as exc:
             return DmsResult(False, error=str(exc))

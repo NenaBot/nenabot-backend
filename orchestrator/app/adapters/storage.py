@@ -19,9 +19,10 @@ class StorageAdapter:
         path = self._results_dir / f"{result.id}.json"
         data = asdict(result)
         # Serialize datetime objects to ISO-8601 format
-        for key, value in data.items():
-            if isinstance(value, datetime):
-                data[key] = value.isoformat()
+        if isinstance(data.get("started_at"), datetime):
+            data["started_at"] = data["started_at"].isoformat()
+        if isinstance(data.get("finished_at"), datetime):
+            data["finished_at"] = data["finished_at"].isoformat()
         with path.open("w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2)
 
