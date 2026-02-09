@@ -118,7 +118,7 @@ python main.py --marker-size <your_size_in_mm>
 ### Known limitations
 
 - Requires good lighting for edge detection
-- Batteries must be close enought to the camera
+- Batteries must be close enough to the camera
 - Batteries must be on same plane as marker
 - May detect ghost shapes in complex backgrounds
 - Best results with marker and batteries clearly visible

@@ -77,6 +77,7 @@ class RobotAdapter:
             import DobotDllTypeMulti as dType
             dType.DisconnectDobot(self._api)
         except Exception:
+            # Ignore errors during disconnect - best-effort cleanup
             pass
         self._api = None
         self._connected_port = None
