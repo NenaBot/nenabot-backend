@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 
-class InspectionJobRequest(BaseModel):
-    pack_id: str = Field(..., alias="packId")
+class JobStatusState(BaseModel):
+    last_point_processed: int = Field(0, alias="lastPointProcessed")
+    error: Optional[str] = None
+
+
+class Job(BaseModel):
+    id: str
     options: Optional[Dict[str, Any]] = None
+    path: Optional[str] = None
+    log: Optional[str] = None
+    measurements: List[Any] = Field(default_factory=list)
+    path_image: Optional[str] = Field(None, alias="path-image")
+    status: JobStatusState = Field(default_factory=JobStatusState)
 
 
-class JobCreated(BaseModel):
-    id: str
-
-
-class JobStatus(BaseModel):
-    id: str
-    state: str
-    step: str
-    updated_at: datetime = Field(..., alias="updatedAt")
 
 
 class Health(BaseModel):
@@ -30,12 +31,31 @@ class Health(BaseModel):
     dms: str
 
 
-class InspectionResultSummary(BaseModel):
-    id: str
-    pack_id: str = Field(..., alias="packId")
-    started_at: datetime = Field(..., alias="startedAt")
-    finished_at: Optional[datetime] = Field(None, alias="finishedAt")
-    decision: str
-    dms_ppb: Optional[float] = Field(None, alias="dmsPpb")
-    dms_compound: Optional[str] = Field(None, alias="dmsCompound")
-    image_path: Optional[str] = Field(None, alias="imagePath")
+class Status(BaseModel):
+    state: str
+
+
+class Profile(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+
+
+class PathRequest(BaseModel):
+    options: Optional[Dict[str, Any]] = None
+
+
+class PathResponse(BaseModel):
+    path: str
+    options: Optional[Dict[str, Any]] = None
+
+
+class StreamStatus(BaseModel):
+    status: str
+    started_at: Optional[datetime] = Field(None, alias="startedAt")
+
+
+class JobCreateRequest(BaseModel):
+    options: Optional[Dict[str, Any]] = None
+    path: Optional[str] = None

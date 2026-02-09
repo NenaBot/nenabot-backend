@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
 class Job:
     id: str
-    pack_id: str
-    state: str
-    step: str
+    options: Optional[Dict[str, Any]] = None
+    path: Optional[str] = None
+    log: Optional[str] = None
+    measurements: List[Any] = field(default_factory=list)
+    path_image: Optional[str] = None
+    last_point_processed: int = 0
+    error: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
 

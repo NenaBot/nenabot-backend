@@ -26,20 +26,60 @@ def client(tmp_path: Path) -> TestClient:
     app.dependency_overrides.clear()
 
 
-def test_health(client: TestClient) -> None:
+def test_health_and_status(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "ok"
+    assert response.json()["status"] == "ok"
 
-
-def test_start_and_get_job(client: TestClient) -> None:
-    response = client.post("/jobs/start", json={"packId": "PACK-1"})
+    response = client.get("/status")
     assert response.status_code == 200
+    assert response.json()["state"] in {"ready", "busy", "error"}
+
+
+def test_jobs_lifecycle(client: TestClient) -> None:
+    response = client.post("/jobs", json={"options": {"foo": "bar"}, "path": "path-1"})
+    assert response.status_code == 201
     job_id = response.json()["id"]
+
+    response = client.get("/jobs")
+    assert response.status_code == 200
+    assert any(job["id"] == job_id for job in response.json())
 
     response = client.get(f"/jobs/{job_id}")
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["id"] == job_id
-    assert payload["state"] == "running"
+    assert response.json()["id"] == job_id
+
+    response = client.get("/jobs/latest")
+    assert response.status_code == 200
+    assert response.json()["id"] == job_id
+
+    response = client.delete(f"/jobs/{job_id}")
+    assert response.status_code == 204
+
+
+def test_profiles_streams_and_paths(client: TestClient) -> None:
+    response = client.get("/profiles")
+    assert response.status_code == 200
+    assert response.json()
+
+    response = client.get("/profiles/default")
+    assert response.status_code == 200
+    assert response.json()["name"]
+
+    response = client.post("/streams/camera")
+    assert response.status_code == 201
+    assert response.json()["status"] == "started"
+
+    response = client.delete("/streams/camera")
+    assert response.status_code == 204
+
+    response = client.post("/streams/detection")
+    assert response.status_code == 201
+    assert response.json()["status"] == "started"
+
+    response = client.delete("/streams/detection")
+    assert response.status_code == 204
+
+    response = client.post("/paths", json={"options": {"speed": 1}})
+    assert response.status_code == 201
+    assert response.json()["path"].startswith("path-")

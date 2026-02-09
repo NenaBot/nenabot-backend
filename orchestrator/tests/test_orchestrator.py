@@ -8,7 +8,7 @@ from app.adapters.vision import VisionAdapter
 from app.services.orchestrator import OrchestratorService
 
 
-def test_start_job_creates_job(tmp_path: Path) -> None:
+def test_create_job_creates_job(tmp_path: Path) -> None:
     svc = OrchestratorService(
         camera=CameraAdapter(),
         vision=VisionAdapter(),
@@ -16,7 +16,7 @@ def test_start_job_creates_job(tmp_path: Path) -> None:
         dms=DmsAdapter(base_url="http://localhost:8080"),
         storage=StorageAdapter(base_dir=str(tmp_path)),
     )
-    job = svc.start_job("PACK-2")
+    job = svc.create_job(options={"foo": "bar"}, path="path-1")
     assert job.id
-    assert job.pack_id == "PACK-2"
-    assert job.state == "running"
+    assert job.options == {"foo": "bar"}
+    assert job.path == "path-1"

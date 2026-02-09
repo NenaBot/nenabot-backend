@@ -18,11 +18,20 @@ OpenAPI spec is generated from the controllers and available at:
 
 ## Endpoints
 
-- `POST /jobs/start`
-- `GET /jobs/{id}`
-- `POST /jobs/{id}/cancel`
 - `GET /health`
-- `GET /results/latest`
+- `GET /status`
+- `GET /jobs`
+- `GET /jobs/{id}`
+- `GET /jobs/latest`
+- `POST /jobs`
+- `DELETE /jobs/{id}`
+- `GET /profiles`
+- `GET /profiles/default`
+- `POST /streams/camera`
+- `DELETE /streams/camera`
+- `POST /streams/detection`
+- `DELETE /streams/detection`
+- `POST /paths`
 
 ## Hardware integration notes
 
