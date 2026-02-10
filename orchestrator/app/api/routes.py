@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from uuid import uuid4
-
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import StreamingResponse
 
-from app.schemas import Health, Job, JobCreateRequest, PathRequest, PathResponse, Profile, Status, StreamStatus
+from app.schemas import (
+    CornerSchema,
+    Health,
+    Job,
+    JobCreateRequest,
+    PathRequest,
+    PathResponse,
+    Profile,
+    Status,
+)
 from app.services.orchestrator import OrchestratorService
 from app.dependencies import get_orchestrator
 
@@ -28,19 +36,19 @@ def list_jobs(svc: OrchestratorService = Depends(get_orchestrator)) -> list[Job]
     return [_to_job(job) for job in jobs]
 
 
-@router.get("/jobs/{job_id}", response_model=Job)
-def get_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
-    job = svc.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return _to_job(job)
-
-
 @router.get("/jobs/latest", response_model=Job)
 def latest_job(svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
     job = svc.latest_job()
     if not job:
         raise HTTPException(status_code=404, detail="No jobs yet")
+    return _to_job(job)
+
+
+@router.get("/jobs/{job_id}", response_model=Job)
+def get_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
+    job = svc.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
     return _to_job(job)
 
 
@@ -68,40 +76,42 @@ def default_profile(svc: OrchestratorService = Depends(get_orchestrator)) -> Pro
     return Profile(**svc.default_profile())
 
 
-@router.post("/streams/camera", response_model=StreamStatus, status_code=status.HTTP_201_CREATED)
-def start_camera_stream(svc: OrchestratorService = Depends(get_orchestrator)) -> StreamStatus:
-    started_at = svc.start_stream("camera")
-    if not started_at:
-        raise HTTPException(status_code=404, detail="Stream not found")
-    return StreamStatus(status="started", startedAt=started_at)
+@router.get("/streams/camera/feed")
+async def camera_feed(svc: OrchestratorService = Depends(get_orchestrator)):
+    """MJPEG live camera feed. Connect via <img src="..."> or fetch API."""
+    return StreamingResponse(
+        svc.camera_vision.stream_camera(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
-@router.delete("/streams/camera", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
-def stop_camera_stream(svc: OrchestratorService = Depends(get_orchestrator)) -> Response:
-    if not svc.stop_stream("camera"):
-        raise HTTPException(status_code=404, detail="Stream not found")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.post("/streams/detection", response_model=StreamStatus, status_code=status.HTTP_201_CREATED)
-def start_detection_stream(svc: OrchestratorService = Depends(get_orchestrator)) -> StreamStatus:
-    started_at = svc.start_stream("detection")
-    if not started_at:
-        raise HTTPException(status_code=404, detail="Stream not found")
-    return StreamStatus(status="started", startedAt=started_at)
-
-
-@router.delete("/streams/detection", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
-def stop_detection_stream(svc: OrchestratorService = Depends(get_orchestrator)) -> Response:
-    if not svc.stop_stream("detection"):
-        raise HTTPException(status_code=404, detail="Stream not found")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+@router.get("/streams/detection/feed")
+async def detection_feed(svc: OrchestratorService = Depends(get_orchestrator)):
+    """MJPEG detection-overlay feed. Shows ArUco markers and battery contour."""
+    return StreamingResponse(
+        svc.camera_vision.stream_detection(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @router.post("/paths", response_model=PathResponse, status_code=status.HTTP_201_CREATED)
-def create_path(payload: PathRequest) -> PathResponse:
-    generated = f"path-{uuid4()}"
-    return PathResponse(path=generated, options=payload.options)
+def create_path(
+    payload: PathRequest,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> PathResponse:
+    result = svc.detect_path()
+    return PathResponse(
+        ok=result.ok,
+        corners=[CornerSchema(x=c.x, y=c.y) for c in result.corners],
+        width_mm=result.width_mm,
+        height_mm=result.height_mm,
+        center_x=result.center_x,
+        center_y=result.center_y,
+        confidence=result.confidence,
+        image_base64=result.image_base64,
+        error=result.error,
+        options=payload.options,
+    )
 
 
 def _to_job(job) -> Job:

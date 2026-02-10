@@ -29,7 +29,10 @@ def client(tmp_path: Path) -> TestClient:
 def test_health_and_status(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    health = response.json()
+    assert health["status"] == "ok"
+    assert "camera" in health
+    assert "dms" in health
 
     response = client.get("/status")
     assert response.status_code == 200
@@ -57,7 +60,7 @@ def test_jobs_lifecycle(client: TestClient) -> None:
     assert response.status_code == 204
 
 
-def test_profiles_streams_and_paths(client: TestClient) -> None:
+def test_profiles_and_paths(client: TestClient) -> None:
     response = client.get("/profiles")
     assert response.status_code == 200
     assert response.json()
@@ -66,20 +69,9 @@ def test_profiles_streams_and_paths(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json()["name"]
 
-    response = client.post("/streams/camera")
-    assert response.status_code == 201
-    assert response.json()["status"] == "started"
-
-    response = client.delete("/streams/camera")
-    assert response.status_code == 204
-
-    response = client.post("/streams/detection")
-    assert response.status_code == 201
-    assert response.json()["status"] == "started"
-
-    response = client.delete("/streams/detection")
-    assert response.status_code == 204
-
     response = client.post("/paths", json={"options": {"speed": 1}})
     assert response.status_code == 201
-    assert response.json()["path"].startswith("path-")
+    body = response.json()
+    assert "ok" in body
+    assert "corners" in body
+    assert isinstance(body["corners"], list)

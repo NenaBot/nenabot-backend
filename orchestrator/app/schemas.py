@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -27,7 +26,6 @@ class Health(BaseModel):
     status: str
     robot: str
     camera: str
-    vision: str
     dms: str
 
 
@@ -42,18 +40,26 @@ class Profile(BaseModel):
 
 
 
+class CornerSchema(BaseModel):
+    x: float
+    y: float
+
+
 class PathRequest(BaseModel):
     options: Optional[Dict[str, Any]] = None
 
 
 class PathResponse(BaseModel):
-    path: str
+    ok: bool
+    corners: List[CornerSchema] = Field(default_factory=list)
+    width_mm: float = 0.0
+    height_mm: float = 0.0
+    center_x: float = 0.0
+    center_y: float = 0.0
+    confidence: float = 0.0
+    image_base64: Optional[str] = Field(None, description="JPEG image as base64 string")
+    error: Optional[str] = None
     options: Optional[Dict[str, Any]] = None
-
-
-class StreamStatus(BaseModel):
-    status: str
-    started_at: Optional[datetime] = Field(None, alias="startedAt")
 
 
 class JobCreateRequest(BaseModel):

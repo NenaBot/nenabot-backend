@@ -1,34 +1,29 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from typing import Dict, List, Optional
 
-from app.adapters.camera import CameraAdapter
+from app.adapters.camera_vision import CameraVisionAdapter, DetectionResult
 from app.adapters.dms import DmsAdapter
 from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
-from app.adapters.vision import VisionAdapter
 from app.domain.models import Job, ResultSummary
 
 
 class OrchestratorService:
     def __init__(
         self,
-        camera: CameraAdapter,
-        vision: VisionAdapter,
+        camera_vision: CameraVisionAdapter,
         robot: RobotAdapter,
         dms: DmsAdapter,
         storage: StorageAdapter,
     ) -> None:
-        self._camera = camera
-        self._vision = vision
+        self._camera_vision = camera_vision
         self._robot = robot
         self._dms = dms
         self._storage = storage
         self._jobs: Dict[str, Job] = {}
         self._job_order: List[str] = []
-        self._streams: Dict[str, Optional[datetime]] = {"camera": None, "detection": None}
         self._profiles = [
             {"name": "default", "description": "Default inspection profile"},
             {"name": "fast", "description": "Faster run, lower accuracy"},
@@ -65,7 +60,6 @@ class OrchestratorService:
             "status": "ok",
             "robot": "unknown",
             "camera": "unknown",
-            "vision": "unknown",
             "dms": "unknown",
         }
 
@@ -78,18 +72,28 @@ class OrchestratorService:
     def default_profile(self) -> dict:
         return self._profiles[0]
 
-    def start_stream(self, stream: str) -> Optional[datetime]:
-        if stream not in self._streams:
-            return None
-        started_at = datetime.utcnow()
-        self._streams[stream] = started_at
-        return started_at
+    def detect_path(self) -> DetectionResult:
+        """Capture an image, detect battery corners, return result with image."""
+        import base64
+        from pathlib import Path
 
-    def stop_stream(self, stream: str) -> bool:
-        if stream not in self._streams:
-            return False
-        self._streams[stream] = None
-        return True
+        capture = self._camera_vision.capture()
+        if not capture.ok or not capture.image_path:
+            return DetectionResult(ok=False, error=capture.error or "Capture failed")
+
+        result = self._camera_vision.detect(capture.image_path)
+
+        try:
+            raw = Path(capture.image_path).read_bytes()
+            result.image_base64 = base64.b64encode(raw).decode("ascii")
+        except Exception:
+            pass  # image encoding is best-effort
+
+        return result
+
+    @property
+    def camera_vision(self) -> CameraVisionAdapter:
+        return self._camera_vision
 
     def latest_result(self) -> Optional[ResultSummary]:
         return self._storage.latest_result()
