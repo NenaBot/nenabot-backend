@@ -1,16 +1,10 @@
 import argparse
 import importlib
 import sys
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
-
-
-# Ensure the directory containing main.py is importable (camera_detection/).
-# This makes tests less sensitive to where pytest is executed from.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def import_main_with_fake_cv2(monkeypatch, fake_cv2):
