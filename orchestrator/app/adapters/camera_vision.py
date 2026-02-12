@@ -35,13 +35,18 @@ class Corner:
 
 @dataclass
 class DetectionResult:
-    ok: bool
     corners: List[Corner] = field(default_factory=list)
     width_mm: float = 0.0
     height_mm: float = 0.0
     center_x: float = 0.0
     center_y: float = 0.0
     confidence: float = 0.0
+
+
+@dataclass
+class DetectionResults:
+    ok: bool
+    detections: List[DetectionResult] = field(default_factory=list)
     image_base64: Optional[str] = None
     error: Optional[str] = None
 
@@ -105,16 +110,16 @@ class CameraVisionAdapter:
 
     # ---- detection (battery corners) ----
 
-    def detect(self, image_path: str) -> DetectionResult:
+    def detect(self, image_path: str) -> DetectionResults:
         try:
             import cv2
             import numpy as np
         except Exception as exc:  # pragma: no cover
-            return DetectionResult(False, error=f"OpenCV not available: {exc}")
+            return DetectionResults(False, error=f"OpenCV not available: {exc}")
 
         image = cv2.imread(image_path)
         if image is None:
-            return DetectionResult(False, error="Unable to read image")
+            return DetectionResults(False, error="Unable to read image")
 
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -128,12 +133,14 @@ class CameraVisionAdapter:
             side_px = float(np.linalg.norm(marker_corners[0][0][0] - marker_corners[0][0][1]))
             pixels_per_mm = side_px / self._marker_size_mm
 
-        # --- battery contour detection (same logic as camera_detection/main.py) ---
+        # --- battery contour detection ---
         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
         edges = cv2.Canny(blurred, 50, 150)
         kernel = np.ones((3, 3), np.uint8)
         edges = cv2.dilate(edges, kernel, iterations=1)
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        detections: List[DetectionResult] = []
 
         for contour in contours:
             area = cv2.contourArea(contour)
@@ -161,17 +168,19 @@ class CameraVisionAdapter:
             width_mm = float(w / pixels_per_mm) if pixels_per_mm else float(w)
             height_mm = float(h / pixels_per_mm) if pixels_per_mm else float(h)
 
-            return DetectionResult(
-                ok=True,
+            detections.append(DetectionResult(
                 corners=corners,
                 width_mm=width_mm,
                 height_mm=height_mm,
                 center_x=center_x,
                 center_y=center_y,
                 confidence=0.7 if pixels_per_mm else 0.3,
-            )
+            ))
 
-        return DetectionResult(False, error="No battery contour detected")
+        if not detections:
+            return DetectionResults(ok=False, error="No battery contour detected")
+
+        return DetectionResults(ok=True, detections=detections)
 
     def detect_live(self, frame):
         """Run detection on a cv2 frame (numpy array), return annotated frame + result."""
