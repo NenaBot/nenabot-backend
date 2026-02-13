@@ -87,9 +87,9 @@ export function CameraFeed({ stream = "camera" }: { stream?: "camera" | "detecti
   const src = `${import.meta.env.VITE_API_URL}/streams/${stream}/feed`;
   return (
     <img
-      src={src}
-      alt={`${stream} feed`}
-      style={{ width: "100%", maxWidth: 640 }}
+    src={src}
+    alt={`${stream} feed`}
+    style={{ width: "100%", maxWidth: 640 }}
     />
   );
 }
@@ -137,16 +137,16 @@ resources. No background thread keeps running.
 ## How it works internally
 
 1. `GET /streams/{type}/feed` returns a `StreamingResponse` wrapping the
-   adapter's async generator.
+    adapter's async generator.
 2. The generator opens `cv2.VideoCapture`, reads frames in a loop, and
-   yields JPEG-encoded bytes with MJPEG boundary headers.
+    yields JPEG-encoded bytes with MJPEG boundary headers.
 3. For the detection feed, each frame is passed through `detect_live()`
-   which runs ArUco detection + contour analysis and draws overlays
-   before encoding.
+    which runs ArUco detection + contour analysis and draws overlays
+    before encoding.
 4. Frame rate is capped at ~30 fps (`asyncio.sleep(0.033)`).
 5. JPEG quality is set to 70 to balance bandwidth and clarity.
 6. When the client disconnects, the generator exits its `finally` block
-   and releases the camera. No background process lingers.
+    and releases the camera. No background process lingers.
 
 ## Troubleshooting
 

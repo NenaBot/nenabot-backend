@@ -15,13 +15,13 @@ def client(tmp_path: Path) -> TestClient:
         storage_dir=str(tmp_path),
         dms_base_url="http://localhost:8080"
     )
-    
+
     # Override the dependency to use our test orchestrator
     app.dependency_overrides[get_orchestrator] = lambda: test_orchestrator
-    
+
     with TestClient(app) as test_client:
         yield test_client
-    
+
     # Clean up the override after the test
     app.dependency_overrides.clear()
 
