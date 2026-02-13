@@ -3,3 +3,4 @@ orchestrator/data/images/*
 orchestrator/.idea/*
 __pycache__
 .coverage
+/data/*
