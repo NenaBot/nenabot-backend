@@ -73,5 +73,5 @@ def test_profiles_and_paths(client: TestClient) -> None:
     assert response.status_code == 201
     body = response.json()
     assert "ok" in body
-    assert "corners" in body
-    assert isinstance(body["corners"], list)
+    assert "detections" in body
+    assert isinstance(body["detections"], list)

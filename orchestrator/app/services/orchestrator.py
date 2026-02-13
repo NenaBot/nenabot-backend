@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Dict, List, Optional
 
-from app.adapters.camera_vision import CameraVisionAdapter, DetectionResult
+from app.adapters.camera_vision import CameraVisionAdapter, DetectionResults
 from app.adapters.dms import DmsAdapter
 from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
@@ -72,14 +72,14 @@ class OrchestratorService:
     def default_profile(self) -> dict:
         return self._profiles[0]
 
-    def detect_path(self) -> DetectionResult:
+    def detect_path(self) -> DetectionResults:
         """Capture an image, detect battery corners, return result with image."""
         import base64
         from pathlib import Path
 
         capture = self._camera_vision.capture()
         if not capture.ok or not capture.image_path:
-            return DetectionResult(ok=False, error=capture.error or "Capture failed")
+            return DetectionResults(ok=False, error=capture.error or "Capture failed")
 
         result = self._camera_vision.detect(capture.image_path)
 

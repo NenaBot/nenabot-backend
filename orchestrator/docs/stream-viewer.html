@@ -318,6 +318,8 @@
       const info = $("snapshot-info");
       const canvas = $("canvas-snapshot");
 
+      const colors = ["#facc15", "#38bdf8", "#a78bfa", "#fb923c", "#4ade80", "#f87171"];
+
       badge.className = "badge badge-live";
       badge.textContent = "...";
       info.textContent = "";
@@ -329,10 +331,11 @@
           body: JSON.stringify({ options: {} }),
         });
         const data = await r.json();
-        log(`POST /paths → ok=${data.ok}, corners=${data.corners?.length ?? 0}, confidence=${data.confidence}`, data.ok ? "ok" : "err");
-        if (data.corners?.length) {
-          log(`  corners: ${data.corners.map((c) => `(${c.x.toFixed(1)}, ${c.y.toFixed(1)})`).join(", ")}`);
-        }
+        const count = data.detections?.length ?? 0;
+        log(`POST /paths → ok=${data.ok}, detections=${count}`, data.ok ? "ok" : "err");
+        data.detections?.forEach((d, i) => {
+          log(`  #${i + 1}: ${d.corners.length} corners, ${d.width_mm.toFixed(1)}×${d.height_mm.toFixed(1)} mm, conf ${(d.confidence * 100).toFixed(0)}%`);
+        });
         if (data.error) log(`  error: ${data.error}`, "err");
 
         if (data.image_base64) {
@@ -340,7 +343,6 @@
           img.style.display = "block";
           ph.style.display = "none";
 
-          // Draw corner overlay once image loads
           img.onload = () => {
             const natW = img.naturalWidth;
             const natH = img.naturalHeight;
@@ -349,32 +351,44 @@
             const ctx = canvas.getContext("2d");
             ctx.clearRect(0, 0, natW, natH);
 
-            if (data.corners?.length) {
-              ctx.strokeStyle = "#facc15";
-              ctx.lineWidth = 3;
-              ctx.beginPath();
-              data.corners.forEach((c, i) => {
-                i === 0 ? ctx.moveTo(c.x, c.y) : ctx.lineTo(c.x, c.y);
-              });
-              ctx.closePath();
-              ctx.stroke();
-
-              // Draw corner dots
-              ctx.fillStyle = "#f87171";
-              data.corners.forEach((c) => {
+            (data.detections || []).forEach((d, idx) => {
+              const color = colors[idx % colors.length];
+              if (d.corners?.length) {
+                // Draw polygon
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
                 ctx.beginPath();
-                ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
-                ctx.fill();
-              });
-            }
+                d.corners.forEach((c, i) => {
+                  i === 0 ? ctx.moveTo(c.x, c.y) : ctx.lineTo(c.x, c.y);
+                });
+                ctx.closePath();
+                ctx.stroke();
+
+                // Draw corner dots
+                ctx.fillStyle = color;
+                d.corners.forEach((c) => {
+                  ctx.beginPath();
+                  ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
+                  ctx.fill();
+                });
+
+                // Label
+                ctx.font = "bold 14px sans-serif";
+                ctx.fillStyle = "#fff";
+                ctx.strokeStyle = "#000";
+                ctx.lineWidth = 3;
+                const label = `#${idx + 1} ${d.width_mm.toFixed(0)}×${d.height_mm.toFixed(0)}mm`;
+                const lx = d.center_x - 40;
+                const ly = d.center_y - 10;
+                ctx.strokeText(label, lx, ly);
+                ctx.fillText(label, lx, ly);
+              }
+            });
           };
 
           badge.className = "badge badge-live";
-          badge.textContent = data.ok ? "OK" : "FAIL";
-          const dims = data.width_mm && data.height_mm
-            ? ` — ${data.width_mm.toFixed(1)} × ${data.height_mm.toFixed(1)} mm`
-            : "";
-          info.textContent = `${data.corners?.length ?? 0} corners, conf ${(data.confidence * 100).toFixed(0)}%${dims}`;
+          badge.textContent = data.ok ? `${count} found` : "FAIL";
+          info.textContent = `${count} detection${count !== 1 ? "s" : ""}`;
         } else {
           img.style.display = "none";
           ph.style.display = "";

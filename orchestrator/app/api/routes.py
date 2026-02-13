@@ -8,6 +8,7 @@ from app.schemas import (
     Health,
     Job,
     JobCreateRequest,
+    PathItem,
     PathRequest,
     PathResponse,
     Profile,
@@ -102,12 +103,17 @@ def create_path(
     result = svc.detect_path()
     return PathResponse(
         ok=result.ok,
-        corners=[CornerSchema(x=c.x, y=c.y) for c in result.corners],
-        width_mm=result.width_mm,
-        height_mm=result.height_mm,
-        center_x=result.center_x,
-        center_y=result.center_y,
-        confidence=result.confidence,
+        detections=[
+            PathItem(
+                corners=[CornerSchema(x=c.x, y=c.y) for c in d.corners],
+                width_mm=d.width_mm,
+                height_mm=d.height_mm,
+                center_x=d.center_x,
+                center_y=d.center_y,
+                confidence=d.confidence,
+            )
+            for d in result.detections
+        ],
         image_base64=result.image_base64,
         error=result.error,
         options=payload.options,
