@@ -1,0 +1,15 @@
+[tool.black]
+line-length = 88
+skip-string-normalization = false
+
+[tool.ruff]
+line-length = 88
+exclude = [".venv", "__pycache__", "build", "dist", ".git", ".mypy_cache", ".pytest_cache"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "C90", "N", "D", "ANN", "S", "A", "COM", "C4", "PIE", "Q", "RUF"]
+ignore = []
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-single-line = false
