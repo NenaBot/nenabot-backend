@@ -4,7 +4,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from app.adapters.camera_vision import CameraVisionAdapter, DetectionResults
-from app.adapters.dms import DmsAdapter
+from app.adapters.ionVision.ionVision import IVAdapter
 from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
 from app.domain.models import Job, ResultSummary
@@ -15,7 +15,7 @@ class OrchestratorService:
         self,
         camera_vision: CameraVisionAdapter,
         robot: RobotAdapter,
-        dms: DmsAdapter,
+        dms: IVAdapter,
         storage: StorageAdapter,
     ) -> None:
         self._camera_vision = camera_vision
