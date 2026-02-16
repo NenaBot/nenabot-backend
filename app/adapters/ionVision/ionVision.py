@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
-from urllib.parse import quote
 import httpx
 
 
@@ -85,6 +84,57 @@ class IVAdapter:
         The /currentScan/comments object can first be fetched for editing using GET.
         """
         return self._request("PUT", "currentScan/comments", json=comments)  
+
+
+    #results
+    def get_results(self, max_results:int, page:int, 
+                    search:str, start_date:str, sort_by:str, 
+                    only_metadata:bool, ids:str) -> IVResult:
+        """
+        Search the scan results that are stored on the device.       
+        """
+        return self._request("GET", "results", params={
+            "maxResults": max_results,
+            "page": page,
+            "search": search,
+            "startDate": start_date,
+            "sortBy": sort_by,
+            "onlyMetadata": only_metadata,
+            "ids": ids
+        })   
+
+    def get_latest_dataobject(self) -> IVResult:
+        """
+        Get the data object of the latest scan result once it has been processed. 
+        Please note that it can take some time for the device to process the scan 
+        result data after a scan has already been finished.       
+        """
+        return self._request("GET", "results/latest")  
+
+    def get_latest_gas_detection(self) -> IVResult:
+        """
+        Get built-in gas detection results for the latest scan result.
+        """
+        return self._request("GET", "results/latest/gasDetection") 
+    
+    def get_gas_detection_result(self, id:str) -> IVResult:
+        """
+        Get built-in gas detection results for a scan result.
+        """
+        return self._request("GET", f"results/id/{id}/gasDetection")
+
+    def get_scan_dataobject(self, id:str) -> IVResult:
+        """
+        Get the complete data object of a scan result.
+        """
+        return self._request("GET", f"results/id/{id}")
+    
+    def get_scan_result_commentobject(self, id:str) -> IVResult:
+        """
+        Get the comment object of a scan result.
+        """
+        return self._request("GET", f"results/id/{id}/comments")
+
 
     # parameters
     def get_parameter_ID(self) -> IVResult:
