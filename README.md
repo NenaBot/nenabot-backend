@@ -24,7 +24,7 @@ OpenAPI spec is generated from the controllers and available at:
 
 For the full system architecture (layer breakdown, folder tree, and dependency diagram), see:
 
-- `docs/architecture-overview.md`
+- [Architecture Overview](docs/architecture-overview.md)
 
 ## Endpoints
 
