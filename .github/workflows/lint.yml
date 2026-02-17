@@ -1,0 +1,47 @@
+name: Lint & Format
+
+on:
+  push:
+    branches: [main, feature/ci-updates]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run ruff (lint + isort)
+        run: |
+          ruff check .
+          ruff check . --select I --fix
+
+      - name: Summarize ruff issues in job summary
+        if: always()
+        run: |
+           ruff check . > ruff_report.txt || true
+           echo '### Ruff Lint Report' >> $GITHUB_STEP_SUMMARY
+           head -n 100 ruff_report.txt >> $GITHUB_STEP_SUMMARY
+           if grep -q . ruff_report.txt; then exit 1; fi
+
+      - name: Run black (check only)
+        run: |
+           black --check .
+
+      - name: Summarize black issues in job summary
+        if: failure()
+        run: |
+           black --check . > black_report.txt || true
+           echo '### Black Format Report' >> $GITHUB_STEP_SUMMARY
+           head -n 100 black_report.txt >> $GITHUB_STEP_SUMMARY
