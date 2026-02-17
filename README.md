@@ -20,6 +20,12 @@ OpenAPI spec is generated from the controllers and available at:
 - http://127.0.0.1:8000/openapi.json
 - http://127.0.0.1:8000/docs
 
+## Architecture overview
+
+For the full system architecture (layer breakdown, folder tree, and dependency diagram), see:
+
+- [Architecture Overview](docs/architecture-overview.md)
+
 ## Endpoints
 
 - `GET /health`
