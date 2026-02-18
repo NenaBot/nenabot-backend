@@ -16,7 +16,7 @@ class IVResult:
     payload: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
-
+# Adapter for the IonVision HTTP API
 class IVAdapter:
     def __init__(self, base_url: str, timeout_s: float = 5.0, client: Optional[httpx.Client] = None) -> None:
         self._base_url = base_url.rstrip("/")
@@ -143,3 +143,8 @@ class IVAdapter:
         To access other parameter related functionality, use the /parameter/* endpoints.        
         """
         return self._request("GET", "currentParameter")
+
+# Adapter for the IonVision WebSocket API
+class WebSocketAdapter:
+    def __init__(self, base_url: str) -> None:
+        self._base_url = base_url.rstrip("/")
