@@ -48,6 +48,8 @@ class DetectionResults:
     ok: bool
     detections: List[DetectionResult] = field(default_factory=list)
     image_base64: Optional[str] = None
+    pixels_per_mm: Optional[float] = None
+    marker_count: int = 0
     error: Optional[str] = None
 
 
@@ -178,9 +180,19 @@ class CameraVisionAdapter:
             ))
 
         if not detections:
-            return DetectionResults(ok=False, error="No battery contour detected")
+            return DetectionResults(
+                ok=False,
+                error="No battery contour detected",
+                pixels_per_mm=pixels_per_mm,
+                marker_count=int(len(ids)) if ids is not None else 0,
+            )
 
-        return DetectionResults(ok=True, detections=detections)
+        return DetectionResults(
+            ok=True,
+            detections=detections,
+            pixels_per_mm=pixels_per_mm,
+            marker_count=int(len(ids)) if ids is not None else 0,
+        )
 
     def detect_live(self, frame):
         """Run detection on a cv2 frame (numpy array), return annotated frame + result."""
@@ -238,18 +250,49 @@ class CameraVisionAdapter:
 
     # ---- MJPEG streaming generators ----
 
+    def _error_frame(self, text: str) -> bytes:
+        """Create a JPEG showing an error message (black background, red text)."""
+        import cv2
+        import numpy as np
+
+        frame = np.zeros((self._frame_height, self._frame_width, 3), dtype=np.uint8)
+        # Multi-line support
+        lines = text.split("\n")
+        y0 = self._frame_height // 2 - 20 * (len(lines) - 1) // 2
+        for i, line in enumerate(lines):
+            cv2.putText(
+                frame, line, (40, y0 + i * 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 255), 2,
+            )
+        _, jpeg = cv2.imencode(".jpg", frame)
+        return jpeg.tobytes()
+
     async def stream_camera(self) -> AsyncGenerator[bytes, None]:
         """Yield raw MJPEG frames from the camera."""
         import cv2
+
+        if self._camera_streaming:
+            # Already streaming — send a single error frame and exit
+            error = self._error_frame("Camera stream already active")
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+            return
 
         self._camera_streaming = True
         cap = cv2.VideoCapture(self._device_index)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
 
+        if not cap.isOpened():
+            self._camera_streaming = False
+            error = self._error_frame("Camera not available\n(check device or opencv-python)")
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+            cap.release()
+            return
+
+        loop = asyncio.get_running_loop()
         try:
             while self._camera_streaming:
-                ok, frame = cap.read()
+                ok, frame = await loop.run_in_executor(None, cap.read)
                 if not ok:
                     await asyncio.sleep(0.05)
                     continue
@@ -267,18 +310,31 @@ class CameraVisionAdapter:
         """Yield MJPEG frames with detection overlay."""
         import cv2
 
+        if self._detection_streaming:
+            error = self._error_frame("Detection stream already active")
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+            return
+
         self._detection_streaming = True
         cap = cv2.VideoCapture(self._device_index)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
 
+        if not cap.isOpened():
+            self._detection_streaming = False
+            error = self._error_frame("Camera not available\n(check device or opencv-python)")
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+            cap.release()
+            return
+
+        loop = asyncio.get_running_loop()
         try:
             while self._detection_streaming:
-                ok, frame = cap.read()
+                ok, frame = await loop.run_in_executor(None, cap.read)
                 if not ok:
                     await asyncio.sleep(0.05)
                     continue
-                annotated = self.detect_live(frame)
+                annotated = await loop.run_in_executor(None, self.detect_live, frame)
                 _, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
                 yield (
                     b"--frame\r\n"
@@ -294,3 +350,88 @@ class CameraVisionAdapter:
 
     def stop_detection_stream(self) -> None:
         self._detection_streaming = False
+
+    # ---- overlay rendering ----
+
+    @staticmethod
+    def render_overlay(
+        jpeg_bytes: bytes,
+        detections: list,
+        measurements: list | None = None,
+    ) -> bytes:
+        """
+        Draw detection boxes and numbered measurement points onto a JPEG image.
+
+        Parameters
+        ----------
+        jpeg_bytes : raw JPEG bytes of the base image
+        detections : list of DetectionResult (corners, center, sizes)
+        measurements : list of Measurement dataclass instances (optional)
+
+        Returns
+        -------
+        JPEG bytes of the annotated image
+        """
+        import cv2
+        import numpy as np
+
+        buf = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        if frame is None:
+            return jpeg_bytes  # can't decode → return original
+
+        # --- detection bounding boxes (cyan) ---
+        for det in detections:
+            corners = det.corners if hasattr(det, "corners") else []
+            if len(corners) >= 4:
+                pts = np.array(
+                    [[int(c.x), int(c.y)] for c in corners], dtype=np.int32
+                )
+                cv2.drawContours(frame, [pts], 0, (0, 255, 255), 2)
+            # center cross
+            cx, cy = int(det.center_x), int(det.center_y)
+            cv2.drawMarker(
+                frame, (cx, cy), (0, 255, 255),
+                cv2.MARKER_CROSS, 12, 1,
+            )
+            # size label
+            label = f"{det.width_mm:.1f}x{det.height_mm:.1f} mm"
+            cv2.putText(
+                frame, label, (cx - 50, cy - 14),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1,
+            )
+
+        # --- measurement points (green numbered circles) ---
+        if measurements:
+            for m in measurements:
+                px = int(m.waypoint.x)
+                py = int(m.waypoint.y)
+                color = (0, 220, 100)  # green
+                cv2.circle(frame, (px, py), 10, color, -1)
+                cv2.circle(frame, (px, py), 10, (255, 255, 255), 1)
+                idx_label = str(m.waypoint_index + 1)
+                cv2.putText(
+                    frame, idx_label, (px - 4, py + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 0), 1,
+                )
+                # scan summary label
+                if m.scan_result:
+                    summary = _scan_summary(m.scan_result)
+                    cv2.putText(
+                        frame, summary, (px + 14, py + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 200), 1,
+                    )
+
+        _, out = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        return out.tobytes()
+
+
+def _scan_summary(scan_result: dict) -> str:
+    """Extract a short human-readable label from a DMS scan result dict."""
+    compound = scan_result.get("compound", scan_result.get("name", ""))
+    ppb = scan_result.get("ppb", scan_result.get("concentration", ""))
+    if compound and ppb:
+        return f"{compound} {ppb} ppb"
+    if compound:
+        return str(compound)
+    return "scan"

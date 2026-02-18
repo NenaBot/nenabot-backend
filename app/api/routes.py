@@ -1,21 +1,26 @@
 from __future__ import annotations
 
+import base64
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 
+from app.dependencies import get_orchestrator
+from app.domain.models import Waypoint
 from app.schemas import (
     CornerSchema,
     Health,
     Job,
     JobCreateRequest,
+    MeasurementSchema,
     PathItem,
     PathRequest,
     PathResponse,
     Profile,
     Status,
+    WaypointSchema,
 )
 from app.services.orchestrator import OrchestratorService
-from app.dependencies import get_orchestrator
 
 router = APIRouter()
 
@@ -53,9 +58,37 @@ def get_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)) -
     return _to_job(job)
 
 
+@router.get("/jobs/{job_id}/image")
+def get_job_image(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)):
+    """Return the annotated overlay JPEG for a job."""
+    img = svc.get_job_image(job_id)
+    if not img:
+        raise HTTPException(status_code=404, detail="No image for this job")
+    return Response(content=img, media_type="image/jpeg")
+
+
 @router.post("/jobs", response_model=Job, status_code=status.HTTP_201_CREATED)
-def create_job(payload: JobCreateRequest, svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
-    job = svc.create_job(options=payload.options, path=payload.path)
+def create_job(
+    payload: JobCreateRequest,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> Job:
+    waypoints = [Waypoint(x=w.x, y=w.y, z=w.z, r=w.r) for w in payload.path]
+
+    # Decode optional snapshot image
+    image_bytes: bytes | None = None
+    if payload.image_base64:
+        try:
+            image_bytes = base64.b64decode(payload.image_base64)
+        except Exception:
+            pass
+
+    job = svc.create_job(
+        path=waypoints,
+        dry_run=payload.dry_run,
+        options=payload.options,
+        image_bytes=image_bytes,
+    )
+    svc.run_job(job.id)
     return _to_job(job)
 
 
@@ -65,6 +98,12 @@ def delete_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)
     if not ok:
         raise HTTPException(status_code=404, detail="Job not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/robot/stop", status_code=status.HTTP_200_OK)
+def stop_robot(svc: OrchestratorService = Depends(get_orchestrator)):
+    stopped = svc.stop_job()
+    return {"stopped": stopped}
 
 
 @router.get("/profiles", response_model=list[Profile])
@@ -86,6 +125,19 @@ async def camera_feed(svc: OrchestratorService = Depends(get_orchestrator)):
     )
 
 
+@router.post("/streams/camera", status_code=status.HTTP_201_CREATED)
+def start_camera_stream(svc: OrchestratorService = Depends(get_orchestrator)):
+    """Start the camera stream (no-op — stream is started on first GET to /feed)."""
+    return {"streaming": True}
+
+
+@router.delete("/streams/camera", status_code=status.HTTP_204_NO_CONTENT)
+def stop_camera_stream(svc: OrchestratorService = Depends(get_orchestrator)):
+    """Stop the camera stream."""
+    svc.camera_vision.stop_camera_stream()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/streams/detection/feed")
 async def detection_feed(svc: OrchestratorService = Depends(get_orchestrator)):
     """MJPEG detection-overlay feed. Shows ArUco markers and battery contour."""
@@ -93,6 +145,19 @@ async def detection_feed(svc: OrchestratorService = Depends(get_orchestrator)):
         svc.camera_vision.stream_detection(),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+@router.post("/streams/detection", status_code=status.HTTP_201_CREATED)
+def start_detection_stream(svc: OrchestratorService = Depends(get_orchestrator)):
+    """Start the detection stream (no-op — stream is started on first GET to /feed)."""
+    return {"streaming": True}
+
+
+@router.delete("/streams/detection", status_code=status.HTTP_204_NO_CONTENT)
+def stop_detection_stream(svc: OrchestratorService = Depends(get_orchestrator)):
+    """Stop the detection stream."""
+    svc.camera_vision.stop_detection_stream()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/paths", response_model=PathResponse, status_code=status.HTTP_201_CREATED)
@@ -115,6 +180,8 @@ def create_path(
             for d in result.detections
         ],
         image_base64=result.image_base64,
+        pixels_per_mm=result.pixels_per_mm,
+        marker_count=result.marker_count,
         error=result.error,
         options=payload.options,
     )
@@ -124,9 +191,23 @@ def _to_job(job) -> Job:
     return Job(
         id=job.id,
         options=job.options,
-        path=job.path,
+        path=[WaypointSchema(x=w.x, y=w.y, z=w.z, r=w.r) for w in job.path],
+        dry_run=job.dry_run,
         log=job.log,
-        measurements=job.measurements,
+        measurements=[
+            MeasurementSchema(
+                waypoint_index=m.waypoint_index,
+                waypoint=WaypointSchema(x=m.waypoint.x, y=m.waypoint.y, z=m.waypoint.z, r=m.waypoint.r),
+                scan_result=m.scan_result,
+                simulated=m.simulated,
+                timestamp=m.timestamp,
+            )
+            for m in job.measurements
+        ],
         path_image=job.path_image,
-        status={"lastPointProcessed": job.last_point_processed, "error": job.error},
+        status={
+            "state": job.state,
+            "lastPointProcessed": job.last_point_processed,
+            "error": job.error,
+        },
     )
