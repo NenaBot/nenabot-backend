@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nenabot — Job Tester</title>
+    <style>
+        :root {
+            --bg: #1e1e2e;
+            --card: #282840;
+            --border: #3a3a5c;
+            --fg: #cdd6f4;
+            --dim: #888;
+            --accent: #89b4fa;
+            --green: #a6e3a1;
+            --red: #f38ba8;
+            --orange: #fab387;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            padding: 12px 20px;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        header h1 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        #apiUrl {
+            background: var(--bg);
+            color: var(--fg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 13px;
+            width: 260px;
+        }
+
+        main {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 12px;
+            flex: 1;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-hdr {
+            padding: 8px 12px;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-body {
+            padding: 10px 12px;
+            flex: 1;
+            overflow: auto;
+        }
+
+        .stream-img {
+            width: 100%;
+            display: block;
+            border-radius: 4px;
+            background: #000;
+            min-height: 160px;
+        }
+
+        button {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        button:hover {
+            filter: brightness(1.15);
+        }
+
+        button.danger {
+            background: var(--red);
+        }
+
+        button.secondary {
+            background: var(--border);
+            color: var(--fg);
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        label {
+            font-size: 12px;
+            color: var(--dim);
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        input[type="number"] {
+            background: var(--bg);
+            color: var(--fg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 13px;
+            width: 80px;
+        }
+
+        .field-row {
+            display: flex;
+            gap: 12px;
+            align-items: end;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .status-pill {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .state-created {
+            background: var(--border);
+            color: var(--fg);
+        }
+
+        .state-running {
+            background: var(--orange);
+            color: #000;
+        }
+
+        .state-completed {
+            background: var(--green);
+            color: #000;
+        }
+
+        .state-failed {
+            background: var(--red);
+            color: #000;
+        }
+
+        .state-stopped {
+            background: var(--dim);
+            color: #fff;
+        }
+
+        #log {
+            background: var(--bg);
+            padding: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 4px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            color: var(--dim);
+            font-weight: 600;
+        }
+
+        .full-span {
+            grid-column: 1 / -1;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            border-radius: 4px;
+            background: #000;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>Nenabot — Job Tester</h1>
+        <input id="apiUrl" type="text" value="http://localhost:8000" placeholder="API base URL" />
+    </header>
+
+    <main>
+        <!-- Camera Feed -->
+        <div class="card">
+            <div class="card-hdr">Camera Feed</div>
+            <div class="card-body">
+                <img id="cameraFeed" class="stream-img" alt="camera feed" />
+                <div class="btn-row">
+                    <button onclick="toggleCamera()">Start</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detection Overlay -->
+        <div class="card">
+            <div class="card-hdr">Detection Overlay</div>
+            <div class="card-body">
+                <img id="detectionFeed" class="stream-img" alt="detection overlay" />
+                <div class="btn-row">
+                    <button onclick="toggleDetection()">Start</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Path Detection (snapshot) -->
+        <div class="card">
+            <div class="card-hdr">
+                <span>Path Detection</span>
+                <button onclick="detectPath()">Detect</button>
+            </div>
+            <div class="card-body">
+                <canvas id="snapCanvas" width="640" height="360"></canvas>
+                <div id="pathInfo" style="margin-top:6px; font-size:12px; color:var(--dim);"></div>
+            </div>
+        </div>
+
+        <!-- Job Controls -->
+        <div class="card">
+            <div class="card-hdr">Job Controls</div>
+            <div class="card-body">
+                <div class="field-row">
+                    <div><label>Work Z</label><input id="workZ" type="number" value="0" step="0.1" /></div>
+                    <div><label>Work R</label><input id="workR" type="number" value="0" step="0.1" /></div>
+                </div>
+                <div class="btn-row">
+                    <button onclick="startJob(false)">Start Job</button>
+                    <button class="secondary" onclick="startJob(true)">Dry Run</button>
+                    <button class="danger" onclick="stopJob()">Stop</button>
+                </div>
+                <div style="margin-top:12px;">
+                    <div id="jobStatus"></div>
+                    <div id="jobProgress" style="margin-top:4px; font-size:12px; color:var(--dim);"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Measurements Table -->
+        <div class="card full-span">
+            <div class="card-hdr">Measurements</div>
+            <div class="card-body">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>X</th>
+                            <th>Y</th>
+                            <th>Z</th>
+                            <th>R</th>
+                            <th>Simulated</th>
+                            <th>Scan Result</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="measurementsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Log -->
+        <div class="card full-span">
+            <div class="card-hdr">
+                <span>Log</span>
+                <button class="secondary" onclick="document.getElementById('log').textContent=''">Clear</button>
+            </div>
+            <div class="card-body">
+                <div id="log"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        const api = () => $('apiUrl').value.replace(/\/+$/, '');
+
+        let cameraOn = false, detectionOn = false;
+        let currentJobId = null, pollTimer = null;
+        let detectedPath = [];  // waypoints from latest detection
+
+        function log(msg) {
+            const el = $('log');
+            el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        /* ---- Streams ---- */
+        async function toggleCamera() {
+            const img = $('cameraFeed');
+            cameraOn = !cameraOn;
+            if (cameraOn) {
+                img.src = `${api()}/streams/camera/feed`;
+                img.onerror = () => { log('Camera feed error — check server / camera'); cameraOn = false; };
+                log('Camera stream started');
+            } else {
+                img.src = '';
+                img.onerror = null;
+                try { await fetch(`${api()}/streams/camera`, { method: 'DELETE' }); } catch (_) { }
+                log('Camera stream stopped');
+            }
+        }
+
+        async function toggleDetection() {
+            const img = $('detectionFeed');
+            detectionOn = !detectionOn;
+            if (detectionOn) {
+                img.src = `${api()}/streams/detection/feed`;
+                img.onerror = () => { log('Detection feed error — check server / camera'); detectionOn = false; };
+                log('Detection stream started');
+            } else {
+                img.src = '';
+                img.onerror = null;
+                try { await fetch(`${api()}/streams/detection`, { method: 'DELETE' }); } catch (_) { }
+                log('Detection stream stopped');
+            }
+        }
+
+        /* ---- Path detection ---- */
+        async function detectPath() {
+            log('Detecting path…');
+            try {
+                const res = await fetch(`${api()}/paths`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ options: {} }),
+                });
+                const data = await res.json();
+                log(`Path result: ok=${data.ok}, ${data.detections?.length ?? 0} detections, ` +
+                    `pixelsPerMm=${data.pixelsPerMm ?? '?'}, markers=${data.markerCount ?? 0}`);
+
+                // Draw snapshot
+                if (data.image_base64) {
+                    const img = new Image();
+                    img.onload = () => {
+                        const cv = $('snapCanvas');
+                        cv.width = img.width; cv.height = img.height;
+                        const ctx = cv.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        // draw detection boxes
+                        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2;
+                        for (const det of (data.detections || [])) {
+                            if (det.corners?.length >= 4) {
+                                ctx.beginPath();
+                                ctx.moveTo(det.corners[0].x, det.corners[0].y);
+                                for (let i = 1; i < det.corners.length; i++)
+                                    ctx.lineTo(det.corners[i].x, det.corners[i].y);
+                                ctx.closePath(); ctx.stroke();
+                            }
+                            // center dot
+                            ctx.fillStyle = '#ff0'; ctx.beginPath();
+                            ctx.arc(det.center_x, det.center_y, 4, 0, Math.PI * 2); ctx.fill();
+                        }
+                    };
+                    img.src = 'data:image/jpeg;base64,' + data.image_base64;
+                }
+
+                // Build waypoint list from detection centers
+                const workZ = parseFloat($('workZ').value) || 0;
+                const workR = parseFloat($('workR').value) || 0;
+                detectedPath = (data.detections || []).map(d => ({
+                    x: d.center_x, y: d.center_y, z: workZ, r: workR
+                }));
+
+                $('pathInfo').textContent = detectedPath.length
+                    ? `${detectedPath.length} waypoint(s) ready — centers: ${detectedPath.map(w => `(${w.x.toFixed(0)},${w.y.toFixed(0)})`).join(', ')}`
+                    : 'No detections — run detection first or add manual waypoints';
+
+            } catch (e) {
+                log('Path detection error: ' + e.message);
+            }
+        }
+
+        /* ---- Job ---- */
+        async function startJob(dryRun) {
+            if (!detectedPath.length) {
+                log('No path detected — run path detection first.');
+                return;
+            }
+            // Update Z/R from inputs
+            const workZ = parseFloat($('workZ').value) || 0;
+            const workR = parseFloat($('workR').value) || 0;
+            const path = detectedPath.map(w => ({ ...w, z: workZ, r: workR }));
+
+            log(`Starting ${dryRun ? 'DRY RUN' : 'REAL'} job with ${path.length} waypoints…`);
+            try {
+                const res = await fetch(`${api()}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path, dryRun: dryRun }),
+                });
+                const job = await res.json();
+                currentJobId = job.id;
+                log(`Job created: ${job.id}  state=${job.status?.state}`);
+                renderJobStatus(job);
+                startPolling();
+            } catch (e) {
+                log('Job creation error: ' + e.message);
+            }
+        }
+
+        async function stopJob() {
+            try {
+                await fetch(`${api()}/robot/stop`, { method: 'POST' });
+                log('Stop requested');
+            } catch (e) {
+                log('Stop error: ' + e.message);
+            }
+        }
+
+        /* ---- Polling ---- */
+        function startPolling() {
+            stopPolling();
+            pollTimer = setInterval(pollJob, 800);
+        }
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+
+        async function pollJob() {
+            if (!currentJobId) return;
+            try {
+                const res = await fetch(`${api()}/jobs/${currentJobId}`);
+                const job = await res.json();
+                renderJobStatus(job);
+                if (['completed', 'failed', 'stopped'].includes(job.status?.state)) {
+                    stopPolling();
+                    log(`Job finished: ${job.status.state}`);
+                }
+            } catch (e) {
+                log('Poll error: ' + e.message);
+            }
+        }
+
+        function renderJobStatus(job) {
+            const s = job.status || {};
+            $('jobStatus').innerHTML =
+                `<span class="status-pill state-${s.state || 'created'}">${(s.state || 'created').toUpperCase()}</span>` +
+                ` &nbsp; Job: <code>${job.id?.slice(0, 8)}…</code>`;
+            $('jobProgress').textContent =
+                `Processed: ${s.lastPointProcessed ?? 0} / ${job.path?.length ?? 0}` +
+                (s.error ? `  —  Error: ${s.error}` : '') +
+                (job.dryRun ? '  (dry run)' : '');
+
+            // Measurements table
+            const tbody = $('measurementsBody');
+            tbody.innerHTML = '';
+            for (const m of (job.measurements || [])) {
+                const w = m.waypoint || {};
+                const scanStr = m.scanResult ? JSON.stringify(m.scanResult).slice(0, 80) : '—';
+                tbody.innerHTML += `<tr>
+      <td>${m.waypointIndex}</td>
+      <td>${w.x?.toFixed(1)}</td><td>${w.y?.toFixed(1)}</td>
+      <td>${w.z?.toFixed(1)}</td><td>${w.r?.toFixed(1)}</td>
+      <td>${m.simulated ? 'Yes' : 'No'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${scanStr}</td>
+      <td>${m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '—'}</td>
+    </tr>`;
+            }
+        }
+    </script>
+</body>
+
+</html>

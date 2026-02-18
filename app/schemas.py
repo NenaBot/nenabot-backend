@@ -5,22 +5,49 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+# ---- Waypoint / Measurement ----
+
+class WaypointSchema(BaseModel):
+    x: float
+    y: float
+    z: float = 0.0
+    r: float = 0.0
+
+
+class MeasurementSchema(BaseModel):
+    waypoint_index: int = Field(alias="waypointIndex")
+    waypoint: WaypointSchema
+    scan_result: Optional[Dict[str, Any]] = Field(None, alias="scanResult")
+    simulated: bool = False
+    timestamp: Optional[str] = None
+
+    model_config = {"populate_by_name": True}
+
+
+# ---- Job ----
+
 class JobStatusState(BaseModel):
+    state: str = "created"
     last_point_processed: int = Field(0, alias="lastPointProcessed")
     error: Optional[str] = None
+
+    model_config = {"populate_by_name": True}
 
 
 class Job(BaseModel):
     id: str
     options: Optional[Dict[str, Any]] = None
-    path: Optional[str] = None
+    path: List[WaypointSchema] = Field(default_factory=list)
+    dry_run: bool = Field(False, alias="dryRun")
     log: Optional[str] = None
-    measurements: List[Any] = Field(default_factory=list)
+    measurements: List[MeasurementSchema] = Field(default_factory=list)
     path_image: Optional[str] = Field(None, alias="path-image")
     status: JobStatusState = Field(default_factory=JobStatusState)
 
+    model_config = {"populate_by_name": True}
 
 
+# ---- Health / Status / Profile ----
 
 class Health(BaseModel):
     status: str
@@ -38,7 +65,7 @@ class Profile(BaseModel):
     description: Optional[str] = None
 
 
-
+# ---- Path detection ----
 
 class CornerSchema(BaseModel):
     x: float
@@ -62,10 +89,24 @@ class PathResponse(BaseModel):
     ok: bool
     detections: List[PathItem] = Field(default_factory=list)
     image_base64: Optional[str] = Field(None, description="JPEG image as base64 string")
+    pixels_per_mm: Optional[float] = Field(None, alias="pixelsPerMm")
+    marker_count: int = Field(0, alias="markerCount")
     error: Optional[str] = None
     options: Optional[Dict[str, Any]] = None
 
+    model_config = {"populate_by_name": True}
+
+
+# ---- Job creation request ----
 
 class JobCreateRequest(BaseModel):
+    path: List[WaypointSchema] = Field(default_factory=list)
+    dry_run: bool = Field(False, alias="dryRun")
     options: Optional[Dict[str, Any]] = None
-    path: Optional[str] = None
+    image_base64: Optional[str] = Field(
+        None,
+        alias="imageBase64",
+        description="Base64-encoded JPEG snapshot to store with the job",
+    )
+
+    model_config = {"populate_by_name": True}

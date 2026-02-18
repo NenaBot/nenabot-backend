@@ -20,11 +20,33 @@ OpenAPI spec is generated from the controllers and available at:
 - http://127.0.0.1:8000/openapi.json
 - http://127.0.0.1:8000/docs
 
+## Running with Docker
+
+```bash
+# Build the image
+docker build -t nenabot .
+
+# Run (database is persisted in a named volume)
+docker run -d --name nenabot \
+  -p 8000:8000 \
+  -v nenabot-data:/app/data \
+  nenabot
+```
+
+The SQLite database (`data/nenabot.db`) is created automatically on first startup. The `nenabot-data` volume ensures it survives container restarts and rebuilds.
+
+To stop and remove:
+
+```bash
+docker stop nenabot && docker rm nenabot
+```
+
 ## Architecture overview
 
 For the full system architecture (layer breakdown, folder tree, and dependency diagram), see:
 
 - [Architecture Overview](docs/architecture-overview.md)
+- [Database Documentation](docs/database.md)
 
 ## Endpoints
 
@@ -32,9 +54,11 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 - `GET /status`
 - `GET /jobs`
 - `GET /jobs/{id}`
+- `GET /jobs/{id}/image` — annotated overlay JPEG
 - `GET /jobs/latest`
 - `POST /jobs`
 - `DELETE /jobs/{id}`
+- `POST /robot/stop`
 - `GET /profiles`
 - `GET /profiles/default`
 - `POST /streams/camera`
@@ -46,20 +70,24 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 ## Hardware integration notes
 
 - **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. It mirrors the connection pattern from DobotDemoForPython/minimal_connect.py.
-- **Camera/Vision**: `app/adapters/camera.py` and `app/adapters/vision.py` are based on camera_detection/main.py (ArUco marker detection). These adapters currently return placeholder pose values.
-- **DMS**: `app/adapters/ionVision/ionVision.py` calls the external DMS HTTP endpoint (`/dms/read`). Configure the base URL in `app/dependencies.py`.
+- **Camera/Vision**: `app/adapters/camera_vision.py` handles ArUco marker detection, battery-contour detection, overlay rendering, and MJPEG streaming.
+- **DMS**: `app/adapters/ionVision/ionVision.py` calls the external DMS HTTP endpoint. Configure the base URL in `app/dependencies.py`.
+- **Database**: SQLite (`data/nenabot.db`) stores all job state, waypoints, measurements, and overlay images. See [Database Documentation](docs/database.md).
+
+## UI pages
+
+| Page          | URL                                    | Description                                         |
+| :------------ | :------------------------------------- | :-------------------------------------------------- |
+| OpenAPI docs  | `/docs`                                | Auto-generated interactive API reference            |
+| Job Tester    | Open `docs/job-tester.html` locally    | Create and monitor jobs                             |
+| Job Results   | Open `docs/job-results.html` locally   | Browse jobs, view annotated images and measurements |
+| Stream Viewer | Open `docs/stream-viewer.html` locally | Live camera / detection stream viewer               |
 
 ## Tests
 
 ```bash
 pytest -q
 ```
-
-## Next steps
-
-- Replace placeholder pose estimation with calibrated pose → robot coordinates.
-- Add persistent job storage and real result persistence.
-- Wire the state machine to the adapters to perform end-to-end runs.
 
 # GitHub Workflow & Contribution Guidelines
 
