@@ -41,6 +41,9 @@ class DetectionResult:
     center_x: float = 0.0
     center_y: float = 0.0
     confidence: float = 0.0
+    # NEW: The distance from the ArUco marker in real millimeters
+    offset_x_mm: float = 0.0 
+    offset_y_mm: float = 0.0
 
 
 @dataclass
@@ -129,9 +132,17 @@ class CameraVisionAdapter:
         marker_corners, ids, _ = detector.detectMarkers(gray)
 
         pixels_per_mm: Optional[float] = None
+        marker_center_x: float = 0.0
+        marker_center_y: float = 0.0
+        
         if ids is not None and len(marker_corners) > 0:
             side_px = float(np.linalg.norm(marker_corners[0][0][0] - marker_corners[0][0][1]))
             pixels_per_mm = side_px / self._marker_size_mm
+            
+            # NEW: Find the center of the marker by averaging its 4 corners
+            corners = marker_corners[0][0]
+            marker_center_x = float(np.mean(corners[:, 0]))
+            marker_center_y = float(np.mean(corners[:, 1]))
 
         # --- battery contour detection ---
         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -164,9 +175,21 @@ class CameraVisionAdapter:
 
             box = cv2.boxPoints(rect)
             corners = [Corner(x=float(pt[0]), y=float(pt[1])) for pt in box]
+            
             center_x, center_y = float(rect[0][0]), float(rect[0][1])
             width_mm = float(w / pixels_per_mm) if pixels_per_mm else float(w)
             height_mm = float(h / pixels_per_mm) if pixels_per_mm else float(h)
+            
+            # NEW: Calculate the distance from the tree (marker) to the treasure (battery)
+            offset_x_mm = 0.0
+            offset_y_mm = 0.0
+            if pixels_per_mm:
+                offset_x_mm = (center_x - marker_center_x) / pixels_per_mm
+                offset_y_mm = (center_y - marker_center_y) / pixels_per_mm
+                
+            # NEW: If this shape is too close to the marker's center, it IS the marker! Skip it.
+            if pixels_per_mm and abs(center_x - marker_center_x) < 5 and abs(center_y - marker_center_y) < 5:
+                continue
 
             detections.append(DetectionResult(
                 corners=corners,
@@ -175,6 +198,8 @@ class CameraVisionAdapter:
                 center_x=center_x,
                 center_y=center_y,
                 confidence=0.7 if pixels_per_mm else 0.3,
+                offset_x_mm=offset_x_mm,  # Save the X distance!
+                offset_y_mm=offset_y_mm,  # Save the Y distance!
             ))
 
         if not detections:

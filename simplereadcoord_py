@@ -1,0 +1,31 @@
+import time
+import DobotDllType as dType  # (Change this to DobotDllTypeMulti if that's the file you have)
+
+def main():
+    print("1. Loading DLL...")
+    api = dType.load()
+    
+    print("2. Connecting to robot...")
+    # Specify your COM port here (check Device Manager -> Ports)
+    # Use "" for auto-search, or e.g. "COM3", "COM4", etc.
+    COM_PORT = "COM5"  # <-- Change this to your Dobot's COM port if auto-search fails
+    result = dType.ConnectDobot(api, COM_PORT, 115200)[0]
+    
+    if result != 0:
+        print("Failed to connect. Is it plugged in and turned on?")
+        return
+        
+    print("3. Connected! Waiting 2 seconds...")
+    time.sleep(2)
+    
+    print("4. Reading coordinates...")
+    pose = dType.GetPose(api)
+    print("\n========================================")
+    print(f"MARKER COORDINATES -> X: {pose[0]:.1f}, Y: {pose[1]:.1f}, Z: {pose[2]:.1f}")
+    print("========================================\n")
+    
+    print("5. Disconnecting safely...")
+    dType.DisconnectDobot(api)
+
+if __name__ == "__main__":
+    main()
