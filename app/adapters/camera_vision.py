@@ -44,12 +44,19 @@ class DetectionResult:
 
 
 @dataclass
+class MarkerCorners:
+    """Four pixel-corners of a single ArUco marker."""
+    corners: List[Corner] = field(default_factory=list)
+
+
+@dataclass
 class DetectionResults:
     ok: bool
     detections: List[DetectionResult] = field(default_factory=list)
     image_base64: Optional[str] = None
     pixels_per_mm: Optional[float] = None
     marker_count: int = 0
+    marker_corners: List[MarkerCorners] = field(default_factory=list)
     error: Optional[str] = None
 
 
@@ -131,9 +138,14 @@ class CameraVisionAdapter:
         marker_corners, ids, _ = detector.detectMarkers(gray)
 
         pixels_per_mm: Optional[float] = None
+        aruco_corners_out: List[MarkerCorners] = []
         if ids is not None and len(marker_corners) > 0:
             side_px = float(np.linalg.norm(marker_corners[0][0][0] - marker_corners[0][0][1]))
             pixels_per_mm = side_px / self._marker_size_mm
+            for mc in marker_corners:
+                aruco_corners_out.append(MarkerCorners(
+                    corners=[Corner(x=float(pt[0]), y=float(pt[1])) for pt in mc[0]]
+                ))
 
         # --- battery contour detection ---
         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -185,6 +197,7 @@ class CameraVisionAdapter:
                 error="No battery contour detected",
                 pixels_per_mm=pixels_per_mm,
                 marker_count=int(len(ids)) if ids is not None else 0,
+                marker_corners=aruco_corners_out,
             )
 
         return DetectionResults(
@@ -192,6 +205,7 @@ class CameraVisionAdapter:
             detections=detections,
             pixels_per_mm=pixels_per_mm,
             marker_count=int(len(ids)) if ids is not None else 0,
+            marker_corners=aruco_corners_out,
         )
 
     def detect_live(self, frame):
@@ -358,19 +372,21 @@ class CameraVisionAdapter:
         jpeg_bytes: bytes,
         detections: list,
         measurements: list | None = None,
+        starting_point: tuple | None = None,
     ) -> bytes:
-        """
-        Draw detection boxes and numbered measurement points onto a JPEG image.
+        """Draw detection boxes, numbered measurement points, and starting point onto a JPEG image.
 
         Parameters
         ----------
         jpeg_bytes : raw JPEG bytes of the base image
         detections : list of DetectionResult (corners, center, sizes)
         measurements : list of Measurement dataclass instances (optional)
+        starting_point : (x, y) pixel coordinates of the robot starting position (optional)
 
         Returns
         -------
         JPEG bytes of the annotated image
+
         """
         import cv2
         import numpy as np
@@ -381,6 +397,7 @@ class CameraVisionAdapter:
             return jpeg_bytes  # can't decode → return original
 
         # --- detection bounding boxes (cyan) ---
+        first_target: tuple | None = None  # first detection/measurement center for connector line
         for det in detections:
             corners = det.corners if hasattr(det, "corners") else []
             if len(corners) >= 4:
@@ -394,6 +411,8 @@ class CameraVisionAdapter:
                 frame, (cx, cy), (0, 255, 255),
                 cv2.MARKER_CROSS, 12, 1,
             )
+            if first_target is None:
+                first_target = (cx, cy)
             # size label
             label = f"{det.width_mm:.1f}x{det.height_mm:.1f} mm"
             cv2.putText(
@@ -414,6 +433,8 @@ class CameraVisionAdapter:
                     frame, idx_label, (px - 4, py + 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 0), 1,
                 )
+                if first_target is None:
+                    first_target = (px, py)
                 # scan summary label
                 if m.scan_result:
                     summary = _scan_summary(m.scan_result)
@@ -421,6 +442,27 @@ class CameraVisionAdapter:
                         frame, summary, (px + 14, py + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 200), 1,
                     )
+
+        # --- starting point (orange diamond + "START" label) ---
+        if starting_point:
+            sx, sy = int(starting_point[0]), int(starting_point[1])
+            # Diamond shape (rotated square)
+            size = 12
+            diamond = np.array([
+                [sx, sy - size],
+                [sx + size, sy],
+                [sx, sy + size],
+                [sx - size, sy],
+            ], dtype=np.int32)
+            cv2.fillPoly(frame, [diamond], (0, 140, 255))       # orange fill
+            cv2.polylines(frame, [diamond], True, (255, 255, 255), 2)  # white border
+            cv2.putText(
+                frame, "START", (sx + 16, sy + 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 140, 255), 2,
+            )
+            # Dashed line from starting point → first target
+            if first_target:
+                _draw_dashed_line(frame, (sx, sy), first_target, (255, 255, 255), 1, 10)
 
         _, out = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
         return out.tobytes()
@@ -435,3 +477,24 @@ def _scan_summary(scan_result: dict) -> str:
     if compound:
         return str(compound)
     return "scan"
+
+
+def _draw_dashed_line(img, pt1: tuple, pt2: tuple, color, thickness: int = 1, gap: int = 10):
+    """Draw a dashed line between two points on a cv2 image."""
+    import numpy as np
+
+    x1, y1 = pt1
+    x2, y2 = pt2
+    dist = np.hypot(x2 - x1, y2 - y1)
+    if dist < 1:
+        return
+    dx = (x2 - x1) / dist
+    dy = (y2 - y1) / dist
+    num_segments = int(dist // gap)
+    import cv2
+    for i in range(0, num_segments, 2):
+        sx = int(x1 + dx * gap * i)
+        sy = int(y1 + dy * gap * i)
+        ex = int(x1 + dx * gap * min(i + 1, num_segments))
+        ey = int(y1 + dy * gap * min(i + 1, num_segments))
+        cv2.line(img, (sx, sy), (ex, ey), color, thickness)

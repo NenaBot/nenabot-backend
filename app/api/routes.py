@@ -12,11 +12,15 @@ from app.schemas import (
     Health,
     Job,
     JobCreateRequest,
+    MarkerCornersSchema,
     MeasurementSchema,
     PathItem,
     PathRequest,
     PathResponse,
     Profile,
+    RobotMoveRequest,
+    RobotMoveResponse,
+    RobotPoseResponse,
     Status,
     WaypointSchema,
 )
@@ -74,6 +78,13 @@ def create_job(
 ) -> Job:
     waypoints = [Waypoint(x=w.x, y=w.y, z=w.z, r=w.r) for w in payload.path]
 
+    # Prepend starting point so the robot moves there first
+    starting_wp: Waypoint | None = None
+    if payload.starting_point:
+        sp = payload.starting_point
+        starting_wp = Waypoint(x=sp.x, y=sp.y, z=sp.z, r=sp.r)
+        waypoints.insert(0, starting_wp)
+
     # Decode optional snapshot image
     image_bytes: bytes | None = None
     if payload.image_base64:
@@ -87,6 +98,7 @@ def create_job(
         dry_run=payload.dry_run,
         options=payload.options,
         image_bytes=image_bytes,
+        starting_point=starting_wp,
     )
     svc.run_job(job.id)
     return _to_job(job)
@@ -104,6 +116,34 @@ def delete_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)
 def stop_robot(svc: OrchestratorService = Depends(get_orchestrator)):
     stopped = svc.stop_job()
     return {"stopped": stopped}
+
+
+@router.post("/robot/move", response_model=RobotMoveResponse)
+def robot_move(
+    payload: RobotMoveRequest,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> RobotMoveResponse:
+    """Send the robot to a specific position (for calibration testing)."""
+    result = svc.move_robot(payload.x, payload.y, payload.z, payload.r)
+    return RobotMoveResponse(ok=result.ok, error=result.error)
+
+
+@router.get("/robot/pose", response_model=RobotPoseResponse)
+def robot_pose(svc: OrchestratorService = Depends(get_orchestrator)) -> RobotPoseResponse:
+    """Read the current position of the robot arm."""
+    result = svc.get_robot_pose()
+    return RobotPoseResponse(
+        ok=result.ok,
+        x=result.x,
+        y=result.y,
+        z=result.z,
+        r=result.r,
+        j1=result.j1,
+        j2=result.j2,
+        j3=result.j3,
+        j4=result.j4,
+        error=result.error,
+    )
 
 
 @router.get("/profiles", response_model=list[Profile])
@@ -182,6 +222,12 @@ def create_path(
         image_base64=result.image_base64,
         pixels_per_mm=result.pixels_per_mm,
         marker_count=result.marker_count,
+        marker_corners=[
+            MarkerCornersSchema(
+                corners=[CornerSchema(x=c.x, y=c.y) for c in mc.corners]
+            )
+            for mc in result.marker_corners
+        ],
         error=result.error,
         options=payload.options,
     )
