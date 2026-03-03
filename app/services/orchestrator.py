@@ -136,11 +136,28 @@ class OrchestratorService:
                 scan_result: Optional[dict] = None
 
                 if not job.dry_run:
-                    # Move robot
+                    # Move robot to waypoint
                     move_res = self._robot.move(wp.x, wp.y, wp.z, wp.r)
                     if not move_res.ok:
                         raise RuntimeError(f"Robot move failed: {move_res.error}")
-                    time.sleep(2)  # settle time
+
+                    # Validate the arm actually reached the target position
+                    arrival = self._robot.wait_for_position(
+                        wp.x, wp.y, wp.z, wp.r, tolerance_mm=1.0, timeout_s=30.0,
+                    )
+                    if not arrival.ok:
+                        logger.warning(
+                            "Job %s — WP %d arrival validation failed: %s",
+                            job.id, i + 1, arrival.error,
+                        )
+                        raise RuntimeError(f"Arm did not reach waypoint {i + 1}: {arrival.error}")
+                    logger.info(
+                        "Job %s — WP %d reached: (%.1f, %.1f, %.1f) — dwelling 1.5 s",
+                        job.id, i + 1, arrival.x, arrival.y, arrival.z,
+                    )
+
+                    # Dwell at the waypoint for 1.5 seconds
+                    time.sleep(1.5)
 
                     # Here comes the reading of the DMS
                     scan_start = self._dms.start_new_scan()
@@ -157,7 +174,7 @@ class OrchestratorService:
                         if latest.ok:
                             scan_result = latest.payload
                 else:
-                    time.sleep(1.5)  # simulate settle time in dry run
+                    time.sleep(0.3)  # simulate settle time in dry run
 
                 measurement = Measurement(
                     waypoint_index=i,
@@ -192,7 +209,16 @@ class OrchestratorService:
                         if not move_res.ok:
                             logger.warning("Return-to-start failed: %s", move_res.error)
                         else:
-                            time.sleep(1.5)  # settle time
+                            arrival = self._robot.wait_for_position(
+                                sp.x, sp.y, sp.z, sp.r, tolerance_mm=1.0, timeout_s=30.0,
+                            )
+                            if not arrival.ok:
+                                logger.warning("Return-to-start position validation failed: %s", arrival.error)
+                            else:
+                                logger.info(
+                                    "Job %s — back at start (%.1f, %.1f, %.1f)",
+                                    job.id, arrival.x, arrival.y, arrival.z,
+                                )
                     else:
                         logger.info(
                             "Job %s (dry run) — would return to start (%.1f, %.1f, %.1f, %.1f)",

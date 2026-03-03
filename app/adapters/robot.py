@@ -77,6 +77,48 @@ class RobotAdapter:
         dType.SetPTPCmd(self._api, dType.PTPMode.PTPMOVLXYZMode, x, y, z, r, isQueued=1)
         return RobotResult(True)
 
+    def wait_for_position(
+        self,
+        target_x: float,
+        target_y: float,
+        target_z: float,
+        target_r: float,
+        tolerance_mm: float = 1.0,
+        timeout_s: float = 30.0,
+        poll_interval_s: float = 0.1,
+    ) -> PoseResult:
+        """Poll get_pose() until the arm is within *tolerance_mm* of the target
+        (Euclidean distance on x/y/z).  Returns the final PoseResult.
+        Returns PoseResult with ok=False on timeout."""
+        import math
+        import time as _time
+
+        elapsed = 0.0
+        last_pose = PoseResult(ok=False, error="never polled")
+        while elapsed < timeout_s:
+            last_pose = self.get_pose()
+            if last_pose.ok:
+                dx = last_pose.x - target_x
+                dy = last_pose.y - target_y
+                dz = last_pose.z - target_z
+                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if dist <= tolerance_mm:
+                    return last_pose
+            _time.sleep(poll_interval_s)
+            elapsed += poll_interval_s
+
+        # Timeout — return last pose with error info
+        return PoseResult(
+            ok=False,
+            x=last_pose.x, y=last_pose.y, z=last_pose.z, r=last_pose.r,
+            j1=last_pose.j1, j2=last_pose.j2, j3=last_pose.j3, j4=last_pose.j4,
+            error=(
+                f"Timeout ({timeout_s}s) waiting for position "
+                f"({target_x:.1f}, {target_y:.1f}, {target_z:.1f}). "
+                f"Last pose: ({last_pose.x:.1f}, {last_pose.y:.1f}, {last_pose.z:.1f})"
+            ),
+        )
+
     def home(self) -> RobotResult:
         if not self.connected:
             return RobotResult(False, "Not connected")
