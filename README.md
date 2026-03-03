@@ -56,22 +56,26 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 - `GET /jobs/{id}`
 - `GET /jobs/{id}/image` — annotated overlay JPEG
 - `GET /jobs/latest`
-- `POST /jobs`
-- `DELETE /jobs/{id}`
-- `POST /robot/stop`
 - `GET /profiles`
 - `GET /profiles/default`
-- `POST /streams/camera`
-- `DELETE /streams/camera`
-- `POST /streams/detection`
-- `DELETE /streams/detection`
-- `POST /paths`
+- `GET /robot/pose` — current end-effector position and joint angles
+- `GET /streams/camera/feed` — raw camera MJPEG stream
+- `GET /streams/detection/feed` — detection overlay MJPEG stream
+- `POST /jobs`
+- `POST /robot/stop` — halt active job
+- `POST /robot/move` — move robot to specific position (calibration)
+- `POST /streams/camera` — start camera stream
+- `POST /streams/detection` — start detection stream
+- `POST /paths` — detect path and battery contours
+- `DELETE /jobs/{id}`
+- `DELETE /streams/camera` — stop camera stream
+- `DELETE /streams/detection` — stop detection stream
 
 ## Hardware integration notes
 
-- **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. It mirrors the connection pattern from DobotDemoForPython/minimal_connect.py.
-- **Camera/Vision**: `app/adapters/camera_vision.py` handles ArUco marker detection, battery-contour detection, overlay rendering, and MJPEG streaming.
-- **DMS**: `app/adapters/ionVision/ionVision.py` calls the external DMS HTTP endpoint. Configure the base URL in `app/dependencies.py`.
+- **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. Supports both automated job execution and manual control via `/robot/move` and `/robot/pose` endpoints for calibration testing.
+- **Camera/Vision**: `app/adapters/camera_vision.py` handles ArUco marker detection, battery-contour detection, overlay rendering, and MJPEG streaming via `/streams/camera/feed` and `/streams/detection/feed`.
+- **IonVision (DMS)**: `app/adapters/ionVision/ionVision.py` is an HTTP client to the external IonVision API. Configure the base URL in `app/dependencies.py`.
 - **Database**: SQLite (`data/nenabot.db`) stores all job state, waypoints, measurements, and overlay images. See [Database Documentation](docs/database.md).
 
 ## UI pages

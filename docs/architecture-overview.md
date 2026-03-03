@@ -26,6 +26,7 @@ In this project, Uvicorn is responsible for:
 - Keeping long-lived streaming connections open for MJPEG endpoints:
     - `GET /streams/camera/feed`
     - `GET /streams/detection/feed`
+- Handling robot control endpoints for calibration and manual positioning
 - Supporting development reload mode (`--reload`) so code changes restart the server automatically
 
 Typical local run command:
@@ -49,6 +50,11 @@ Notes about current behavior:
 - Captured images and overlay renders are stored as BLOBs in the `job_images` table.
 - `IVAdapter` (`app/adapters/ionVision/ionVision.py`) is an HTTP client to the external IonVision API.
 - `CameraVisionAdapter` handles image capture, contour detection, overlay rendering, and live stream generation.
+- `RobotAdapter` (`app/adapters/robot.py`) wraps Dobot hardware control; supports both job automation and manual calibration moves.
+- Robot control endpoints:
+    - `POST /robot/move` — manual positioning for calibration
+    - `GET /robot/pose` — read current end-effector position and joint angles
+    - `POST /robot/stop` — halt active job and stop robot motion
 - Some API/internal fields still use legacy `dms` naming (for example `Health.dms`), while adapter naming is now IonVision/IV.
 
 ## 4. Folder structure (commented tree)
@@ -60,7 +66,7 @@ nenabot-main/
 |  |- dependencies.py                    # Dependency factory + singleton orchestrator provider
 |  |- schemas.py                         # Pydantic request/response models used by API
 |  |- api/
-|  |  |- routes.py                       # HTTP endpoints (health, jobs, profiles, paths, streams)
+|  |  |- routes.py                       # HTTP endpoints (health, jobs, profiles, paths, streams, robot control)
 |  |- services/
 |  |  |- orchestrator.py                 # Core use-case orchestration and in-memory job state
 |  |- adapters/
