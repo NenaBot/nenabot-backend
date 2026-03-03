@@ -1,13 +1,19 @@
 """ 
 Documentation for the HTTP IonVision API can be found here:
 https://olfactomics.github.io/IonVision-API-docs/ 
+
+Websocket API documentation:
+https://github.com/Olfactomics/IonVision-API-docs/blob/main/IonVision-WS-API.md
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 import httpx
+import websockets
 
 
 @dataclass
@@ -144,7 +150,113 @@ class IVAdapter:
         """
         return self._request("GET", "currentParameter")
 
+
 # Adapter for the IonVision WebSocket API
 class WebSocketAdapter:
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, timeout_s: float = 5.0) -> None:
         self._base_url = base_url.rstrip("/")
+        self._timeout = timeout_s
+
+    
+    async def wait_for_events(self, event_type: str, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        Wait for all the event types
+        """
+        timeout = self._timeout if timeout_s is None else timeout_s
+
+        async def _listen() -> Optional[Dict[str, Any]]:
+            async with websockets.connect(self._base_url) as ws:
+                async for raw in ws:
+                    data = json.loads(raw)
+                    if data.get("type") == event_type:
+                        return data
+            return None
+
+        try:
+            if timeout and timeout > 0:
+                payload = await asyncio.wait_for(_listen(), timeout=timeout)
+            else:
+                payload = await _listen()
+
+            if payload is None:
+                return IVResult(False, error=f"WebSocket closed before {event_type}")
+
+            return IVResult(True, payload=payload)
+        except asyncio.TimeoutError:
+            return IVResult(False, error=f"Timed out waiting for {event_type}")
+        except Exception as exc:
+            return IVResult(False, error=str(exc))
+
+
+    async def scan_stopped(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        A scan has been stopped without finishing. No result data will be saved.
+        """
+        return await self.wait_for_events("scan.stopped", timeout_s)
+
+    async def scan_finished(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        A scan has been finished successfully. The results of the scan are still being processed and are not yet available.
+        """
+        return await self.wait_for_events("scan.finished", timeout_s)
+    
+    async def results_processed(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        The results of the previously finished scan have been processed to the device storage.
+        """
+        return await self.wait_for_events("scan.resultsProcessed", timeout_s)
+    
+    async def scan_progress(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        The progress of an ongoing scan.
+
+            in body->progress {number} The progress of an ongoing scan 
+            as a percentage integer from 0 to 100.        
+        """
+        return await self.wait_for_events("scan.progress", timeout_s)
+
+    async def standby_button_pressed(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        The standby button at the front panel of the device has been pressed 
+        shortly. This is mainly used to show a "Do you want to power off the 
+        device?" dialog in the user interface.   
+        """
+        return await self.wait_for_events("device.standbyButtonPressed", timeout_s)
+    
+    async def device_shutdown(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        The device is powering off once this message is received. The device APIs 
+        will no be usable shortly after this message.
+        """
+        return await self.wait_for_events("device.shutdown", timeout_s)
+    
+    async def error_message(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        A error or warning message from the back-end.
+        in body->code: {string} An unique error code describing what the error is.        
+        """
+        return await self.wait_for_events("message.error", timeout_s)
+    
+    async def limit_error(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        An user set or safety limit has been crossed. The message always contains 
+        every possible limit error and whether they are off (false) or on (true).
+
+        * {boolean} The state of a single value error.     
+        """
+        return await self.wait_for_events("message.limitError", timeout_s)
+    
+    async def backup_started(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        A process to back up the device has started. Some device features 
+        like scanning are not available during this.
+        """
+        return await self.wait_for_events("backup.started", timeout_s)
+    
+    async def backup_finished(self, timeout_s: Optional[float] = None) -> IVResult:
+        """
+        A process to back up the device has finished successfully.
+        """
+        return await self.wait_for_events("backup.finished", timeout_s)
+
+    
