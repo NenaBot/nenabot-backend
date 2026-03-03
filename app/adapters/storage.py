@@ -1,10 +1,10 @@
-"""SQLite-backed storage adapter for jobs, measurements, waypoints, and images."""
+"""SQLite-backed storage adapter."""
 
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timezone
-from typing import List, Optional
 
 from app.adapters.database import Database
 from app.domain.models import Job, Measurement, Waypoint
@@ -17,7 +17,7 @@ class StorageAdapter:
     # ---- Jobs ----
 
     def save_job(self, job: Job) -> None:
-        """Insert or replace a full job (with waypoints). Does NOT touch measurements."""
+        """Insert or replace a full job (with waypoints)."""
         self._db.execute(
             """INSERT OR REPLACE INTO jobs
                (id, options, dry_run, state, log, error,
@@ -31,16 +31,29 @@ class StorageAdapter:
                 job.log,
                 job.error,
                 job.last_point_processed,
-                job.created_at.isoformat() if hasattr(job.created_at, 'isoformat') else str(job.created_at),
-                job.updated_at.isoformat() if hasattr(job.updated_at, 'isoformat') else str(job.updated_at),
+                (
+                    job.created_at.isoformat()
+                    if hasattr(job.created_at, "isoformat")
+                    else str(job.created_at)
+                ),
+                (
+                    job.updated_at.isoformat()
+                    if hasattr(job.updated_at, "isoformat")
+                    else str(job.updated_at)
+                ),
             ),
         )
         # Clear old waypoints and re-insert
         self._db.execute("DELETE FROM waypoints WHERE job_id = ?", (job.id,))
         if job.path:
             self._db.executemany(
-                "INSERT INTO waypoints (job_id, seq, x, y, z, r) VALUES (?, ?, ?, ?, ?, ?)",
-                [(job.id, i, w.x, w.y, w.z, w.r) for i, w in enumerate(job.path)],
+                "INSERT INTO waypoints "
+                "(job_id, seq, x, y, z, r) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (job.id, i, w.x, w.y, w.z, w.r)
+                    for i, w in enumerate(job.path)
+                ],
             )
         self._db.commit()
 
@@ -49,26 +62,27 @@ class StorageAdapter:
         job_id: str,
         state: str,
         last_point_processed: int,
-        error: Optional[str] = None,
+        error: str | None = None,
     ) -> None:
         self._db.execute(
             """UPDATE jobs SET state = ?, last_point_processed = ?,
                error = ?, updated_at = ? WHERE id = ?""",
-            (state, last_point_processed, error, datetime.now(timezone.utc).isoformat(), job_id),
+            (state, last_point_processed, error,
+             datetime.now(timezone.utc).isoformat(), job_id),
         )
         self._db.commit()
 
-    def get_job(self, job_id: str) -> Optional[Job]:
+    def get_job(self, job_id: str) -> Job | None:
         row = self._db.fetchone("SELECT * FROM jobs WHERE id = ?", (job_id,))
         if not row:
             return None
         return self._row_to_job(row)
 
-    def list_jobs(self) -> List[Job]:
+    def list_jobs(self) -> list[Job]:
         rows = self._db.fetchall("SELECT * FROM jobs ORDER BY created_at ASC")
         return [self._row_to_job(r) for r in rows]
 
-    def latest_job(self) -> Optional[Job]:
+    def latest_job(self) -> Job | None:
         row = self._db.fetchone("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1")
         if not row:
             return None
@@ -100,7 +114,7 @@ class StorageAdapter:
         )
         self._db.commit()
 
-    def get_measurements(self, job_id: str) -> List[Measurement]:
+    def get_measurements(self, job_id: str) -> list[Measurement]:
         rows = self._db.fetchall(
             "SELECT * FROM measurements WHERE job_id = ? ORDER BY waypoint_index ASC",
             (job_id,),
@@ -118,7 +132,12 @@ class StorageAdapter:
 
     # ---- Images ----
 
-    def save_job_image(self, job_id: str, image_bytes: bytes, content_type: str = "image/jpeg") -> None:
+    def save_job_image(
+        self,
+        job_id: str,
+        image_bytes: bytes,
+        content_type: str = "image/jpeg",
+    ) -> None:
         self._db.execute(
             """INSERT OR REPLACE INTO job_images (job_id, image, content_type)
                VALUES (?, ?, ?)""",
@@ -126,15 +145,18 @@ class StorageAdapter:
         )
         self._db.commit()
 
-    def get_job_image(self, job_id: str) -> Optional[bytes]:
-        row = self._db.fetchone("SELECT image FROM job_images WHERE job_id = ?", (job_id,))
+    def get_job_image(self, job_id: str) -> bytes | None:
+        row = self._db.fetchone(
+            "SELECT image FROM job_images WHERE job_id = ?",
+            (job_id,),
+        )
         if not row:
             return None
         return row["image"]
 
     # ---- internal ----
 
-    def _row_to_job(self, row) -> Job:
+    def _row_to_job(self, row: sqlite3.Row) -> Job:
         job_id = row["id"]
         # Waypoints
         wp_rows = self._db.fetchall(

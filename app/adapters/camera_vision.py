@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncGenerator, List, Optional, Tuple
+from typing import TYPE_CHECKING, AsyncGenerator
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 @dataclass
 class CaptureResult:
     ok: bool
-    image_path: Optional[str] = None
-    error: Optional[str] = None
+    image_path: str | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -24,7 +25,7 @@ class PoseEstimate:
     z: float = 0.0
     r: float = 0.0
     confidence: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -35,7 +36,7 @@ class Corner:
 
 @dataclass
 class DetectionResult:
-    corners: List[Corner] = field(default_factory=list)
+    corners: list[Corner] = field(default_factory=list)
     width_mm: float = 0.0
     height_mm: float = 0.0
     center_x: float = 0.0
@@ -46,23 +47,23 @@ class DetectionResult:
 @dataclass
 class MarkerCorners:
     """Four pixel-corners of a single ArUco marker."""
-    corners: List[Corner] = field(default_factory=list)
+
+    corners: list[Corner] = field(default_factory=list)
 
 
 @dataclass
 class DetectionResults:
     ok: bool
-    detections: List[DetectionResult] = field(default_factory=list)
-    image_base64: Optional[str] = None
-    pixels_per_mm: Optional[float] = None
+    detections: list[DetectionResult] = field(default_factory=list)
+    image_base64: str | None = None
+    pixels_per_mm: float | None = None
     marker_count: int = 0
-    marker_corners: List[MarkerCorners] = field(default_factory=list)
-    error: Optional[str] = None
+    marker_corners: list[MarkerCorners] = field(default_factory=list)
+    error: str | None = None
 
 
 class CameraVisionAdapter:
-    """
-    Merged camera + vision adapter.
+    """Merged camera + vision adapter.
 
     Handles:
     - Single-frame capture and save to disk
@@ -137,14 +138,20 @@ class CameraVisionAdapter:
         detector = cv2.aruco.ArucoDetector(aruco_dict, cv2.aruco.DetectorParameters())
         marker_corners, ids, _ = detector.detectMarkers(gray)
 
-        pixels_per_mm: Optional[float] = None
-        aruco_corners_out: List[MarkerCorners] = []
+        pixels_per_mm: float | None = None
+        aruco_corners_out: list[MarkerCorners] = []
         if ids is not None and len(marker_corners) > 0:
-            side_px = float(np.linalg.norm(marker_corners[0][0][0] - marker_corners[0][0][1]))
+            first_corner = marker_corners[0][0]
+            side_px = float(
+                np.linalg.norm(first_corner[0] - first_corner[1])
+            )
             pixels_per_mm = side_px / self._marker_size_mm
             for mc in marker_corners:
                 aruco_corners_out.append(MarkerCorners(
-                    corners=[Corner(x=float(pt[0]), y=float(pt[1])) for pt in mc[0]]
+                    corners=[
+                        Corner(x=float(pt[0]), y=float(pt[1]))
+                        for pt in mc[0]
+                    ],
                 ))
 
         # --- battery contour detection ---
@@ -152,9 +159,11 @@ class CameraVisionAdapter:
         edges = cv2.Canny(blurred, 50, 150)
         kernel = np.ones((3, 3), np.uint8)
         edges = cv2.dilate(edges, kernel, iterations=1)
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+        )
 
-        detections: List[DetectionResult] = []
+        detections: list[DetectionResult] = []
 
         for contour in contours:
             area = cv2.contourArea(contour)
@@ -208,8 +217,8 @@ class CameraVisionAdapter:
             marker_corners=aruco_corners_out,
         )
 
-    def detect_live(self, frame):
-        """Run detection on a cv2 frame (numpy array), return annotated frame + result."""
+    def detect_live(self, frame: np.ndarray) -> np.ndarray:
+        """Run detection on a cv2 frame, return annotated frame + result."""
         import cv2
         import numpy as np
 
@@ -222,15 +231,22 @@ class CameraVisionAdapter:
 
         pixels_per_mm = None
         if ids is not None and len(marker_corners) > 0:
-            cv2.aruco.drawDetectedMarkers(annotated, marker_corners, ids)
-            side_px = float(np.linalg.norm(marker_corners[0][0][0] - marker_corners[0][0][1]))
+            cv2.aruco.drawDetectedMarkers(
+                annotated, marker_corners, ids,
+            )
+            first_corner = marker_corners[0][0]
+            side_px = float(
+                np.linalg.norm(first_corner[0] - first_corner[1])
+            )
             pixels_per_mm = side_px / self._marker_size_mm
 
         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
         edges = cv2.Canny(blurred, 50, 150)
         kernel = np.ones((3, 3), np.uint8)
         edges = cv2.dilate(edges, kernel, iterations=1)
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+        )
 
         for contour in contours:
             area = cv2.contourArea(contour)
@@ -298,8 +314,13 @@ class CameraVisionAdapter:
 
         if not cap.isOpened():
             self._camera_streaming = False
-            error = self._error_frame("Camera not available\n(check device or opencv-python)")
-            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+            error = self._error_frame(
+                "Camera not available\n(check device or opencv-python)",
+            )
+            yield (
+                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                + error + b"\r\n"
+            )
             cap.release()
             return
 
@@ -336,8 +357,13 @@ class CameraVisionAdapter:
 
         if not cap.isOpened():
             self._detection_streaming = False
-            error = self._error_frame("Camera not available\n(check device or opencv-python)")
-            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+            error = self._error_frame(
+                "Camera not available\n(check device or opencv-python)",
+            )
+            yield (
+                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                + error + b"\r\n"
+            )
             cap.release()
             return
 
@@ -348,8 +374,12 @@ class CameraVisionAdapter:
                 if not ok:
                     await asyncio.sleep(0.05)
                     continue
-                annotated = await loop.run_in_executor(None, self.detect_live, frame)
-                _, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                annotated = await loop.run_in_executor(
+                    None, self.detect_live, frame,
+                )
+                _, jpeg = cv2.imencode(
+                    ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70],
+                )
                 yield (
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
@@ -374,18 +404,23 @@ class CameraVisionAdapter:
         measurements: list | None = None,
         starting_point: tuple | None = None,
     ) -> bytes:
-        """Draw detection boxes, numbered measurement points, and starting point onto a JPEG image.
+        """Draw detection boxes, measurement points, and start marker.
 
         Parameters
         ----------
-        jpeg_bytes : raw JPEG bytes of the base image
-        detections : list of DetectionResult (corners, center, sizes)
-        measurements : list of Measurement dataclass instances (optional)
-        starting_point : (x, y) pixel coordinates of the robot starting position (optional)
+        jpeg_bytes :
+            Raw JPEG bytes of the base image.
+        detections :
+            List of DetectionResult (corners, center, sizes).
+        measurements :
+            List of Measurement dataclass instances (optional).
+        starting_point :
+            (x, y) pixel coordinates of the robot start (optional).
 
         Returns
         -------
-        JPEG bytes of the annotated image
+        bytes
+            JPEG bytes of the annotated image.
 
         """
         import cv2
@@ -397,7 +432,8 @@ class CameraVisionAdapter:
             return jpeg_bytes  # can't decode → return original
 
         # --- detection bounding boxes (cyan) ---
-        first_target: tuple | None = None  # first detection/measurement center for connector line
+        # first detection/measurement center for connector line
+        first_target: tuple | None = None
         for det in detections:
             corners = det.corners if hasattr(det, "corners") else []
             if len(corners) >= 4:
@@ -479,7 +515,14 @@ def _scan_summary(scan_result: dict) -> str:
     return "scan"
 
 
-def _draw_dashed_line(img, pt1: tuple, pt2: tuple, color, thickness: int = 1, gap: int = 10):
+def _draw_dashed_line(
+    img: np.ndarray,
+    pt1: tuple,
+    pt2: tuple,
+    color: tuple,
+    thickness: int = 1,
+    gap: int = 10,
+) -> None:
     """Draw a dashed line between two points on a cv2 image."""
     import numpy as np
 

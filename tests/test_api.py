@@ -4,13 +4,16 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.dependencies import create_orchestrator, get_orchestrator
+from app.main import app
 
 
 @pytest.fixture
 def client(tmp_path: Path) -> TestClient:
-    """Create a test client with an isolated orchestrator instance (in-memory SQLite)."""
+    """Create a test client with an isolated orchestrator.
+
+    Uses an in-memory SQLite database.
+    """
     test_orchestrator = create_orchestrator(
         db_path=str(tmp_path / "test.db"),
         dms_base_url="http://localhost:8080",
