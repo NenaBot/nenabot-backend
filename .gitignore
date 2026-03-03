@@ -6,8 +6,3 @@ __pycache__
 /data/*
 .DS_Store
 
-# Dobot SDK native binaries (large / platform-specific)
-lib/dobot/*.dll
-lib/dobot/*.dylib
-lib/dobot/*.so
-lib/dobot/*.framework/
