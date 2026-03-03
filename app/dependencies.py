@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from app.adapters.camera_vision import CameraVisionAdapter
@@ -9,6 +10,8 @@ from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
 from app.services.orchestrator import OrchestratorService
 
+logger = logging.getLogger(__name__)
+
 
 def create_orchestrator(
     db_path: str = "data/nenabot.db",
@@ -17,9 +20,17 @@ def create_orchestrator(
     """Factory function to create an OrchestratorService with default dependencies."""
     db = Database(db_path=db_path)
     db.init_db()
+
+    robot = RobotAdapter()
+    result = robot.connect_first_available()
+    if result.ok:
+        logger.info("Robot connected on startup")
+    else:
+        logger.warning("Robot not connected on startup: %s", result.error)
+
     return OrchestratorService(
         camera_vision=CameraVisionAdapter(),
-        robot=RobotAdapter(),
+        robot=robot,
         dms=IVAdapter(base_url=dms_base_url),
         storage=StorageAdapter(db=db),
     )

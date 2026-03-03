@@ -85,16 +85,50 @@ class PathItem(BaseModel):
     confidence: float = 0.0
 
 
+class MarkerCornersSchema(BaseModel):
+    corners: List[CornerSchema] = Field(default_factory=list)
+
+
 class PathResponse(BaseModel):
     ok: bool
     detections: List[PathItem] = Field(default_factory=list)
     image_base64: Optional[str] = Field(None, description="JPEG image as base64 string")
     pixels_per_mm: Optional[float] = Field(None, alias="pixelsPerMm")
     marker_count: int = Field(0, alias="markerCount")
+    marker_corners: List[MarkerCornersSchema] = Field(default_factory=list, alias="markerCorners")
     error: Optional[str] = None
     options: Optional[Dict[str, Any]] = None
 
     model_config = {"populate_by_name": True}
+
+
+# ---- Robot pose ----
+
+class RobotPoseResponse(BaseModel):
+    ok: bool
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    r: float = 0.0
+    j1: float = 0.0
+    j2: float = 0.0
+    j3: float = 0.0
+    j4: float = 0.0
+    error: Optional[str] = None
+
+
+# ---- Robot move request ----
+
+class RobotMoveRequest(BaseModel):
+    x: float
+    y: float
+    z: float = 0.0
+    r: float = 0.0
+
+
+class RobotMoveResponse(BaseModel):
+    ok: bool
+    error: Optional[str] = None
 
 
 # ---- Job creation request ----
@@ -107,6 +141,11 @@ class JobCreateRequest(BaseModel):
         None,
         alias="imageBase64",
         description="Base64-encoded JPEG snapshot to store with the job",
+    )
+    starting_point: Optional[WaypointSchema] = Field(
+        None,
+        alias="startingPoint",
+        description="Robot starting position — prepended to path so the arm moves there first",
     )
 
     model_config = {"populate_by_name": True}

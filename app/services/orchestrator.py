@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 from app.adapters.camera_vision import CameraVisionAdapter, DetectionResults
 from app.adapters.ionVision.ionVision import IVAdapter
-from app.adapters.robot import RobotAdapter
+from app.adapters.robot import RobotAdapter, PoseResult
 from app.adapters.storage import StorageAdapter
 from app.domain.models import Job, Measurement, Waypoint
 
@@ -47,6 +47,7 @@ class OrchestratorService:
         options: Optional[dict] = None,
         image_bytes: Optional[bytes] = None,
         detections: Optional[list] = None,
+        starting_point: Optional[Waypoint] = None,
     ) -> Job:
         job_id = str(uuid.uuid4())
         job = Job(id=job_id, options=options, path=path or [], dry_run=dry_run)
@@ -54,8 +55,9 @@ class OrchestratorService:
 
         # Store initial overlay image (detection snapshot with boxes drawn)
         if image_bytes:
+            sp_tuple = (starting_point.x, starting_point.y) if starting_point else None
             overlay = CameraVisionAdapter.render_overlay(
-                image_bytes, detections or [], []
+                image_bytes, detections or [], [], starting_point=sp_tuple
             )
             self._storage.save_job_image(job_id, overlay)
 
@@ -107,6 +109,16 @@ class OrchestratorService:
         self._robot.stop()
         return True
 
+    def get_robot_pose(self) -> PoseResult:
+        """Read the current position of the robot arm."""
+        return self._robot.get_pose()
+
+    def move_robot(self, x: float, y: float, z: float, r: float) -> "RobotResult":
+        """Send the robot to a specific position (for calibration / testing)."""
+        from app.adapters.robot import RobotResult
+        logger.info("Manual move → (%.1f, %.1f, %.1f, %.1f)", x, y, z, r)
+        return self._robot.move(x, y, z, r)
+
     def _execute_job(self, job: Job) -> None:
         """Run the job waypoints sequentially (called in background thread)."""
         try:
@@ -128,13 +140,13 @@ class OrchestratorService:
                     move_res = self._robot.move(wp.x, wp.y, wp.z, wp.r)
                     if not move_res.ok:
                         raise RuntimeError(f"Robot move failed: {move_res.error}")
-                    time.sleep(1.5)  # settle time
+                    time.sleep(2)  # settle time
 
-                    # DMS scan
+                    # Here comes the reading of the DMS
                     scan_start = self._dms.start_new_scan()
                     if scan_start.ok:
                         for _ in range(120):
-                            time.sleep(0.5)
+                            time.sleep(1.5)
                             status = self._dms.get_current_scan()
                             if not status.ok:
                                 break
@@ -145,7 +157,7 @@ class OrchestratorService:
                         if latest.ok:
                             scan_result = latest.payload
                 else:
-                    time.sleep(0.3)
+                    time.sleep(1.5)  # simulate settle time in dry run
 
                 measurement = Measurement(
                     waypoint_index=i,
@@ -168,6 +180,24 @@ class OrchestratorService:
                 self._update_overlay(job)
 
             if job.state == "running":
+                # Return to starting position (path[0] = the starting point)
+                if job.path:
+                    sp = job.path[0]
+                    if not job.dry_run:
+                        logger.info(
+                            "Job %s — returning to start (%.1f, %.1f, %.1f, %.1f)",
+                            job.id, sp.x, sp.y, sp.z, sp.r,
+                        )
+                        move_res = self._robot.move(sp.x, sp.y, sp.z, sp.r)
+                        if not move_res.ok:
+                            logger.warning("Return-to-start failed: %s", move_res.error)
+                        else:
+                            time.sleep(1.5)  # settle time
+                    else:
+                        logger.info(
+                            "Job %s (dry run) — would return to start (%.1f, %.1f, %.1f, %.1f)",
+                            job.id, sp.x, sp.y, sp.z, sp.r,
+                        )
                 job.state = "completed"
 
         except Exception as exc:
