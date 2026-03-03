@@ -14,21 +14,21 @@ def _make_storage(tmp_path: Path) -> StorageAdapter:
     return StorageAdapter(db=db)
 
 
-def _sample_job(**overrides) -> Job:
-    defaults = dict(
-        id="j-1",
-        options={"speed": 10},
-        path=[Waypoint(x=1, y=2), Waypoint(x=3, y=4, z=5, r=90)],
-        dry_run=True,
-        log=None,
-        measurements=[],
-        path_image=None,
-        state="created",
-        last_point_processed=0,
-        error=None,
-        created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        updated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    )
+def _sample_job(**overrides: object) -> Job:
+    defaults = {
+        "id": "j-1",
+        "options": {"speed": 10},
+        "path": [Waypoint(x=1, y=2), Waypoint(x=3, y=4, z=5, r=90)],
+        "dry_run": True,
+        "log": None,
+        "measurements": [],
+        "path_image": None,
+        "state": "created",
+        "last_point_processed": 0,
+        "error": None,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
     defaults.update(overrides)
     return Job(**defaults)
 

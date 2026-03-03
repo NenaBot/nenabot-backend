@@ -7,11 +7,10 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from app.adapters.camera_vision import CameraVisionAdapter, DetectionResults
 from app.adapters.ionVision.ionVision import IVAdapter
-from app.adapters.robot import RobotAdapter, PoseResult
+from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
 from app.adapters.storage import StorageAdapter
 from app.domain.models import Job, Measurement, Waypoint
 
@@ -34,20 +33,20 @@ class OrchestratorService:
             {"name": "default", "description": "Default inspection profile"},
             {"name": "fast", "description": "Faster run, lower accuracy"},
         ]
-        self._running_job_id: Optional[str] = None
+        self._running_job_id: str | None = None
         self._stop_requested = False
-        self._job_thread: Optional[threading.Thread] = None
+        self._job_thread: threading.Thread | None = None
 
     # ---- Job CRUD (DB-backed) ----
 
     def create_job(
         self,
-        path: Optional[List[Waypoint]] = None,
+        path: list[Waypoint] | None = None,
         dry_run: bool = False,
-        options: Optional[dict] = None,
-        image_bytes: Optional[bytes] = None,
-        detections: Optional[list] = None,
-        starting_point: Optional[Waypoint] = None,
+        options: dict | None = None,
+        image_bytes: bytes | None = None,
+        detections: list | None = None,
+        starting_point: Waypoint | None = None,
     ) -> Job:
         job_id = str(uuid.uuid4())
         job = Job(id=job_id, options=options, path=path or [], dry_run=dry_run)
@@ -63,19 +62,19 @@ class OrchestratorService:
 
         return job
 
-    def get_job(self, job_id: str) -> Optional[Job]:
+    def get_job(self, job_id: str) -> Job | None:
         return self._storage.get_job(job_id)
 
-    def list_jobs(self) -> List[Job]:
+    def list_jobs(self) -> list[Job]:
         return self._storage.list_jobs()
 
-    def latest_job(self) -> Optional[Job]:
+    def latest_job(self) -> Job | None:
         return self._storage.latest_job()
 
     def delete_job(self, job_id: str) -> bool:
         return self._storage.delete_job(job_id)
 
-    def get_job_image(self, job_id: str) -> Optional[bytes]:
+    def get_job_image(self, job_id: str) -> bytes | None:
         return self._storage.get_job_image(job_id)
 
     # ---- Job execution ----
@@ -113,10 +112,13 @@ class OrchestratorService:
         """Read the current position of the robot arm."""
         return self._robot.get_pose()
 
-    def move_robot(self, x: float, y: float, z: float, r: float) -> "RobotResult":
+    def move_robot(
+        self, x: float, y: float, z: float, r: float,
+    ) -> RobotResult:
         """Send the robot to a specific position (for calibration / testing)."""
-        from app.adapters.robot import RobotResult
-        logger.info("Manual move → (%.1f, %.1f, %.1f, %.1f)", x, y, z, r)
+        logger.info(
+            "Manual move → (%.1f, %.1f, %.1f, %.1f)", x, y, z, r,
+        )
         return self._robot.move(x, y, z, r)
 
     def _execute_job(self, job: Job) -> None:
@@ -129,11 +131,15 @@ class OrchestratorService:
                     break
 
                 logger.info(
-                    "Job %s — waypoint %d/%d  (%.1f, %.1f, %.1f, %.1f) dry_run=%s",
-                    job.id, i + 1, len(job.path), wp.x, wp.y, wp.z, wp.r, job.dry_run,
+                    "Job %s — WP %d/%d (%.1f, %.1f, %.1f, %.1f) dry=%s",
+                    job.id,
+                    i + 1,
+                    len(job.path),
+                    wp.x, wp.y, wp.z, wp.r,
+                    job.dry_run,
                 )
 
-                scan_result: Optional[dict] = None
+                scan_result: dict | None = None
 
                 if not job.dry_run:
                     # Move robot to waypoint
@@ -150,7 +156,8 @@ class OrchestratorService:
                             "Job %s — WP %d arrival validation failed: %s",
                             job.id, i + 1, arrival.error,
                         )
-                        raise RuntimeError(f"Arm did not reach waypoint {i + 1}: {arrival.error}")
+                        msg = f"Arm did not reach waypoint {i + 1}: {arrival.error}"
+                        raise RuntimeError(msg)
                     logger.info(
                         "Job %s — WP %d reached: (%.1f, %.1f, %.1f) — dwelling 1.5 s",
                         job.id, i + 1, arrival.x, arrival.y, arrival.z,
@@ -207,13 +214,20 @@ class OrchestratorService:
                         )
                         move_res = self._robot.move(sp.x, sp.y, sp.z, sp.r)
                         if not move_res.ok:
-                            logger.warning("Return-to-start failed: %s", move_res.error)
+                            logger.warning(
+                                "Return-to-start failed: %s",
+                                move_res.error,
+                            )
                         else:
                             arrival = self._robot.wait_for_position(
-                                sp.x, sp.y, sp.z, sp.r, tolerance_mm=1.0, timeout_s=30.0,
+                                sp.x, sp.y, sp.z, sp.r,
+                                tolerance_mm=1.0, timeout_s=30.0,
                             )
                             if not arrival.ok:
-                                logger.warning("Return-to-start position validation failed: %s", arrival.error)
+                                logger.warning(
+                                    "Return-to-start validation failed: %s",
+                                    arrival.error,
+                                )
                             else:
                                 logger.info(
                                     "Job %s — back at start (%.1f, %.1f, %.1f)",
@@ -221,7 +235,8 @@ class OrchestratorService:
                                 )
                     else:
                         logger.info(
-                            "Job %s (dry run) — would return to start (%.1f, %.1f, %.1f, %.1f)",
+                            "Job %s (dry run) — would return "
+                            "to start (%.1f, %.1f, %.1f, %.1f)",
                             job.id, sp.x, sp.y, sp.z, sp.r,
                         )
                 job.state = "completed"
@@ -257,7 +272,7 @@ class OrchestratorService:
 
     # ---- Misc ----
 
-    def health(self) -> Dict[str, str]:
+    def health(self) -> dict[str, str]:
         return {
             "status": "ok",
             "robot": "unknown",
@@ -270,7 +285,7 @@ class OrchestratorService:
             return "busy"
         return "ready"
 
-    def profiles(self) -> List[dict]:
+    def profiles(self) -> list[dict]:
         return list(self._profiles)
 
     def default_profile(self) -> dict:
@@ -288,7 +303,7 @@ class OrchestratorService:
             raw = Path(capture.image_path).read_bytes()
             result.image_base64 = base64.b64encode(raw).decode("ascii")
         except Exception:
-            pass  # image encoding is best-effort
+            logger.debug("Image encoding failed", exc_info=True)
 
         return result
 

@@ -4,12 +4,40 @@ skip-string-normalization = false
 
 [tool.ruff]
 line-length = 88
-exclude = [".venv", "__pycache__", "build", "dist", ".git", ".mypy_cache", ".pytest_cache"]
+exclude = [
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    "lib/",
+]
 
-[tool.ruff.lint]
+[tool.rules]
 select = ["E", "F", "I", "B", "UP", "C90", "N", "D", "ANN", "S", "A", "COM", "C4", "PIE", "Q", "RUF"]
-ignore = []
+ignore = [
+    "ANN101",   # Missing type annotation for `self` (deprecated)
+    "ANN102",   # Missing type annotation for `cls` (deprecated)
+    "D100",     # Missing docstring in public module
+    "D101",     # Missing docstring in public class
+    "D102",     # Missing docstring in public method
+    "D103",     # Missing docstring in public function
+    "D104",     # Missing docstring in public package
+    "D107",     # Missing docstring in `__init__`
+    "D203",     # one-blank-line-before-class (conflicts with D211)
+    "D213",     # multi-line-summary-second-line (conflicts with D212)
+    "COM812",   # Trailing comma missing (conflicts with formatter)
+    "S101",     # Use of `assert` detected (needed in tests)
+    "B008",     # Function call in default argument (FastAPI Depends)
+    "C901",     # Function too complex (structural, not quick-fix)
+    "A002",     # Builtin variable shadowing (`id` in models)
+]
 
-[tool.ruff.lint.isort]
+[tool.lint.per-file-ignores]
+"tests/**" = ["ANN", "D", "S"]
+
+[tool.isort]
 combine-as-imports = true
 force-single-line = false

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import os
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Add the vendored Dobot SDK (lib/dobot/) to sys.path so
 # `import DobotDllTypeMulti` resolves regardless of cwd.
@@ -16,7 +17,7 @@ if _DOBOT_LIB not in sys.path:
 @dataclass
 class RobotResult:
     ok: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -30,22 +31,21 @@ class PoseResult:
     j2: float = 0.0
     j3: float = 0.0
     j4: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class RobotAdapter:
-    """
-    Wrapper around Dobot DLL. Based on DobotDemoForPython/minimal_connect.py and DobotControl.py.
-    """
+    """Dobot DLL wrapper (DobotDemoForPython)."""
 
     def __init__(self, baud: int = 115200) -> None:
         self._baud = baud
         self._api = None
-        self._connected_port: Optional[str] = None
+        self._connected_port: str | None = None
 
     def connect_first_available(self) -> RobotResult:
         try:
             import glob
+
             import DobotDllTypeMulti as dType
         except Exception as exc:  # pragma: no cover - hardware dependency
             return RobotResult(False, f"Dobot DLL not available: {exc}")
@@ -87,9 +87,10 @@ class RobotAdapter:
         timeout_s: float = 30.0,
         poll_interval_s: float = 0.1,
     ) -> PoseResult:
-        """Poll get_pose() until the arm is within *tolerance_mm* of the target
-        (Euclidean distance on x/y/z).  Returns the final PoseResult.
-        Returns PoseResult with ok=False on timeout."""
+        """Poll get_pose() until within *tolerance_mm* of the target.
+
+        Returns the final PoseResult, or PoseResult(ok=False) on timeout.
+        """
         import math
         import time as _time
 
@@ -170,7 +171,7 @@ class RobotAdapter:
             import DobotDllTypeMulti as dType
             dType.DisconnectDobot(self._api)
         except Exception:
-            # Ignore errors during disconnect - best-effort cleanup
-            pass
+            # Best-effort cleanup during disconnect
+            logger.debug("Disconnect error", exc_info=True)
         self._api = None
         self._connected_port = None

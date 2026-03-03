@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 
 class Database:
-    """
-    Thread-safe SQLite wrapper.
+    """Thread-safe SQLite wrapper.
 
     Uses WAL journal mode so the background job thread can write while
     the FastAPI request thread reads concurrently.
@@ -18,7 +15,7 @@ class Database:
 
     def __init__(self, db_path: str = "data/nenabot.db") -> None:
         self._db_path = db_path
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
 
     # ---- lifecycle ----
 
@@ -50,16 +47,16 @@ class Database:
 
     # ---- helpers ----
 
-    def execute(self, sql: str, params: Tuple = ()) -> sqlite3.Cursor:
+    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         return self.conn.execute(sql, params)
 
-    def executemany(self, sql: str, seq: List[Tuple]) -> sqlite3.Cursor:
+    def executemany(self, sql: str, seq: list[tuple]) -> sqlite3.Cursor:
         return self.conn.executemany(sql, seq)
 
-    def fetchone(self, sql: str, params: Tuple = ()) -> Optional[sqlite3.Row]:
+    def fetchone(self, sql: str, params: tuple = ()) -> sqlite3.Row | None:
         return self.conn.execute(sql, params).fetchone()
 
-    def fetchall(self, sql: str, params: Tuple = ()) -> List[sqlite3.Row]:
+    def fetchall(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         return self.conn.execute(sql, params).fetchall()
 
     def commit(self) -> None:
@@ -109,7 +106,8 @@ class Database:
 
             CREATE TABLE IF NOT EXISTS job_images (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_id        TEXT NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+                job_id        TEXT NOT NULL UNIQUE
+                              REFERENCES jobs(id) ON DELETE CASCADE,
                 image         BLOB NOT NULL,
                 content_type  TEXT NOT NULL DEFAULT 'image/jpeg'
             );
