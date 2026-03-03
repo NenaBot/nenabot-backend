@@ -4,3 +4,10 @@ orchestrator/.idea/*
 __pycache__
 .coverage
 /data/*
+.DS_Store
+
+# Dobot SDK native binaries (large / platform-specific)
+lib/dobot/*.dll
+lib/dobot/*.dylib
+lib/dobot/*.so
+lib/dobot/*.framework/
