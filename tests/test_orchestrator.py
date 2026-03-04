@@ -30,6 +30,7 @@ def _make_svc(tmp_path: Path) -> OrchestratorService:
         camera_vision=CameraVisionAdapter(),
         robot=RobotAdapter(),
 <<<<<<< HEAD
+<<<<<<< HEAD
         dms=IVAdapter(base_url="http://localhost:8080"),
 =======
         camera_vision=camera,
@@ -38,6 +39,8 @@ def _make_svc(tmp_path: Path) -> OrchestratorService:
         storage=StorageAdapter(db=db),
 <<<<<<< HEAD
 =======
+=======
+>>>>>>> accf757 (chore(tests): updated orchestrator test case)
         dms=IVAdapter(base_url="http://localhost:8080",ws_base_url="ws://localhost:8080"),
         storage=StorageAdapter(base_dir=str(tmp_path)),
 >>>>>>> d2ca401 (Feature/websocket api (#13))
