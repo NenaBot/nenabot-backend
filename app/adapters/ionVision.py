@@ -37,7 +37,6 @@ class IVAdapter:
         self._timeout = timeout_s
         self._client = client
         self._ws = WebSocketAdapter(ws_base_url)
-
     def _request(self, method: str, endpoint: str, **kwargs) -> IVResult:
         """Helper method to make HTTP requests to the IonVision API."""
         try:
@@ -205,7 +204,6 @@ class IVAdapter:
             handler: The handler to remove
         """
         self._ws.off(event_type, handler)
-
 
 # Adapter for the IonVision WebSocket API
 class WebSocketAdapter:
