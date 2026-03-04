@@ -25,10 +25,12 @@ class IVResult:
 
 # Adapter for the IonVision HTTP API
 class IVAdapter:
-    def __init__(self, base_url: str, timeout_s: float = 5.0, client: Optional[httpx.Client] = None) -> None:
+    def __init__(self, base_url: str, ws_base_url: str, timeout_s: float = 5.0, 
+                 client: Optional[httpx.Client] = None) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_s
         self._client = client
+        self._ws = WebSocketAdapter(ws_base_url)
     
     def _request(self, method: str, endpoint: str, **kwargs) -> IVResult:
         """Helper method to make HTTP requests to the IonVision API."""
@@ -150,6 +152,37 @@ class IVAdapter:
         """
         return self._request("GET", "currentParameter")
 
+    # WEBSCOKET EVENT HANDLING #
+    async def initialize_websocket(self) -> None:
+        """
+        Initialize WebSocket connection for event streaming.
+        Must be called after instantiation to open the WebSocket.
+        """
+        await self._ws.connect()
+    
+    async def disconnect_websocket(self) -> None:
+        """Close WebSocket connection and stop listening for events."""
+        await self._ws.disconnect()
+    
+    def on_event(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
+        """
+        Register a handler for a WebSocket event.
+        
+        Args:
+            event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
+            handler: Async or sync callable that receives the event data dict
+        """
+        self._ws.on(event_type, handler)
+    
+    def off_event(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
+        """
+        Unregister a handler for a WebSocket event.
+        
+        Args:
+            event_type: The event type
+            handler: The handler to remove
+        """
+        self._ws.off(event_type, handler)
 
 # Adapter for the IonVision WebSocket API
 class WebSocketAdapter:
