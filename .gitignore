@@ -4,5 +4,4 @@ orchestrator/.idea/*
 __pycache__
 .coverage
 /data/*
-.DS_Store
-
+*.egg-info/
