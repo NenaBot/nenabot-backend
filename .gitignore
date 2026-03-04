@@ -4,3 +4,4 @@ orchestrator/.idea/*
 __pycache__
 .coverage
 /data/*
+*.egg-info/
