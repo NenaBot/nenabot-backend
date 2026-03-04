@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from app.adapters.camera_vision import CameraVisionAdapter
-from app.adapters.ionVision.ionVision import IVAdapter
+from app.adapters.ionVision import IVAdapter
 from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
 from app.services.orchestrator import OrchestratorService

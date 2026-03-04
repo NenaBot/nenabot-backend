@@ -9,9 +9,10 @@ https://github.com/Olfactomics/IonVision-API-docs/blob/main/IonVision-WS-API.md
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 import httpx
 import websockets
 
@@ -141,7 +142,6 @@ class IVAdapter:
         """
         return self._request("GET", f"results/id/{id}/comments")
 
-
     # parameters
     def get_parameter_ID(self) -> IVResult:
         """
@@ -153,110 +153,114 @@ class IVAdapter:
 
 # Adapter for the IonVision WebSocket API
 class WebSocketAdapter:
-    def __init__(self, base_url: str, timeout_s: float = 5.0) -> None:
+    """
+    Event-driven WebSocket adapter for IonVision API.
+    Maintains a persistent connection and dispatches events to registered handlers.
+    
+    Supported event types:
+    - "scan.stopped": A scan has been stopped without finishing. No result data will be saved.
+    - "scan.finished": A scan has been finished successfully. Results are still being processed.
+    - "scan.resultsProcessed": The results of the finished scan have been processed to device storage.
+    - "scan.progress": The progress of an ongoing scan (0-100 percentage).
+    - "device.standbyButtonPressed": Standby button at front panel pressed. Shows "power off?" dialog.
+    - "device.shutdown": Device is powering off. Device APIs will not be usable shortly after.
+    - "message.error": An error or warning message. Contains unique error code.
+    - "message.limitError": User set or safety limit has been crossed.
+    - "backup.started": Backup process started. Scanning unavailable during this.
+    - "backup.finished": Backup process finished successfully.
+    """
+    
+    def __init__(self, base_url: str) -> None:
         self._base_url = base_url.rstrip("/")
-        self._timeout = timeout_s
-
+        self._ws: Optional[websockets.WebSocketClientProtocol] = None
+        self._running = False
+        self._listen_task: Optional[asyncio.Task] = None
+        self._handlers: Dict[str, List[Callable[[Dict[str, Any]], Any]]] = {}
     
-    async def wait_for_events(self, event_type: str, timeout_s: Optional[float] = None) -> IVResult:
-        """
-        Wait for all the event types
-        """
-        timeout = self._timeout if timeout_s is None else timeout_s
-
-        async def _listen() -> Optional[Dict[str, Any]]:
-            async with websockets.connect(self._base_url) as ws:
-                async for raw in ws:
-                    data = json.loads(raw)
-                    if data.get("type") == event_type:
-                        return data
-            return None
-
+    async def connect(self) -> None:
+        """Establish the WebSocket connection and start listening for events."""
         try:
-            if timeout and timeout > 0:
-                payload = await asyncio.wait_for(_listen(), timeout=timeout)
-            else:
-                payload = await _listen()
-
-            if payload is None:
-                return IVResult(False, error=f"WebSocket closed before {event_type}")
-
-            return IVResult(True, payload=payload)
-        except asyncio.TimeoutError:
-            return IVResult(False, error=f"Timed out waiting for {event_type}")
+            self._ws = await websockets.connect(self._base_url)
+            self._running = True
+            self._listen_task = asyncio.create_task(self._listen_loop())
         except Exception as exc:
-            return IVResult(False, error=str(exc))
-
-
-    async def scan_stopped(self, timeout_s: Optional[float] = None) -> IVResult:
-        """
-        A scan has been stopped without finishing. No result data will be saved.
-        """
-        return await self.wait_for_events("scan.stopped", timeout_s)
-
-    async def scan_finished(self, timeout_s: Optional[float] = None) -> IVResult:
-        """
-        A scan has been finished successfully. The results of the scan are still being processed and are not yet available.
-        """
-        return await self.wait_for_events("scan.finished", timeout_s)
+            self._running = False
+            raise Exception(f"Failed to connect to WebSocket: {exc}")
     
-    async def results_processed(self, timeout_s: Optional[float] = None) -> IVResult:
-        """
-        The results of the previously finished scan have been processed to the device storage.
-        """
-        return await self.wait_for_events("scan.resultsProcessed", timeout_s)
+    async def disconnect(self) -> None:
+        """Close the WebSocket connection and stop listening."""
+        self._running = False
+        if self._listen_task:
+            self._listen_task.cancel()
+            try:
+                await self._listen_task
+            except asyncio.CancelledError:
+                pass
+        if self._ws:
+            await self._ws.close()
     
-    async def scan_progress(self, timeout_s: Optional[float] = None) -> IVResult:
-        """
-        The progress of an ongoing scan.
-
-            in body->progress {number} The progress of an ongoing scan 
-            as a percentage integer from 0 to 100.        
-        """
-        return await self.wait_for_events("scan.progress", timeout_s)
-
-    async def standby_button_pressed(self, timeout_s: Optional[float] = None) -> IVResult:
-        """
-        The standby button at the front panel of the device has been pressed 
-        shortly. This is mainly used to show a "Do you want to power off the 
-        device?" dialog in the user interface.   
-        """
-        return await self.wait_for_events("device.standbyButtonPressed", timeout_s)
+    async def _listen_loop(self) -> None:
+        """Continuously listen for messages and dispatch to registered handlers."""
+        try:
+            if self._ws is None:
+                return
+            
+            async for raw_message in self._ws:
+                try:
+                    data = json.loads(raw_message)
+                    event_type = data.get("type")
+                    
+                    # Call all registered handlers for this event type
+                    if event_type in self._handlers:
+                        for handler in self._handlers[event_type]:
+                            try:
+                                if inspect.iscoroutinefunction(handler):
+                                    await handler(data)
+                                else:
+                                    handler(data)
+                            except Exception as e:
+                                print(f"Handler error for {event_type}: {e}")
+                except json.JSONDecodeError as e:
+                    print(f"Failed to parse message: {e}")
+                except Exception as e:
+                    print(f"Error processing message: {e}")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"Listen loop error: {e}")
+        finally:
+            self._running = False
     
-    async def device_shutdown(self, timeout_s: Optional[float] = None) -> IVResult:
+    def on(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
         """
-        The device is powering off once this message is received. The device APIs 
-        will no be usable shortly after this message.
+        Register a handler for an event type.
+        
+        Args:
+            event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
+            handler: Async or sync callable that receives the event data dict
+        
+        Example:
+            async def handle_error(data):
+                print(f"Error: {data}")
+            
+            ws_adapter.on("message.error", handle_error)
         """
-        return await self.wait_for_events("device.shutdown", timeout_s)
+        if event_type not in self._handlers:
+            self._handlers[event_type] = []
+        self._handlers[event_type].append(handler)
     
-    async def error_message(self, timeout_s: Optional[float] = None) -> IVResult:
+    def off(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
         """
-        A error or warning message from the back-end.
-        in body->code: {string} An unique error code describing what the error is.        
+        Unregister a handler for an event type.
+        
+        Args:
+            event_type: The event type
+            handler: The handler to remove
         """
-        return await self.wait_for_events("message.error", timeout_s)
-    
-    async def limit_error(self, timeout_s: Optional[float] = None) -> IVResult:
-        """
-        An user set or safety limit has been crossed. The message always contains 
-        every possible limit error and whether they are off (false) or on (true).
-
-        * {boolean} The state of a single value error.     
-        """
-        return await self.wait_for_events("message.limitError", timeout_s)
-    
-    async def backup_started(self, timeout_s: Optional[float] = None) -> IVResult:
-        """
-        A process to back up the device has started. Some device features 
-        like scanning are not available during this.
-        """
-        return await self.wait_for_events("backup.started", timeout_s)
-    
-    async def backup_finished(self, timeout_s: Optional[float] = None) -> IVResult:
-        """
-        A process to back up the device has finished successfully.
-        """
-        return await self.wait_for_events("backup.finished", timeout_s)
+        if event_type in self._handlers:
+            try:
+                self._handlers[event_type].remove(handler)
+            except ValueError:
+                pass  # Handler not in list
 
     
