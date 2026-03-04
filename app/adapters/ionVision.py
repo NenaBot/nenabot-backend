@@ -212,7 +212,7 @@ class WebSocketAdapter:
     """
     Event-driven WebSocket adapter for IonVision API.
     Maintains a persistent connection and dispatches events to registered handlers.
-
+    
     Supported event types:
     - "scan.stopped": A scan has been stopped without finishing. No result data will be saved.
     - "scan.finished": A scan has been finished successfully. Results are still being processed.
@@ -225,14 +225,14 @@ class WebSocketAdapter:
     - "backup.started": Backup process started. Scanning unavailable during this.
     - "backup.finished": Backup process finished successfully.
     """
-
+    
     def __init__(self, base_url: str) -> None:
         self._base_url = base_url.rstrip("/")
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._running = False
         self._listen_task: Optional[asyncio.Task] = None
         self._handlers: Dict[str, List[Callable[[Dict[str, Any]], Any]]] = {}
-
+    
     async def connect(self) -> None:
         """Establish the WebSocket connection and start listening for events."""
         try:
@@ -242,7 +242,7 @@ class WebSocketAdapter:
         except Exception as exc:
             self._running = False
             raise Exception(f"Failed to connect to WebSocket: {exc}")
-
+    
     async def disconnect(self) -> None:
         """Close the WebSocket connection and stop listening."""
         self._running = False
@@ -254,18 +254,18 @@ class WebSocketAdapter:
                 pass
         if self._ws:
             await self._ws.close()
-
+    
     async def _listen_loop(self) -> None:
         """Continuously listen for messages and dispatch to registered handlers."""
         try:
             if self._ws is None:
                 return
-
+            
             async for raw_message in self._ws:
                 try:
                     data = json.loads(raw_message)
                     event_type = data.get("type")
-
+                    
                     # Call all registered handlers for this event type
                     if event_type in self._handlers:
                         for handler in self._handlers[event_type]:
@@ -286,14 +286,38 @@ class WebSocketAdapter:
             print(f"Listen loop error: {e}")
         finally:
             self._running = False
-
+    
     def on(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
         """
         Register a handler for an event type.
-
+        
         Args:
             event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
             handler: Async or sync callable that receives the event data dict
+        
+        Example:
+            async def handle_error(data):
+                print(f"Error: {data}")
+            
+            ws_adapter.on("message.error", handle_error)
+        """
+        if event_type not in self._handlers:
+            self._handlers[event_type] = []
+        self._handlers[event_type].append(handler)
+    
+    def off(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
+        """
+        Unregister a handler for an event type.
+        
+        Args:
+            event_type: The event type
+            handler: The handler to remove
+        """
+        if event_type in self._handlers:
+            try:
+                self._handlers[event_type].remove(handler)
+            except ValueError:
+                pass  # Handler not in list
 
         Example:
             async def handle_error(data):
