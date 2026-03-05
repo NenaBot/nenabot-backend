@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 # ---- Waypoint / Measurement ----
 
+
 class WaypointSchema(BaseModel):
     x: float
     y: float
@@ -24,6 +25,7 @@ class MeasurementSchema(BaseModel):
 
 
 # ---- Job ----
+
 
 class JobStatusState(BaseModel):
     state: str = "created"
@@ -47,6 +49,7 @@ class Job(BaseModel):
 
 
 # ---- Health / Status / Profile ----
+
 
 class ComponentHealth(BaseModel):
     status: str
@@ -73,6 +76,7 @@ class Profile(BaseModel):
 
 
 # ---- Path detection ----
+
 
 class CornerSchema(BaseModel):
     x: float
@@ -103,7 +107,8 @@ class PathResponse(BaseModel):
     pixels_per_mm: float | None = Field(None, alias="pixelsPerMm")
     marker_count: int = Field(0, alias="markerCount")
     marker_corners: list[MarkerCornersSchema] = Field(
-        default_factory=list, alias="markerCorners",
+        default_factory=list,
+        alias="markerCorners",
     )
     error: str | None = None
     options: dict[str, Any] | None = None
@@ -112,6 +117,7 @@ class PathResponse(BaseModel):
 
 
 # ---- Robot pose ----
+
 
 class RobotPoseResponse(BaseModel):
     ok: bool
@@ -128,6 +134,7 @@ class RobotPoseResponse(BaseModel):
 
 # ---- Robot move request ----
 
+
 class RobotMoveRequest(BaseModel):
     x: float
     y: float
@@ -142,6 +149,7 @@ class RobotMoveResponse(BaseModel):
 
 # ---- Job creation request ----
 
+
 class JobCreateRequest(BaseModel):
     path: list[WaypointSchema] = Field(default_factory=list)
     dry_run: bool = Field(False, alias="dryRun")
@@ -149,9 +157,7 @@ class JobCreateRequest(BaseModel):
     image_base64: str | None = Field(
         None,
         alias="imageBase64",
-        description=(
-            "Base64-encoded JPEG snapshot to store with the job"
-        ),
+        description=("Base64-encoded JPEG snapshot to store with the job"),
     )
     starting_point: WaypointSchema | None = Field(
         None,

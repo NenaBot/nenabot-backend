@@ -68,9 +68,7 @@ class RobotAdapter:
         if system == "Darwin":
             return sorted(glob.glob("/dev/cu.usbserial-*"))
         if system == "Linux":
-            return sorted(
-                glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")
-            )
+            return sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
         if system == "Windows":
             # Windows COM ports are not glob-able; probe COM1–COM20
             import serial.tools.list_ports as lp  # pyserial
@@ -129,8 +127,14 @@ class RobotAdapter:
         # Timeout — return last pose with error info
         return PoseResult(
             ok=False,
-            x=last_pose.x, y=last_pose.y, z=last_pose.z, r=last_pose.r,
-            j1=last_pose.j1, j2=last_pose.j2, j3=last_pose.j3, j4=last_pose.j4,
+            x=last_pose.x,
+            y=last_pose.y,
+            z=last_pose.z,
+            r=last_pose.r,
+            j1=last_pose.j1,
+            j2=last_pose.j2,
+            j3=last_pose.j3,
+            j4=last_pose.j4,
             error=(
                 f"Timeout ({timeout_s}s) waiting for position "
                 f"({target_x:.1f}, {target_y:.1f}, {target_z:.1f}). "
@@ -203,6 +207,7 @@ class RobotAdapter:
             return
         try:
             import DobotDllTypeMulti as dType
+
             dType.DisconnectDobot(self._api)
         except Exception:
             # Best-effort cleanup during disconnect

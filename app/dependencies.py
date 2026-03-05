@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 def create_orchestrator(
     db_path: str = "data/nenabot.db",
     dms_base_url: str = "http://localhost:8080",
+    dms_ws_base_url: str = "ws://localhost:8080",
 ) -> OrchestratorService:
     """Create an OrchestratorService with default dependencies."""
     db = Database(db_path=db_path)

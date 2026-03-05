@@ -157,8 +157,12 @@ def load():
         framework_candidates = [framework_path]
         if platform.machine() == "arm64" and os.path.isdir(brew_framework_path):
             framework_candidates.insert(0, brew_framework_path)
-        existing_framework_entries = [p for p in existing_framework_path.split(":") if p]
-        updated_framework_entries = [p for p in framework_candidates if p not in existing_framework_entries]
+        existing_framework_entries = [
+            p for p in existing_framework_path.split(":") if p
+        ]
+        updated_framework_entries = [
+            p for p in framework_candidates if p not in existing_framework_entries
+        ]
         os.environ["DYLD_FRAMEWORK_PATH"] = ":".join(
             updated_framework_entries + existing_framework_entries
         )
@@ -180,35 +184,86 @@ def load():
 
 def _ensure_api(api):
     if not hasattr(api, "_dobot_multi_bound"):
-        api.ConnectDobot.argtypes = [c_char_p, c_uint32, c_char_p, c_char_p, POINTER(c_int)]
+        api.ConnectDobot.argtypes = [
+            c_char_p,
+            c_uint32,
+            c_char_p,
+            c_char_p,
+            POINTER(c_int),
+        ]
         api.ConnectDobot.restype = c_int
         api.DisconnectDobot.argtypes = [c_int]
         api.DisconnectDobot.restype = c_int
         api.GetPose.argtypes = [c_int, POINTER(Pose)]
         api.GetPose.restype = c_int
-        api.SetHOMEParams.argtypes = [c_int, POINTER(HOMEParams), c_bool, POINTER(c_uint64)]
+        api.SetHOMEParams.argtypes = [
+            c_int,
+            POINTER(HOMEParams),
+            c_bool,
+            POINTER(c_uint64),
+        ]
         api.SetHOMEParams.restype = c_int
         api.SetHOMECmd.argtypes = [c_int, POINTER(HOMECmd), c_bool, POINTER(c_uint64)]
         api.SetHOMECmd.restype = c_int
-        api.SetPTPJointParams.argtypes = [c_int, POINTER(PTPJointParams), c_bool, POINTER(c_uint64)]
+        api.SetPTPJointParams.argtypes = [
+            c_int,
+            POINTER(PTPJointParams),
+            c_bool,
+            POINTER(c_uint64),
+        ]
         api.SetPTPJointParams.restype = c_int
-        api.SetPTPCommonParams.argtypes = [c_int, POINTER(PTPCommonParams), c_bool, POINTER(c_uint64)]
+        api.SetPTPCommonParams.argtypes = [
+            c_int,
+            POINTER(PTPCommonParams),
+            c_bool,
+            POINTER(c_uint64),
+        ]
         api.SetPTPCommonParams.restype = c_int
         api.SetPTPCmd.argtypes = [c_int, POINTER(PTPCmd), c_bool, POINTER(c_uint64)]
         api.SetPTPCmd.restype = c_int
         api.SetCmdTimeout.argtypes = [c_int, c_uint32]
         api.SetCmdTimeout.restype = c_int
-        api.SetEndEffectorParams.argtypes = [c_int, POINTER(EndEffectorParams), c_bool, POINTER(c_uint64)]
+        api.SetEndEffectorParams.argtypes = [
+            c_int,
+            POINTER(EndEffectorParams),
+            c_bool,
+            POINTER(c_uint64),
+        ]
         api.SetEndEffectorParams.restype = c_int
-        api.SetJOGJointParams.argtypes = [c_int, POINTER(JOGJointParams), c_bool, POINTER(c_uint64)]
+        api.SetJOGJointParams.argtypes = [
+            c_int,
+            POINTER(JOGJointParams),
+            c_bool,
+            POINTER(c_uint64),
+        ]
         api.SetJOGJointParams.restype = c_int
-        api.SetJOGCoordinateParams.argtypes = [c_int, POINTER(JOGCoordinateParams), c_bool, POINTER(c_uint64)]
+        api.SetJOGCoordinateParams.argtypes = [
+            c_int,
+            POINTER(JOGCoordinateParams),
+            c_bool,
+            POINTER(c_uint64),
+        ]
         api.SetJOGCoordinateParams.restype = c_int
-        api.SetJOGCommonParams.argtypes = [c_int, POINTER(JOGCommonParams), c_bool, POINTER(c_uint64)]
+        api.SetJOGCommonParams.argtypes = [
+            c_int,
+            POINTER(JOGCommonParams),
+            c_bool,
+            POINTER(c_uint64),
+        ]
         api.SetJOGCommonParams.restype = c_int
-        api.SetPTPCoordinateParams.argtypes = [c_int, POINTER(PTPCoordinateParams), c_bool, POINTER(c_uint64)]
+        api.SetPTPCoordinateParams.argtypes = [
+            c_int,
+            POINTER(PTPCoordinateParams),
+            c_bool,
+            POINTER(c_uint64),
+        ]
         api.SetPTPCoordinateParams.restype = c_int
-        api.SetPTPJumpParams.argtypes = [c_int, POINTER(PTPJumpParams), c_bool, POINTER(c_uint64)]
+        api.SetPTPJumpParams.argtypes = [
+            c_int,
+            POINTER(PTPJumpParams),
+            c_bool,
+            POINTER(c_uint64),
+        ]
         api.SetPTPJumpParams.restype = c_int
         api.SetQueuedCmdStartExec.argtypes = [c_int]
         api.SetQueuedCmdStartExec.restype = c_int
@@ -231,10 +286,17 @@ def ConnectDobot(api, portName, baudrate):
     fw_type = create_string_buffer(64)
     version = create_string_buffer(64)
     dobot_id = c_int(0)
-    result = api.ConnectDobot(portName.encode("utf-8"), baudrate, fw_type, version, byref(dobot_id))
+    result = api.ConnectDobot(
+        portName.encode("utf-8"), baudrate, fw_type, version, byref(dobot_id)
+    )
     if result == DobotConnect.DobotConnect_NoError:
         _dobot_id = dobot_id.value
-    return [result, dobot_id.value, fw_type.value.decode("utf-8", errors="ignore"), version.value.decode("utf-8", errors="ignore")]
+    return [
+        result,
+        dobot_id.value,
+        fw_type.value.decode("utf-8", errors="ignore"),
+        version.value.decode("utf-8", errors="ignore"),
+    ]
 
 
 def DisconnectDobot(api):
@@ -283,7 +345,9 @@ def SetEndEffectorParams(api, xBias, yBias, zBias, isQueued=0):
     params = EndEffectorParams(xBias, yBias, zBias)
     queued_index = c_uint64(0)
     while True:
-        result = api.SetEndEffectorParams(c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index))
+        result = api.SetEndEffectorParams(
+            c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -296,7 +360,9 @@ def SetJOGJointParams(api, velocity, acceleration, isQueued=0):
     params = JOGJointParams((c_float * 4)(*velocity), (c_float * 4)(*acceleration))
     queued_index = c_uint64(0)
     while True:
-        result = api.SetJOGJointParams(c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index))
+        result = api.SetJOGJointParams(
+            c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -309,7 +375,9 @@ def SetJOGCoordinateParams(api, velocity, acceleration, isQueued=0):
     params = JOGCoordinateParams((c_float * 4)(*velocity), (c_float * 4)(*acceleration))
     queued_index = c_uint64(0)
     while True:
-        result = api.SetJOGCoordinateParams(c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index))
+        result = api.SetJOGCoordinateParams(
+            c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -322,7 +390,9 @@ def SetJOGCommonParams(api, velocityRatio, accelerationRatio, isQueued=0):
     params = JOGCommonParams(velocityRatio, accelerationRatio)
     queued_index = c_uint64(0)
     while True:
-        result = api.SetJOGCommonParams(c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index))
+        result = api.SetJOGCommonParams(
+            c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -335,7 +405,9 @@ def SetHOMEParams(api, x, y, z, r, isQueued=0):
     params = HOMEParams(x, y, z, r)
     queued_index = c_uint64(0)
     while True:
-        result = api.SetHOMEParams(c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index))
+        result = api.SetHOMEParams(
+            c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -348,7 +420,9 @@ def SetHOMECmd(api, temp, isQueued=0):
     cmd = HOMECmd(0)
     queued_index = c_uint64(0)
     while True:
-        result = api.SetHOMECmd(c_int(_dobot_id), byref(cmd), c_bool(isQueued), byref(queued_index))
+        result = api.SetHOMECmd(
+            c_int(_dobot_id), byref(cmd), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -356,7 +430,18 @@ def SetHOMECmd(api, temp, isQueued=0):
     return [queued_index.value]
 
 
-def SetPTPJointParams(api, j1Velocity, j1Acceleration, j2Velocity, j2Acceleration, j3Velocity, j3Acceleration, j4Velocity, j4Acceleration, isQueued=0):
+def SetPTPJointParams(
+    api,
+    j1Velocity,
+    j1Acceleration,
+    j2Velocity,
+    j2Acceleration,
+    j3Velocity,
+    j3Acceleration,
+    j4Velocity,
+    j4Acceleration,
+    isQueued=0,
+):
     _ensure_api(api)
     params = PTPJointParams(
         (c_float * 4)(j1Velocity, j2Velocity, j3Velocity, j4Velocity),
@@ -364,7 +449,9 @@ def SetPTPJointParams(api, j1Velocity, j1Acceleration, j2Velocity, j2Acceleratio
     )
     queued_index = c_uint64(0)
     while True:
-        result = api.SetPTPJointParams(c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index))
+        result = api.SetPTPJointParams(
+            c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -377,7 +464,9 @@ def SetPTPCommonParams(api, velocityRatio, accelerationRatio, isQueued=0):
     params = PTPCommonParams(velocityRatio, accelerationRatio)
     queued_index = c_uint64(0)
     while True:
-        result = api.SetPTPCommonParams(c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index))
+        result = api.SetPTPCommonParams(
+            c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -385,12 +474,16 @@ def SetPTPCommonParams(api, velocityRatio, accelerationRatio, isQueued=0):
     return [queued_index.value]
 
 
-def SetPTPCoordinateParams(api, xyzVelocity, xyzAcceleration, rVelocity, rAcceleration, isQueued=0):
+def SetPTPCoordinateParams(
+    api, xyzVelocity, xyzAcceleration, rVelocity, rAcceleration, isQueued=0
+):
     _ensure_api(api)
     params = PTPCoordinateParams(xyzVelocity, rVelocity, xyzAcceleration, rAcceleration)
     queued_index = c_uint64(0)
     while True:
-        result = api.SetPTPCoordinateParams(c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index))
+        result = api.SetPTPCoordinateParams(
+            c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -403,7 +496,9 @@ def SetPTPJumpParams(api, jumpHeight, zLimit, isQueued=0):
     params = PTPJumpParams(jumpHeight, zLimit)
     queued_index = c_uint64(0)
     while True:
-        result = api.SetPTPJumpParams(c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index))
+        result = api.SetPTPJumpParams(
+            c_int(_dobot_id), byref(params), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(5)
             continue
@@ -416,7 +511,9 @@ def SetPTPCmd(api, ptpMode, x, y, z, rHead, isQueued=0):
     cmd = PTPCmd(ptpMode, x, y, z, rHead)
     queued_index = c_uint64(0)
     while True:
-        result = api.SetPTPCmd(c_int(_dobot_id), byref(cmd), c_bool(isQueued), byref(queued_index))
+        result = api.SetPTPCmd(
+            c_int(_dobot_id), byref(cmd), c_bool(isQueued), byref(queued_index)
+        )
         if result != DobotCommunicate.DobotCommunicate_NoError:
             dSleep(2)
             continue

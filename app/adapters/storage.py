@@ -50,10 +50,7 @@ class StorageAdapter:
                 "INSERT INTO waypoints "
                 "(job_id, seq, x, y, z, r) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                [
-                    (job.id, i, w.x, w.y, w.z, w.r)
-                    for i, w in enumerate(job.path)
-                ],
+                [(job.id, i, w.x, w.y, w.z, w.r) for i, w in enumerate(job.path)],
             )
         self._db.commit()
 
@@ -67,8 +64,13 @@ class StorageAdapter:
         self._db.execute(
             """UPDATE jobs SET state = ?, last_point_processed = ?,
                error = ?, updated_at = ? WHERE id = ?""",
-            (state, last_point_processed, error,
-             datetime.now(timezone.utc).isoformat(), job_id),
+            (
+                state,
+                last_point_processed,
+                error,
+                datetime.now(timezone.utc).isoformat(),
+                job_id,
+            ),
         )
         self._db.commit()
 
@@ -180,4 +182,3 @@ class StorageAdapter:
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
-

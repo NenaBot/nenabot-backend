@@ -114,11 +114,19 @@ class OrchestratorService:
         return self._robot.get_pose()
 
     def move_robot(
-        self, x: float, y: float, z: float, r: float,
+        self,
+        x: float,
+        y: float,
+        z: float,
+        r: float,
     ) -> RobotResult:
         """Send the robot to a specific position (for calibration / testing)."""
         logger.info(
-            "Manual move → (%.1f, %.1f, %.1f, %.1f)", x, y, z, r,
+            "Manual move → (%.1f, %.1f, %.1f, %.1f)",
+            x,
+            y,
+            z,
+            r,
         )
         return self._robot.move(x, y, z, r)
 
@@ -136,7 +144,10 @@ class OrchestratorService:
                     job.id,
                     i + 1,
                     len(job.path),
-                    wp.x, wp.y, wp.z, wp.r,
+                    wp.x,
+                    wp.y,
+                    wp.z,
+                    wp.r,
                     job.dry_run,
                 )
 
@@ -150,18 +161,29 @@ class OrchestratorService:
 
                     # Validate the arm actually reached the target position
                     arrival = self._robot.wait_for_position(
-                        wp.x, wp.y, wp.z, wp.r, tolerance_mm=1.0, timeout_s=30.0,
+                        wp.x,
+                        wp.y,
+                        wp.z,
+                        wp.r,
+                        tolerance_mm=1.0,
+                        timeout_s=30.0,
                     )
                     if not arrival.ok:
                         logger.warning(
                             "Job %s — WP %d arrival validation failed: %s",
-                            job.id, i + 1, arrival.error,
+                            job.id,
+                            i + 1,
+                            arrival.error,
                         )
                         msg = f"Arm did not reach waypoint {i + 1}: {arrival.error}"
                         raise RuntimeError(msg)
                     logger.info(
                         "Job %s — WP %d reached: (%.1f, %.1f, %.1f) — dwelling 1.5 s",
-                        job.id, i + 1, arrival.x, arrival.y, arrival.z,
+                        job.id,
+                        i + 1,
+                        arrival.x,
+                        arrival.y,
+                        arrival.z,
                     )
 
                     # Dwell at the waypoint for 1.5 seconds
@@ -211,7 +233,11 @@ class OrchestratorService:
                     if not job.dry_run:
                         logger.info(
                             "Job %s — returning to start (%.1f, %.1f, %.1f, %.1f)",
-                            job.id, sp.x, sp.y, sp.z, sp.r,
+                            job.id,
+                            sp.x,
+                            sp.y,
+                            sp.z,
+                            sp.r,
                         )
                         move_res = self._robot.move(sp.x, sp.y, sp.z, sp.r)
                         if not move_res.ok:
@@ -221,8 +247,12 @@ class OrchestratorService:
                             )
                         else:
                             arrival = self._robot.wait_for_position(
-                                sp.x, sp.y, sp.z, sp.r,
-                                tolerance_mm=1.0, timeout_s=30.0,
+                                sp.x,
+                                sp.y,
+                                sp.z,
+                                sp.r,
+                                tolerance_mm=1.0,
+                                timeout_s=30.0,
                             )
                             if not arrival.ok:
                                 logger.warning(
@@ -232,13 +262,20 @@ class OrchestratorService:
                             else:
                                 logger.info(
                                     "Job %s — back at start (%.1f, %.1f, %.1f)",
-                                    job.id, arrival.x, arrival.y, arrival.z,
+                                    job.id,
+                                    arrival.x,
+                                    arrival.y,
+                                    arrival.z,
                                 )
                     else:
                         logger.info(
                             "Job %s (dry run) — would return "
                             "to start (%.1f, %.1f, %.1f, %.1f)",
-                            job.id, sp.x, sp.y, sp.z, sp.r,
+                            job.id,
+                            sp.x,
+                            sp.y,
+                            sp.z,
+                            sp.r,
                         )
                 job.state = "completed"
 
@@ -264,9 +301,7 @@ class OrchestratorService:
             # We need the original snapshot, but we only have the previously
             # rendered overlay.  For simplicity we just re-render from it.
             # The detection boxes are already burned in from create_job.
-            overlay = CameraVisionAdapter.render_overlay(
-                existing, [], job.measurements
-            )
+            overlay = CameraVisionAdapter.render_overlay(existing, [], job.measurements)
             self._storage.save_job_image(job.id, overlay)
         except Exception:
             logger.debug("Overlay update failed for job %s", job.id, exc_info=True)
