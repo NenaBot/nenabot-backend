@@ -45,20 +45,41 @@ class RobotAdapter:
     def connect_first_available(self) -> RobotResult:
         try:
             import glob
+            import platform
 
             import DobotDllTypeMulti as dType
-        except Exception as exc:  # pragma: no cover - hardware dependency
+
+            self._api = dType.load()
+            ports = self._discover_ports()
+            for port in ports:
+                state = dType.ConnectDobot(self._api, port, self._baud)[0]
+                if state == dType.DobotConnect.DobotConnect_NoError:
+                    self._connected_port = port
+                    return RobotResult(True)
+
+            return RobotResult(False, "No Dobot device found")
+        except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
 
-        self._api = dType.load()
-        ports = sorted(glob.glob("/dev/cu.usbserial-*"))
-        for port in ports:
-            state = dType.ConnectDobot(self._api, port, self._baud)[0]
-            if state == dType.DobotConnect.DobotConnect_NoError:
-                self._connected_port = port
-                return RobotResult(True)
+    @staticmethod
+    def _discover_ports() -> list[str]:
+        """Return candidate serial ports for the current platform."""
+        import glob
+        import platform
 
-        return RobotResult(False, "No Dobot device found")
+        system = platform.system()
+        if system == "Darwin":
+            return sorted(glob.glob("/dev/cu.usbserial-*"))
+        if system == "Linux":
+            return sorted(
+                glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")
+            )
+        if system == "Windows":
+            # Windows COM ports are not glob-able; probe COM1–COM20
+            import serial.tools.list_ports as lp  # pyserial
+
+            return sorted(p.device for p in lp.comports())
+        return []
 
     @property
     def connected(self) -> bool:
