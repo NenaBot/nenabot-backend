@@ -48,11 +48,19 @@ class Job(BaseModel):
 
 # ---- Health / Status / Profile ----
 
+class ComponentHealth(BaseModel):
+    status: str
+    error: str | None = None
+
+
 class Health(BaseModel):
     status: str
-    robot: str
-    camera: str
-    dms: str
+    uptime_s: float = Field(0.0, alias="uptimeSeconds")
+    robot: ComponentHealth
+    camera: ComponentHealth
+    dms: ComponentHealth
+
+    model_config = {"populate_by_name": True}
 
 
 class Status(BaseModel):

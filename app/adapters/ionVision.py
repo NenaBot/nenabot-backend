@@ -57,6 +57,11 @@ class IVAdapter:
             return IVResult(False, error=str(exc))
 
 
+    # health check
+    def ping(self) -> IVResult:
+        """Lightweight reachability check against the IonVision API."""
+        return self._request("GET", "currentParameter")
+
     # scan management    
     def get_current_scan(self) -> IVResult:
         """

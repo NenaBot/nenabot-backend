@@ -29,6 +29,7 @@ class OrchestratorService:
         self._robot = robot
         self._dms = dms
         self._storage = storage
+        self._started_at = time.monotonic()
         self._profiles = [
             {"name": "default", "description": "Default inspection profile"},
             {"name": "fast", "description": "Faster run, lower accuracy"},
@@ -272,12 +273,47 @@ class OrchestratorService:
 
     # ---- Misc ----
 
-    def health(self) -> dict[str, str]:
+    def health(self) -> dict[str, object]:
+        """Probe every subsystem and return a structured health report."""
+        components: dict[str, dict[str, str | None]] = {}
+
+        # Robot
+        try:
+            res = self._robot.ping()
+            components["robot"] = {
+                "status": "connected" if res.ok else "disconnected",
+                "error": res.error,
+            }
+        except Exception as exc:
+            components["robot"] = {"status": "error", "error": str(exc)}
+
+        # Camera
+        try:
+            res = self._camera_vision.ping()
+            components["camera"] = {
+                "status": "connected" if res.ok else "disconnected",
+                "error": res.error,
+            }
+        except Exception as exc:
+            components["camera"] = {"status": "error", "error": str(exc)}
+
+        # DMS (IonVision)
+        try:
+            res = self._dms.ping()
+            components["dms"] = {
+                "status": "connected" if res.ok else "disconnected",
+                "error": res.error,
+            }
+        except Exception as exc:
+            components["dms"] = {"status": "error", "error": str(exc)}
+
+        any_error = any(c["status"] == "error" for c in components.values())
+        overall = "degraded" if any_error else "ok"
+
         return {
-            "status": "ok",
-            "robot": "unknown",
-            "camera": "unknown",
-            "dms": "unknown",
+            "status": overall,
+            "uptime_s": round(time.monotonic() - self._started_at, 2),
+            **components,
         }
 
     def status(self) -> str:
