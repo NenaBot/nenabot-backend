@@ -5,4 +5,4 @@ __pycache__
 .coverage
 /data/*
 .DS_Store
-
+*.egg-info/

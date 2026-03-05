@@ -4,7 +4,7 @@ import logging
 
 from app.adapters.camera_vision import CameraVisionAdapter
 from app.adapters.database import Database
-from app.adapters.ionVision.ionVision import IVAdapter
+from app.adapters.ionVision import IVAdapter
 from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
 from app.services.orchestrator import OrchestratorService
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 def create_orchestrator(
     db_path: str = "data/nenabot.db",
     dms_base_url: str = "http://localhost:8080",
+    dms_ws_base_url: str = "ws://localhost:8080"
 ) -> OrchestratorService:
     """Create an OrchestratorService with default dependencies."""
     db = Database(db_path=db_path)
@@ -30,7 +31,7 @@ def create_orchestrator(
     return OrchestratorService(
         camera_vision=CameraVisionAdapter(),
         robot=robot,
-        dms=IVAdapter(base_url=dms_base_url),
+        dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
         storage=StorageAdapter(db=db),
     )
 
