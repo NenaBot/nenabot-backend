@@ -164,6 +164,22 @@ class RobotAdapter:
         except Exception as exc:
             return PoseResult(ok=False, error=f"GetPose failed: {exc}")
 
+    def ping(self) -> RobotResult:
+        """Lightweight connectivity check.
+
+        Returns *ok=True* when the Dobot DLL is loaded **and** the arm is
+        connected (i.e. we can read its pose).
+        """
+        if not self.connected:
+            return RobotResult(False, "Not connected")
+        try:
+            pose = self.get_pose()
+            if pose.ok:
+                return RobotResult(True)
+            return RobotResult(False, pose.error)
+        except Exception as exc:
+            return RobotResult(False, f"Ping failed: {exc}")
+
     def disconnect(self) -> None:
         if not self._api:
             return

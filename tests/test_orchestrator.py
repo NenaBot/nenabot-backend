@@ -91,3 +91,44 @@ def test_stop_running_job(tmp_path: Path) -> None:
     assert db_job is not None
     assert db_job.state == "stopped"
     assert db_job.last_point_processed < 100
+
+
+def test_health_returns_component_statuses(tmp_path: Path) -> None:
+    """health() should probe each adapter and report per-component status."""
+    svc = _make_svc(tmp_path)
+    result = svc.health()
+
+    assert result["status"] in {"ok", "degraded"}
+    assert result["uptime_s"] >= 0
+
+    for key in ("robot", "camera", "dms"):
+        assert key in result
+        assert result[key]["status"] in {"connected", "disconnected", "error"}
+
+
+def test_health_uptime_advances(tmp_path: Path) -> None:
+    """uptime should increase between successive health() calls."""
+    svc = _make_svc(tmp_path)
+    h1 = svc.health()
+    time.sleep(0.15)
+    h2 = svc.health()
+    assert h2["uptime_s"] > h1["uptime_s"]
+
+
+def test_status_reflects_running_job(tmp_path: Path) -> None:
+    """status() should return 'busy' while a job is executing."""
+    svc = _make_svc(tmp_path)
+    assert svc.status() == "ready"
+
+    waypoints = [Waypoint(x=float(i), y=float(i)) for i in range(50)]
+    job = svc.create_job(path=waypoints, dry_run=True)
+    svc.run_job(job.id)
+    time.sleep(0.1)
+    assert svc.status() == "busy"
+
+    svc.stop_job()
+    for _ in range(20):
+        if svc.status() == "ready":
+            break
+        time.sleep(0.1)
+    assert svc.status() == "ready"

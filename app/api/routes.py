@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from app.dependencies import get_orchestrator
 from app.domain.models import Job as DomainJob, Waypoint
 from app.schemas import (
+    ComponentHealth,
     CornerSchema,
     Health,
     Job,
@@ -32,7 +33,13 @@ router = APIRouter()
 @router.get("/health", response_model=Health)
 def health(svc: OrchestratorService = Depends(get_orchestrator)) -> Health:
     data = svc.health()
-    return Health(**data)
+    return Health(
+        status=data["status"],
+        uptime_s=data["uptime_s"],
+        robot=ComponentHealth(**data["robot"]),
+        camera=ComponentHealth(**data["camera"]),
+        dms=ComponentHealth(**data["dms"]),
+    )
 
 
 @router.get("/status", response_model=Status)

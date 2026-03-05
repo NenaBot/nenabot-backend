@@ -34,6 +34,13 @@ def test_health_and_status(client: TestClient) -> None:
     assert health["status"] == "ok"
     assert "camera" in health
     assert "dms" in health
+    assert "robot" in health
+    assert "uptimeSeconds" in health
+    assert health["uptimeSeconds"] >= 0
+    # Each component should report a status and optional error
+    for key in ("camera", "dms", "robot"):
+        assert "status" in health[key]
+        assert health[key]["status"] in {"connected", "disconnected", "error"}
 
     response = client.get("/status")
     assert response.status_code == 200

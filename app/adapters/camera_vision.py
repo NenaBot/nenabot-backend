@@ -89,6 +89,21 @@ class CameraVisionAdapter:
         self._camera_streaming = False
         self._detection_streaming = False
 
+    # ---- health check ----
+
+    def ping(self) -> CaptureResult:
+        """Lightweight check: can we open the camera device?"""
+        try:
+            import cv2
+        except Exception as exc:  # pragma: no cover
+            return CaptureResult(False, error=f"OpenCV not available: {exc}")
+
+        cap = cv2.VideoCapture(self._device_index)
+        if not cap.isOpened():
+            return CaptureResult(False, error="Unable to open camera")
+        cap.release()
+        return CaptureResult(True)
+
     # ---- single-frame capture ----
 
     def capture(self) -> CaptureResult:
