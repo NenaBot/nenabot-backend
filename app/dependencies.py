@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from app.adapters.camera_vision import CameraVisionAdapter
-from app.adapters.ionVision.ionVision import IVAdapter
+from app.adapters.ionVision import IVAdapter
 from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
 from app.services.orchestrator import OrchestratorService
@@ -11,13 +11,14 @@ from app.services.orchestrator import OrchestratorService
 
 def create_orchestrator(
     storage_dir: str = "data",
-    dms_base_url: str = "http://localhost:8080"
+    dms_base_url: str = "http://localhost:8080",
+    dms_ws_base_url: str = "ws://localhost:8080"
 ) -> OrchestratorService:
     """Factory function to create an OrchestratorService with default dependencies."""
     return OrchestratorService(
         camera_vision=CameraVisionAdapter(),
         robot=RobotAdapter(),
-        dms=IVAdapter(base_url=dms_base_url),
+        dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
         storage=StorageAdapter(base_dir=storage_dir),
     )
 
