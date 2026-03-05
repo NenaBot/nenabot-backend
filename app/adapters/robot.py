@@ -44,9 +44,6 @@ class RobotAdapter:
 
     def connect_first_available(self) -> RobotResult:
         try:
-            import glob
-            import platform
-
             import DobotDllTypeMulti as dType
 
             self._api = dType.load()
