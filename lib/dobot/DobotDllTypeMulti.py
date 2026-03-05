@@ -143,10 +143,13 @@ _dobot_id = None
 
 
 def load():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
     if platform.system() == "Windows":
-        return CDLL("./DobotDll.dll", RTLD_GLOBAL)
+        dll_path = os.path.join(base_dir, "DobotDll.dll")
+        if not os.path.exists(dll_path):
+            raise FileNotFoundError("DobotDll.dll not found in lib/dobot/.")
+        return CDLL(dll_path, RTLD_GLOBAL)
     if platform.system() == "Darwin":
-        base_dir = os.path.dirname(os.path.abspath(__file__))
         dylib_path = os.path.join(base_dir, "libDobotDll.dylib")
         brew_framework_path = "/opt/homebrew/opt/qt@5/lib"
         framework_path = base_dir
@@ -165,11 +168,14 @@ def load():
                 [p for p in [base_dir, existing_library_path] if p]
             )
         if not os.path.exists(dylib_path):
-            raise FileNotFoundError("libDobotDll.dylib not found in project root.")
+            raise FileNotFoundError("libDobotDll.dylib not found in lib/dobot/.")
         return CDLL(dylib_path, RTLD_GLOBAL)
     if platform.system() == "Linux":
-        return cdll.loadLibrary("libDobotDll.so")
-    raise RuntimeError("Unsupported platform")
+        so_path = os.path.join(base_dir, "libDobotDll.so")
+        if not os.path.exists(so_path):
+            raise FileNotFoundError("libDobotDll.so not found in lib/dobot/.")
+        return CDLL(so_path, RTLD_GLOBAL)
+    raise RuntimeError(f"Unsupported platform: {platform.system()}")
 
 
 def _ensure_api(api):
