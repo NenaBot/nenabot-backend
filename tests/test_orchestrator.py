@@ -2,8 +2,12 @@ import time
 from pathlib import Path
 
 from app.adapters.camera_vision import CameraVisionAdapter
+<<<<<<< HEAD
 from app.adapters.database import Database
 from app.adapters.ionVision.ionVision import IVAdapter
+=======
+from app.adapters.ionVision import IVAdapter
+>>>>>>> d2ca401 (Feature/websocket api (#13))
 from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
 from app.domain.models import Waypoint
@@ -16,8 +20,13 @@ def _make_svc(tmp_path: Path) -> OrchestratorService:
     return OrchestratorService(
         camera_vision=CameraVisionAdapter(),
         robot=RobotAdapter(),
+<<<<<<< HEAD
         dms=IVAdapter(base_url="http://localhost:8080"),
         storage=StorageAdapter(db=db),
+=======
+        dms=IVAdapter(base_url="http://localhost:8080",ws_base_url="ws://localhost:8080"),
+        storage=StorageAdapter(base_dir=str(tmp_path)),
+>>>>>>> d2ca401 (Feature/websocket api (#13))
     )
 
 
