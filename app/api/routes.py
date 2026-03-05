@@ -270,10 +270,7 @@ def _to_job(job: DomainJob) -> Job:
     return Job(
         id=job.id,
         options=job.options,
-        path=[
-            WaypointSchema(x=w.x, y=w.y, z=w.z, r=w.r)
-            for w in job.path
-        ],
+        path=[WaypointSchema(x=w.x, y=w.y, z=w.z, r=w.r) for w in job.path],
         dry_run=job.dry_run,
         log=job.log,
         measurements=[

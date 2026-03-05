@@ -157,17 +157,16 @@ class CameraVisionAdapter:
         aruco_corners_out: list[MarkerCorners] = []
         if ids is not None and len(marker_corners) > 0:
             first_corner = marker_corners[0][0]
-            side_px = float(
-                np.linalg.norm(first_corner[0] - first_corner[1])
-            )
+            side_px = float(np.linalg.norm(first_corner[0] - first_corner[1]))
             pixels_per_mm = side_px / self._marker_size_mm
             for mc in marker_corners:
-                aruco_corners_out.append(MarkerCorners(
-                    corners=[
-                        Corner(x=float(pt[0]), y=float(pt[1]))
-                        for pt in mc[0]
-                    ],
-                ))
+                aruco_corners_out.append(
+                    MarkerCorners(
+                        corners=[
+                            Corner(x=float(pt[0]), y=float(pt[1])) for pt in mc[0]
+                        ],
+                    )
+                )
 
         # --- battery contour detection ---
         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -175,7 +174,9 @@ class CameraVisionAdapter:
         kernel = np.ones((3, 3), np.uint8)
         edges = cv2.dilate(edges, kernel, iterations=1)
         contours, _ = cv2.findContours(
-            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+            edges,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
         )
 
         detections: list[DetectionResult] = []
@@ -206,14 +207,16 @@ class CameraVisionAdapter:
             width_mm = float(w / pixels_per_mm) if pixels_per_mm else float(w)
             height_mm = float(h / pixels_per_mm) if pixels_per_mm else float(h)
 
-            detections.append(DetectionResult(
-                corners=corners,
-                width_mm=width_mm,
-                height_mm=height_mm,
-                center_x=center_x,
-                center_y=center_y,
-                confidence=0.7 if pixels_per_mm else 0.3,
-            ))
+            detections.append(
+                DetectionResult(
+                    corners=corners,
+                    width_mm=width_mm,
+                    height_mm=height_mm,
+                    center_x=center_x,
+                    center_y=center_y,
+                    confidence=0.7 if pixels_per_mm else 0.3,
+                )
+            )
 
         if not detections:
             return DetectionResults(
@@ -247,12 +250,12 @@ class CameraVisionAdapter:
         pixels_per_mm = None
         if ids is not None and len(marker_corners) > 0:
             cv2.aruco.drawDetectedMarkers(
-                annotated, marker_corners, ids,
+                annotated,
+                marker_corners,
+                ids,
             )
             first_corner = marker_corners[0][0]
-            side_px = float(
-                np.linalg.norm(first_corner[0] - first_corner[1])
-            )
+            side_px = float(np.linalg.norm(first_corner[0] - first_corner[1]))
             pixels_per_mm = side_px / self._marker_size_mm
 
         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -260,7 +263,9 @@ class CameraVisionAdapter:
         kernel = np.ones((3, 3), np.uint8)
         edges = cv2.dilate(edges, kernel, iterations=1)
         contours, _ = cv2.findContours(
-            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+            edges,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
         )
 
         for contour in contours:
@@ -288,8 +293,15 @@ class CameraVisionAdapter:
             if pixels_per_mm:
                 label = f"{w / pixels_per_mm:.1f}x{h / pixels_per_mm:.1f} mm"
                 center = tuple(map(int, rect[0]))
-                cv2.putText(annotated, label, (center[0] - 50, center[1] - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                cv2.putText(
+                    annotated,
+                    label,
+                    (center[0] - 50, center[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    2,
+                )
 
         return annotated
 
@@ -306,8 +318,13 @@ class CameraVisionAdapter:
         y0 = self._frame_height // 2 - 20 * (len(lines) - 1) // 2
         for i, line in enumerate(lines):
             cv2.putText(
-                frame, line, (40, y0 + i * 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 255), 2,
+                frame,
+                line,
+                (40, y0 + i * 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (80, 80, 255),
+                2,
             )
         _, jpeg = cv2.imencode(".jpg", frame)
         return jpeg.tobytes()
@@ -332,10 +349,7 @@ class CameraVisionAdapter:
             error = self._error_frame(
                 "Camera not available\n(check device or opencv-python)",
             )
-            yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                + error + b"\r\n"
-            )
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n")
             cap.release()
             return
 
@@ -375,10 +389,7 @@ class CameraVisionAdapter:
             error = self._error_frame(
                 "Camera not available\n(check device or opencv-python)",
             )
-            yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                + error + b"\r\n"
-            )
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n")
             cap.release()
             return
 
@@ -390,10 +401,14 @@ class CameraVisionAdapter:
                     await asyncio.sleep(0.05)
                     continue
                 annotated = await loop.run_in_executor(
-                    None, self.detect_live, frame,
+                    None,
+                    self.detect_live,
+                    frame,
                 )
                 _, jpeg = cv2.imencode(
-                    ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70],
+                    ".jpg",
+                    annotated,
+                    [cv2.IMWRITE_JPEG_QUALITY, 70],
                 )
                 yield (
                     b"--frame\r\n"
@@ -452,23 +467,30 @@ class CameraVisionAdapter:
         for det in detections:
             corners = det.corners if hasattr(det, "corners") else []
             if len(corners) >= 4:
-                pts = np.array(
-                    [[int(c.x), int(c.y)] for c in corners], dtype=np.int32
-                )
+                pts = np.array([[int(c.x), int(c.y)] for c in corners], dtype=np.int32)
                 cv2.drawContours(frame, [pts], 0, (0, 255, 255), 2)
             # center cross
             cx, cy = int(det.center_x), int(det.center_y)
             cv2.drawMarker(
-                frame, (cx, cy), (0, 255, 255),
-                cv2.MARKER_CROSS, 12, 1,
+                frame,
+                (cx, cy),
+                (0, 255, 255),
+                cv2.MARKER_CROSS,
+                12,
+                1,
             )
             if first_target is None:
                 first_target = (cx, cy)
             # size label
             label = f"{det.width_mm:.1f}x{det.height_mm:.1f} mm"
             cv2.putText(
-                frame, label, (cx - 50, cy - 14),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1,
+                frame,
+                label,
+                (cx - 50, cy - 14),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 255, 255),
+                1,
             )
 
         # --- measurement points (green numbered circles) ---
@@ -481,8 +503,13 @@ class CameraVisionAdapter:
                 cv2.circle(frame, (px, py), 10, (255, 255, 255), 1)
                 idx_label = str(m.waypoint_index + 1)
                 cv2.putText(
-                    frame, idx_label, (px - 4, py + 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 0), 1,
+                    frame,
+                    idx_label,
+                    (px - 4, py + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.35,
+                    (0, 0, 0),
+                    1,
                 )
                 if first_target is None:
                     first_target = (px, py)
@@ -490,8 +517,13 @@ class CameraVisionAdapter:
                 if m.scan_result:
                     summary = _scan_summary(m.scan_result)
                     cv2.putText(
-                        frame, summary, (px + 14, py + 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 200), 1,
+                        frame,
+                        summary,
+                        (px + 14, py + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.35,
+                        (200, 200, 200),
+                        1,
                     )
 
         # --- starting point (orange diamond + "START" label) ---
@@ -499,17 +531,25 @@ class CameraVisionAdapter:
             sx, sy = int(starting_point[0]), int(starting_point[1])
             # Diamond shape (rotated square)
             size = 12
-            diamond = np.array([
-                [sx, sy - size],
-                [sx + size, sy],
-                [sx, sy + size],
-                [sx - size, sy],
-            ], dtype=np.int32)
-            cv2.fillPoly(frame, [diamond], (0, 140, 255))       # orange fill
+            diamond = np.array(
+                [
+                    [sx, sy - size],
+                    [sx + size, sy],
+                    [sx, sy + size],
+                    [sx - size, sy],
+                ],
+                dtype=np.int32,
+            )
+            cv2.fillPoly(frame, [diamond], (0, 140, 255))  # orange fill
             cv2.polylines(frame, [diamond], True, (255, 255, 255), 2)  # white border
             cv2.putText(
-                frame, "START", (sx + 16, sy + 5),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 140, 255), 2,
+                frame,
+                "START",
+                (sx + 16, sy + 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 140, 255),
+                2,
             )
             # Dashed line from starting point → first target
             if first_target:
@@ -550,6 +590,7 @@ def _draw_dashed_line(
     dy = (y2 - y1) / dist
     num_segments = int(dist // gap)
     import cv2
+
     for i in range(0, num_segments, 2):
         sx = int(x1 + dx * gap * i)
         sy = int(y1 + dy * gap * i)

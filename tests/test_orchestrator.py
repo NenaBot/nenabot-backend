@@ -17,7 +17,9 @@ def _make_svc(tmp_path: Path) -> OrchestratorService:
         camera_vision=CameraVisionAdapter(),
         robot=RobotAdapter(),
         storage=StorageAdapter(db=db),
-        dms=IVAdapter(base_url="http://localhost:8080",ws_base_url="ws://localhost:8080"),
+        dms=IVAdapter(
+            base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
+        ),
     )
 
 
