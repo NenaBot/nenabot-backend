@@ -17,6 +17,7 @@ from app.domain.models import Job, Measurement, Waypoint
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
 
 class OrchestratorService:
     def __init__(

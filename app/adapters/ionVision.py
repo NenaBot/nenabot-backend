@@ -210,18 +210,6 @@ class WebSocketAdapter:
     """
     Event-driven WebSocket adapter for IonVision API.
     Maintains a persistent connection and dispatches events to registered handlers.
-    
-    Supported event types:
-    - "scan.stopped": A scan has been stopped without finishing. No result data will be saved.
-    - "scan.finished": A scan has been finished successfully. Results are still being processed.
-    - "scan.resultsProcessed": The results of the finished scan have been processed to device storage.
-    - "scan.progress": The progress of an ongoing scan (0-100 percentage).
-    - "device.standbyButtonPressed": Standby button at front panel pressed. Shows "power off?" dialog.
-    - "device.shutdown": Device is powering off. Device APIs will not be usable shortly after.
-    - "message.error": An error or warning message. Contains unique error code.
-    - "message.limitError": User set or safety limit has been crossed.
-    - "backup.started": Backup process started. Scanning unavailable during this.
-    - "backup.finished": Backup process finished successfully.
     """
     
     def __init__(self, base_url: str) -> None:
