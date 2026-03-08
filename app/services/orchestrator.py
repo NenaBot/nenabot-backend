@@ -38,6 +38,11 @@ class OrchestratorService:
         self._stop_requested = False
         self._job_thread: threading.Thread | None = None
 
+        # Calibration state — populated by detect_path()
+        self._cal_robot_start: Waypoint | None = None
+        self._cal_canvas_start: tuple[float, float] | None = None
+        self._cal_pixels_per_mm: float | None = None
+
     # ---- Job CRUD (DB-backed) ----
 
     def create_job(
@@ -362,8 +367,85 @@ class OrchestratorService:
     def default_profile(self) -> dict:
         return self._profiles[0]
 
+    # ---- Calibration ----
+
+    def _compute_canvas_start(
+        self, result: DetectionResults, offset_mm: float = 50.0
+    ) -> tuple[float, float] | None:
+        """Compute canvas start marker 50 mm below the first ArUco marker center.
+
+        Camera is mounted behind the arm, so "below" in the image (Y+)
+        corresponds to the arm being offset away from the marker.
+        """
+        if not result.marker_corners:
+            return None
+        mc = result.marker_corners[0].corners
+        if len(mc) < 4:
+            return None
+
+        cx = sum(c.x for c in mc) / len(mc)
+        cy = sum(c.y for c in mc) / len(mc)
+
+        ppm = result.pixels_per_mm
+        offset_px = (offset_mm * ppm) if ppm else 50.0
+        return (cx, cy + offset_px)
+
+    @property
+    def is_calibrated(self) -> bool:
+        return all([
+            self._cal_robot_start is not None,
+            self._cal_canvas_start is not None,
+            self._cal_pixels_per_mm is not None,
+        ])
+
+    @property
+    def calibration_robot_start(self) -> Waypoint | None:
+        return self._cal_robot_start
+
+    @property
+    def calibration_canvas_start(self) -> tuple[float, float] | None:
+        return self._cal_canvas_start
+
+    @property
+    def calibration_pixels_per_mm(self) -> float | None:
+        return self._cal_pixels_per_mm
+
+    def pixel_to_robot(
+        self, px: float, py: float, work_z: float, work_r: float
+    ) -> Waypoint:
+        """Convert canvas pixel coordinates → robot mm coordinates.
+
+        Uses the calibration state captured during ``detect_path()``.
+        Camera orientation (mounted behind the arm):
+          • image Y decreasing (up) → robot +X
+          • image X increasing (right) → robot −Y
+        """
+        if not self.is_calibrated:
+            raise RuntimeError(
+                "Not calibrated — call POST /paths first "
+                "(with robot arm at starting position)"
+            )
+        cs_x, cs_y = self._cal_canvas_start  # type: ignore[misc]
+        rs = self._cal_robot_start  # type: ignore[union-attr]
+        ppm = self._cal_pixels_per_mm  # type: ignore[assignment]
+
+        dpx = px - cs_x  # pixel delta X (+ = right)
+        dpy = py - cs_y  # pixel delta Y (+ = down)
+        return Waypoint(
+            x=rs.x - (dpy / ppm),  # pixel Y↑ → robot +X
+            y=rs.y - (dpx / ppm),  # pixel X→ → robot −Y
+            z=work_z,
+            r=work_r,
+        )
+
     def detect_path(self) -> DetectionResults:
-        """Capture an image, detect battery corners, return result with image."""
+        """Capture an image, detect battery corners, and calibrate.
+
+        This also reads the robot’s current pose (assumed to be at the
+        starting position) and computes the canvas start point from the
+        first ArUco marker.  All three calibration ingredients are stored
+        so that ``pixel_to_robot()`` can convert coordinates.
+        """
         capture = self._camera_vision.capture()
         if not capture.ok or not capture.image_path:
             return DetectionResults(ok=False, error=capture.error or "Capture failed")
@@ -375,6 +457,32 @@ class OrchestratorService:
             result.image_base64 = base64.b64encode(raw).decode("ascii")
         except Exception:
             logger.debug("Image encoding failed", exc_info=True)
+
+        # --- Calibration: capture robot pose + canvas start ----
+        pose = self._robot.get_pose()
+        if pose.ok:
+            self._cal_robot_start = Waypoint(
+                x=pose.x, y=pose.y, z=pose.z, r=pose.r
+            )
+            logger.info(
+                "Calibration: robot start → (%.1f, %.1f, %.1f, %.1f)",
+                pose.x, pose.y, pose.z, pose.r,
+            )
+        else:
+            logger.warning("Calibration: could not read robot pose — %s", pose.error)
+
+        self._cal_pixels_per_mm = result.pixels_per_mm
+        self._cal_canvas_start = self._compute_canvas_start(result)
+
+        if self._cal_canvas_start:
+            logger.info(
+                "Calibration: canvas start → (%.0f, %.0f) px, ppm=%.4f",
+                self._cal_canvas_start[0],
+                self._cal_canvas_start[1],
+                self._cal_pixels_per_mm or 0,
+            )
+        else:
+            logger.warning("Calibration: no ArUco markers — canvas start not set")
 
         return result
 
