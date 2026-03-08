@@ -309,11 +309,8 @@
                     <button id="toolAdd" class="secondary" onclick="setTool('add')">Add</button>
                     <button id="toolDelete" class="secondary" onclick="setTool('delete')">Delete</button>
                     <div class="sep"></div>
-                    <button class="secondary" onclick="autoStartFromMarker()">Auto Start</button>
-                    <button class="secondary" onclick="clearStartingPoint()">Clear Start</button>
                     <button class="secondary" onclick="clearAllWaypoints()">Clear Path</button>
                     <div class="sep"></div>
-                    <button class="secondary" onclick="validateCoords()">Validate</button>
                     <button class="secondary" onclick="testMoveToWP()">Test Move</button>
                 </div>
             </div>
@@ -353,24 +350,17 @@
             </div>
         </div>
 
-        <!-- Robot Start Position (robot mm coordinates) -->
+        <!-- Calibration Status (read-only, from POST /paths) -->
         <div class="card">
             <div class="card-hdr">
-                <span>Robot Start Position (mm)</span>
-                <button onclick="readPose()">Read Position</button>
+                <span>Calibration Status</span>
+                <button class="secondary" onclick="readPose()">Read Pose (debug)</button>
             </div>
             <div class="card-body">
-                <p style="font-size:11px;color:var(--dim);margin-bottom:8px;">Robot arm coordinates — not pixels. Read
-                    Position records where the arm is now.</p>
-                <div class="field-row">
-                    <div><label>X</label><input id="startX" type="number" value="" step="0.1" placeholder="—" /></div>
-                    <div><label>Y</label><input id="startY" type="number" value="" step="0.1" placeholder="—" /></div>
-                    <div><label>Z</label><input id="startZ" type="number" value="" step="0.1" placeholder="—" /></div>
-                    <div><label>R</label><input id="startR" type="number" value="" step="0.1" placeholder="—" /></div>
-                </div>
-                <div class="btn-row">
-                    <button class="secondary" onclick="clearRobotStart()">Clear</button>
-                </div>
+                <p style="font-size:11px;color:var(--dim);margin-bottom:8px;">Calibration is captured automatically
+                    when you click Detect. The robot arm must be at the starting position.</p>
+                <div id="calibInfo" style="font-size:12px; color:var(--dim);">Not calibrated — click Detect with robot
+                    at start position.</div>
                 <div id="poseInfo" style="margin-top:6px; font-size:12px; color:var(--dim);"></div>
             </div>
         </div>
@@ -417,19 +407,14 @@
         let currentJobId = null, pollTimer = null;
 
         // Path state
-        let detectedPath = [];       // [{x, y, z, r}, ...] in pixel coords
+        let detectedPath = [];       // [{x, y}, ...] in pixel coords
         let lastSnapshotImg = null;  // Image object of last detection snapshot
         let lastDetections = [];     // raw detection objects from last POST /paths
-        let lastPixelsPerMm = null;  // scale factor
+        let lastPixelsPerMm = null;  // scale factor (for display only)
         let lastMarkerCorners = [];  // ArUco marker corner data
 
-        // Two separate coordinate systems:
-        // 1) Robot start position — mm in robot coordinate space (from Read Position)
-        let robotStartPos = null;    // {x, y, z, r} or null
-        // 2) Canvas start marker — pixel coordinates (from ArUco marker auto-start)
-        let canvasStartPos = null;   // {x, y} or null
-        // 3) ArUco marker pixel center (before 50 mm offset) — used as calibration anchor
-        let markerPixelCenter = null; // {x, y} or null
+        // Calibration state — read-only, populated from POST /paths response
+        let calibration = null;      // {calibrated, robotStart, canvasStart, pixelsPerMm} or null
 
         // Canvas interaction
         let activeTool = 'move';     // 'move' | 'add' | 'delete'
@@ -478,12 +463,6 @@
                 const d = Math.sqrt(dx * dx + dy * dy);
                 if (d < bestDist) { bestDist = d; bestIdx = i; }
             }
-            // Also check canvas start marker (index -1)
-            if (canvasStartPos) {
-                const dx = canvasStartPos.x - cx, dy = canvasStartPos.y - cy;
-                const d = Math.sqrt(dx * dx + dy * dy);
-                if (d < bestDist) { bestDist = d; bestIdx = -1; }
-            }
             return bestDist < threshold ? bestIdx : null;
         }
 
@@ -508,7 +487,7 @@
                             if (d < bestDist) { bestDist = d; insertAt = i + 1; }
                         }
                     }
-                    detectedPath.splice(insertAt, 0, { x, y, z: workZ, r: workR });
+                    detectedPath.splice(insertAt, 0, { x, y });
                     log(`Added waypoint #${insertAt + 1} at (${x.toFixed(0)}, ${y.toFixed(0)})`);
                     redrawCanvas();
                     return;
@@ -536,10 +515,7 @@
             cv.addEventListener('mousemove', e => {
                 if (!isDragging) return;
                 const { x, y } = canvasCoords(e);
-                if (draggingIdx === -1) {
-                    // Dragging canvas start marker (pixel space only)
-                    canvasStartPos = { x, y };
-                } else if (draggingIdx >= 0 && draggingIdx < detectedPath.length) {
+                if (draggingIdx >= 0 && draggingIdx < detectedPath.length) {
                     detectedPath[draggingIdx].x = x;
                     detectedPath[draggingIdx].y = y;
                 }
@@ -574,7 +550,6 @@
             } else {
                 img.src = '';
                 img.onerror = null;
-                try { await fetch(`${api()}/streams/camera`, { method: 'DELETE' }); } catch (_) { }
                 log('Camera stream stopped');
             }
         }
@@ -589,14 +564,13 @@
             } else {
                 img.src = '';
                 img.onerror = null;
-                try { await fetch(`${api()}/streams/detection`, { method: 'DELETE' }); } catch (_) { }
                 log('Detection stream stopped');
             }
         }
 
         /* ---- Path detection ---- */
         async function detectPath() {
-            log('Detecting path…');
+            log('Detecting path (robot arm must be at start position)…');
             try {
                 const res = await fetch(`${api()}/paths`, {
                     method: 'POST',
@@ -611,18 +585,20 @@
                 lastPixelsPerMm = data.pixelsPerMm || null;
                 lastMarkerCorners = data.markerCorners || [];
 
+                // Store calibration from backend
+                calibration = data.calibration || null;
+                updateCalibrationInfo();
+
                 if (data.image_base64) {
                     const img = new Image();
                     img.onload = () => {
                         lastSnapshotImg = img;
                         buildPathFromCorners();
-                        autoStartFromMarker();
                         redrawCanvas();
                     };
                     img.src = 'data:image/jpeg;base64,' + data.image_base64;
                 } else {
                     buildPathFromCorners();
-                    autoStartFromMarker();
                     redrawCanvas();
                 }
 
@@ -631,69 +607,53 @@
             }
         }
 
+        function updateCalibrationInfo() {
+            const el = $('calibInfo');
+            if (calibration && calibration.calibrated) {
+                const rs = calibration.robotStart;
+                const cs = calibration.canvasStart;
+                const ppm = calibration.pixelsPerMm;
+                el.textContent = `✓ Calibrated — Robot start: (${rs.x.toFixed(1)}, ${rs.y.toFixed(1)}, ${rs.z.toFixed(1)}) mm` +
+                    ` | Canvas start: (${cs.x.toFixed(0)}, ${cs.y.toFixed(0)}) px` +
+                    ` | ppm: ${ppm?.toFixed(2) ?? '?'}`;
+                el.style.color = 'var(--green)';
+            } else {
+                el.textContent = 'Not calibrated — click Detect with robot at start position.';
+                el.style.color = 'var(--dim)';
+            }
+        }
+
         /* Build waypoint path from detected object corners (4 per object) */
         function buildPathFromCorners() {
-            const workZ = parseFloat($('workZ').value) || 0;
-            const workR = parseFloat($('workR').value) || 0;
             detectedPath = [];
             for (const det of lastDetections) {
                 if (det.corners && det.corners.length >= 4) {
                     for (const c of det.corners) {
-                        detectedPath.push({ x: c.x, y: c.y, z: workZ, r: workR });
+                        detectedPath.push({ x: c.x, y: c.y });
                     }
                 } else {
-                    detectedPath.push({ x: det.center_x, y: det.center_y, z: workZ, r: workR });
+                    detectedPath.push({ x: det.center_x, y: det.center_y });
                 }
             }
             log(`Built path: ${detectedPath.length} waypoints from ${lastDetections.length} object(s)`);
             updatePathInfo();
         }
 
-        /* Set canvas start marker 50 mm below the ArUco marker center (pixel space).
-         * The arm starts 50 mm below the marker so the marker stays visible during detection.
-         * The user must physically position the robot arm at this offset point,
-         * then Read Position to pair the pixel anchor with robot mm. */
-        function autoStartFromMarker() {
-            if (!lastMarkerCorners || lastMarkerCorners.length === 0) {
-                log('No ArUco markers — cannot auto-set canvas start marker');
-                return;
-            }
-            const mc = lastMarkerCorners[0].corners;
-            if (!mc || mc.length < 4) return;
-
-            let cx = 0, cy = 0;
-            for (const c of mc) { cx += c.x; cy += c.y; }
-            cx /= mc.length;
-            cy /= mc.length;
-
-            // Store raw marker pixel center
-            markerPixelCenter = { x: cx, y: cy };
-
-            // Offset 50 mm downward in image (Y+) so the arm doesn't occlude the marker
-            const offsetMm = 50;
-            const offsetPx = lastPixelsPerMm ? (offsetMm * lastPixelsPerMm) : 50;
-            const sy = cy + offsetPx;
-
-            canvasStartPos = { x: cx, y: sy };
-            log(`Canvas start marker set 50 mm below ArUco: pixel (${cx.toFixed(0)}, ${sy.toFixed(0)})`);
-            log(`  Marker center: (${cx.toFixed(0)}, ${cy.toFixed(0)})px — offset: ${offsetMm} mm = ${offsetPx.toFixed(0)} px downward`);
-            log('  → Move the robot arm to the orange diamond (50 mm below marker), then Read Position.');
-            redrawCanvas();
-        }
-
         function updatePathInfo() {
             let text = '';
-            if (canvasStartPos) text += `Start marker: (${canvasStartPos.x.toFixed(0)}, ${canvasStartPos.y.toFixed(0)})px  →  `;
-            if (robotStartPos) text += `Robot: (${robotStartPos.x.toFixed(1)}, ${robotStartPos.y.toFixed(1)})mm  |  `;
+            if (calibration?.calibrated) {
+                const cs = calibration.canvasStart;
+                const rs = calibration.robotStart;
+                text += `Start: (${cs.x.toFixed(0)}, ${cs.y.toFixed(0)})px → (${rs.x.toFixed(1)}, ${rs.y.toFixed(1)})mm  |  `;
+            }
             text += detectedPath.length
                 ? `${detectedPath.length} waypoint(s): ${detectedPath.map((w, i) => `#${i + 1}(${w.x.toFixed(0)},${w.y.toFixed(0)})`).join(' → ')}`
                 : 'No path — click Detect or use Add tool';
 
-            // Calibration status
-            const calibOk = canCalibrate();
+            const calibOk = calibration?.calibrated;
             text += calibOk
                 ? '  ✓ calibrated'
-                : '  ⚠ uncalibrated (need: canvas start + robot start + ppm)';
+                : '  ⚠ uncalibrated (run Detect with robot at start pos)';
             $('pathInfo').textContent = text;
         }
 
@@ -778,20 +738,15 @@
                 ctx.lineWidth = 1;
                 ctx.stroke();
 
-                // Label: index + robot mm if calibrated
+                // Label: index number
                 let label = `#${i + 1}`;
-                if (canCalibrate()) {
-                    const workZ = parseFloat($('workZ').value) || 0;
-                    const workR = parseFloat($('workR').value) || 0;
-                    const rw = pixelToRobot(w.x, w.y, workZ, workR);
-                    label += ` (${rw.x.toFixed(1)},${rw.y.toFixed(1)})`;
-                }
                 ctx.fillStyle = '#facc15';
                 ctx.font = 'bold 11px system-ui';
                 ctx.fillText(label, w.x + 9, w.y - 5);
             }
 
-            // Canvas start marker (orange diamond) — pixel coordinates from ArUco marker
+            // Canvas start marker (orange diamond) — from backend calibration
+            const canvasStartPos = calibration?.canvasStart;
             if (canvasStartPos) {
                 const sx = canvasStartPos.x, sy = canvasStartPos.y;
                 const sz = 10;
@@ -825,62 +780,18 @@
             updatePathInfo();
         }
 
-        /* ---- Robot Start Position (robot mm coordinates) ---- */
-        function getRobotStartPos() {
-            return robotStartPos;  // {x, y, z, r} in mm or null
-        }
-
-        /**
-         * Check whether we have all three calibration ingredients:
-         *  - canvasStartPos  (pixel anchor from ArUco auto-start)
-         *  - robotStartPos   (mm anchor from Read Position)
-         *  - lastPixelsPerMm (scale from ArUco detection)
-         */
-        function canCalibrate() {
-            return !!(canvasStartPos && robotStartPos && lastPixelsPerMm);
-        }
-
-        /**
-         * Convert canvas pixel coordinates → robot mm coordinates.
-         *
-         * Camera is mounted behind the arm:
-         *   image bottom→top (Y decreasing)  =  robot +X
-         *   image left→right (X increasing)  =  robot −Y
-         *
-         * @param {number} px  Pixel X on canvas
-         * @param {number} py  Pixel Y on canvas
-         * @param {number} workZ  Robot Z in mm
-         * @param {number} workR  Robot R in mm
-         * @returns {{x,y,z,r}}  Robot coordinates in mm
-         */
-        function pixelToRobot(px, py, workZ, workR) {
-            const dpx = px - canvasStartPos.x;  // pixel delta X (+ = right)
-            const dpy = py - canvasStartPos.y;  // pixel delta Y (+ = down)
-            const ppm = lastPixelsPerMm;
-            return {
-                x: robotStartPos.x - (dpy / ppm),   // pixel Y↑ (dpy<0) → robot +X
-                y: robotStartPos.y - (dpx / ppm),   // pixel X→ (dpx>0) → robot −Y
-                z: workZ,
-                r: workR,
-            };
-        }
+        /* ---- Robot Pose (debug only) ---- */
 
         async function readPose() {
-            log('Reading robot arm position…');
+            log('Reading robot arm position (debug)…');
             try {
                 const res = await fetch(`${api()}/robot/pose`);
                 const data = await res.json();
                 if (data.ok) {
-                    robotStartPos = { x: data.x, y: data.y, z: data.z, r: data.r };
-                    $('startX').value = data.x.toFixed(1);
-                    $('startY').value = data.y.toFixed(1);
-                    $('startZ').value = data.z.toFixed(1);
-                    $('startR').value = data.r.toFixed(1);
                     $('poseInfo').textContent = `Robot position: (${data.x.toFixed(1)}, ${data.y.toFixed(1)}, ${data.z.toFixed(1)}, ${data.r.toFixed(1)}) mm`;
                     $('poseInfo').style.color = 'var(--green)';
                     log(`Robot pose (mm): x=${data.x.toFixed(1)} y=${data.y.toFixed(1)} z=${data.z.toFixed(1)} r=${data.r.toFixed(1)}`);
                     log(`  Joints: j1=${data.j1.toFixed(1)} j2=${data.j2.toFixed(1)} j3=${data.j3.toFixed(1)} j4=${data.j4.toFixed(1)}`);
-                    // NOTE: does not redraw canvas — robot coords != pixel coords
                 } else {
                     $('poseInfo').textContent = `Error: ${data.error || 'unknown'}`;
                     $('poseInfo').style.color = 'var(--red)';
@@ -893,95 +804,28 @@
             }
         }
 
-        function clearRobotStart() {
-            robotStartPos = null;
-            $('startX').value = '';
-            $('startY').value = '';
-            $('startZ').value = '';
-            $('startR').value = '';
-            $('poseInfo').textContent = '';
-            log('Robot start position cleared');
-        }
-
-        function clearStartingPoint() {
-            canvasStartPos = null;
-            markerPixelCenter = null;
-            log('Canvas start marker cleared');
-            redrawCanvas();
-        }
-
-        /* ---- Coordinate validation ---- */
-        function validateCoords() {
-            log('=== Coordinate Validation ===');
-
-            // 1. Check calibration ingredients
-            log(`  canvasStartPos: ${canvasStartPos ? `(${canvasStartPos.x.toFixed(1)}, ${canvasStartPos.y.toFixed(1)}) px` : 'MISSING'}`);
-            log(`  robotStartPos:  ${robotStartPos ? `(${robotStartPos.x.toFixed(1)}, ${robotStartPos.y.toFixed(1)}, ${robotStartPos.z.toFixed(1)}, ${robotStartPos.r.toFixed(1)}) mm` : 'MISSING'}`);
-            log(`  pixelsPerMm:    ${lastPixelsPerMm ? lastPixelsPerMm.toFixed(4) : 'MISSING'}`);
-            log(`  markerPixelCtr: ${markerPixelCenter ? `(${markerPixelCenter.x.toFixed(1)}, ${markerPixelCenter.y.toFixed(1)}) px` : 'n/a'}`);
-
-            if (!canCalibrate()) {
-                log('  ⚠ Calibration incomplete — cannot convert coordinates.');
-                log('  Workflow: 1) Detect (ArUco → canvasStartPos + ppm)  2) Move arm to start marker  3) Read Position');
-                return;
-            }
-
-            // 2. Self-test: canvasStartPos should map back to robotStartPos
-            const workZ = parseFloat($('workZ').value) || 0;
-            const workR = parseFloat($('workR').value) || 0;
-            const selfTest = pixelToRobot(canvasStartPos.x, canvasStartPos.y, workZ, workR);
-            const dx = Math.abs(selfTest.x - robotStartPos.x);
-            const dy = Math.abs(selfTest.y - robotStartPos.y);
-            log(`  Self-test: canvasStart → robot (${selfTest.x.toFixed(2)}, ${selfTest.y.toFixed(2)}) mm` +
-                ` vs actual (${robotStartPos.x.toFixed(2)}, ${robotStartPos.y.toFixed(2)}) mm` +
-                ` Δ=(${dx.toFixed(3)}, ${dy.toFixed(3)}) ${dx < 0.01 && dy < 0.01 ? '✓ OK' : '⚠ MISMATCH'}`);
-
-            // 3. Axis orientation check
-            const testRight = pixelToRobot(canvasStartPos.x + 100, canvasStartPos.y, workZ, workR);
-            const testDown = pixelToRobot(canvasStartPos.x, canvasStartPos.y + 100, workZ, workR);
-            log(`  Axis test: 100px RIGHT → robot Δx=${(testRight.x - robotStartPos.x).toFixed(2)}, Δy=${(testRight.y - robotStartPos.y).toFixed(2)} mm  (expect Δx≈0, Δy<0)`);
-            log(`  Axis test: 100px DOWN  → robot Δx=${(testDown.x - robotStartPos.x).toFixed(2)}, Δy=${(testDown.y - robotStartPos.y).toFixed(2)} mm  (expect Δx<0, Δy≈0)`);
-
-            // 4. Convert all waypoints
-            if (!detectedPath.length) {
-                log('  No waypoints to convert.');
-                return;
-            }
-            log(`  --- ${detectedPath.length} waypoint conversions ---`);
-            for (let i = 0; i < detectedPath.length; i++) {
-                const w = detectedPath[i];
-                const rw = pixelToRobot(w.x, w.y, workZ, workR);
-                const dpx = (w.x - canvasStartPos.x).toFixed(1);
-                const dpy = (w.y - canvasStartPos.y).toFixed(1);
-                log(`  WP#${i + 1}: px(${w.x.toFixed(0)},${w.y.toFixed(0)}) Δpx(${dpx},${dpy}) → robot(${rw.x.toFixed(2)},${rw.y.toFixed(2)}) mm`);
-            }
-            log('=== End Validation ===');
-            redrawCanvas();  // refresh labels with robot coords
-        }
-
         async function testMoveToWP() {
-            if (!canCalibrate()) {
-                log('⚠ Cannot test move — calibration incomplete.');
+            if (!calibration?.calibrated) {
+                log('⚠ Cannot test move — not calibrated (run Detect first).');
                 return;
             }
             if (!detectedPath.length) {
                 log('⚠ No waypoints — add or detect waypoints first.');
                 return;
             }
-            const workZ = parseFloat($('workZ').value) || 0;
-            const workR = parseFloat($('workR').value) || 0;
-            const rw = pixelToRobot(detectedPath[0].x, detectedPath[0].y, workZ, workR);
-            log(`Test Move: sending robot to WP#1 → (${rw.x.toFixed(2)}, ${rw.y.toFixed(2)}, ${workZ}, ${workR}) mm`);
-            log(`  (pixel source: ${detectedPath[0].x.toFixed(0)}, ${detectedPath[0].y.toFixed(0)})`);
+            // Send just the first pixel waypoint as a 1-waypoint job-like move for testing.
+            // The backend will convert it. For a quick test, use robot/move with the backend-known start.
+            const rs = calibration.robotStart;
+            log(`Test Move: sending robot to start position → (${rs.x.toFixed(2)}, ${rs.y.toFixed(2)}, ${rs.z.toFixed(2)}) mm`);
             try {
                 const res = await fetch(`${api()}/robot/move`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ x: rw.x, y: rw.y, z: workZ, r: workR }),
+                    body: JSON.stringify({ x: rs.x, y: rs.y, z: rs.z, r: rs.r }),
                 });
                 const data = await res.json();
                 if (data.ok) {
-                    log('  ✓ Move command sent. Check physical robot position vs expected.');
+                    log('  ✓ Move command sent. Check physical robot position.');
                 } else {
                     log(`  ✗ Move failed: ${data.error}`);
                 }
@@ -996,33 +840,21 @@
                 log('No path — run detection first or add waypoints manually.');
                 return;
             }
-            if (!canCalibrate()) {
-                const missing = [];
-                if (!canvasStartPos) missing.push('canvas start marker (run Detect with ArUco)');
-                if (!robotStartPos) missing.push('robot start position (Read Position)');
-                if (!lastPixelsPerMm) missing.push('pixelsPerMm (run Detect with ArUco)');
-                log('⚠ Cannot launch — calibration incomplete. Missing: ' + missing.join(', '));
+            if (!calibration?.calibrated) {
+                log('⚠ Cannot launch — not calibrated. Run Detect with robot arm at start position.');
                 return;
             }
 
-            const rsp = getRobotStartPos();
             pendingDryRun = dryRun;
 
-            // Preview first & last converted waypoint for sanity check
-            const workZ = parseFloat($('workZ').value) || 0;
-            const workR = parseFloat($('workR').value) || 0;
-            const first = pixelToRobot(detectedPath[0].x, detectedPath[0].y, workZ, workR);
-            const last = pixelToRobot(detectedPath[detectedPath.length - 1].x, detectedPath[detectedPath.length - 1].y, workZ, workR);
-
+            const rs = calibration.robotStart;
             const banner = $('confirmBanner');
             banner.style.display = 'block';
             $('confirmBtn').textContent = dryRun ? 'Confirm & Dry Run' : 'Confirm & Start';
             $('confirmDetail').textContent =
-                `${detectedPath.length} waypoints (pixel → robot mm)` +
-                ` | Robot start: (${rsp.x.toFixed(1)}, ${rsp.y.toFixed(1)}, ${rsp.z.toFixed(1)}) mm` +
-                ` | First WP: (${first.x.toFixed(1)}, ${first.y.toFixed(1)}) mm` +
-                ` | Last WP: (${last.x.toFixed(1)}, ${last.y.toFixed(1)}) mm` +
-                ` | ppm=${lastPixelsPerMm.toFixed(2)}` +
+                `${detectedPath.length} pixel waypoints (backend converts → robot mm)` +
+                ` | Robot start: (${rs.x.toFixed(1)}, ${rs.y.toFixed(1)}, ${rs.z.toFixed(1)}) mm` +
+                ` | ppm=${calibration.pixelsPerMm?.toFixed(2) ?? '?'}` +
                 ` | ${dryRun ? 'DRY RUN' : 'REAL MOVEMENT'}`;
         }
 
@@ -1040,22 +872,10 @@
             const workZ = parseFloat($('workZ').value) || 0;
             const workR = parseFloat($('workR').value) || 0;
 
-            // Convert pixel waypoints → robot mm using calibration
-            const path = detectedPath.map((w, i) => {
-                const rw = pixelToRobot(w.x, w.y, workZ, workR);
-                if (i < 3 || i === detectedPath.length - 1) {
-                    log(`  WP#${i + 1}: pixel(${w.x.toFixed(0)},${w.y.toFixed(0)}) → robot(${rw.x.toFixed(1)},${rw.y.toFixed(1)}) mm`);
-                }
-                return rw;
-            });
+            // Send raw pixel waypoints — backend converts to robot mm
+            const path = detectedPath.map(w => ({ x: w.x, y: w.y }));
 
-            const body = { path, dryRun: dryRun };
-            const rsp = getRobotStartPos();
-            if (rsp) {
-                body.startingPoint = rsp;
-                log(`Robot start (mm): (${rsp.x.toFixed(1)}, ${rsp.y.toFixed(1)}, ${rsp.z.toFixed(1)}, ${rsp.r.toFixed(1)})`);
-            }
-            log(`Calibration: canvasStart=(${canvasStartPos.x.toFixed(0)},${canvasStartPos.y.toFixed(0)})px  robotStart=(${rsp.x.toFixed(1)},${rsp.y.toFixed(1)})mm  ppm=${lastPixelsPerMm.toFixed(2)}`);
+            const body = { path, workZ, workR, dryRun };
 
             // Capture canvas snapshot as base64
             try {
@@ -1064,13 +884,18 @@
                 body.imageBase64 = dataUrl.split(',')[1];
             } catch (_) { }
 
-            log(`Starting ${dryRun ? 'DRY RUN' : 'REAL'} job with ${path.length} waypoints${rsp ? ' + robot start' : ''}…`);
+            log(`Starting ${dryRun ? 'DRY RUN' : 'REAL'} job with ${path.length} pixel waypoints…`);
             try {
                 const res = await fetch(`${api()}/jobs`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
                 });
+                if (!res.ok) {
+                    const err = await res.json();
+                    log(`Job creation error: ${err.detail || JSON.stringify(err)}`);
+                    return;
+                }
                 const job = await res.json();
                 currentJobId = job.id;
                 log(`Job created: ${job.id}  state=${job.status?.state}  waypoints=${job.path?.length}`);

@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from app.dependencies import get_orchestrator
 from app.domain.models import Job as DomainJob, Waypoint
 from app.schemas import (
+    CalibrationResponse,
     ComponentHealth,
     CornerSchema,
     Health,
@@ -18,6 +19,7 @@ from app.schemas import (
     PathItem,
     PathRequest,
     PathResponse,
+    PixelPointSchema,
     Profile,
     RobotMoveRequest,
     RobotMoveResponse,
@@ -86,14 +88,26 @@ def create_job(
     payload: JobCreateRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> Job:
-    waypoints = [Waypoint(x=w.x, y=w.y, z=w.z, r=w.r) for w in payload.path]
+    if not svc.is_calibrated:
+        raise HTTPException(
+            status_code=409,
+            detail="Not calibrated — call POST /paths first "
+            "(with robot arm at starting position)",
+        )
 
-    # Prepend starting point so the robot moves there first
-    starting_wp: Waypoint | None = None
-    if payload.starting_point:
-        sp = payload.starting_point
-        starting_wp = Waypoint(x=sp.x, y=sp.y, z=sp.z, r=sp.r)
-        waypoints.insert(0, starting_wp)
+    # Convert pixel waypoints → robot mm using stored calibration
+    waypoints = [
+        svc.pixel_to_robot(p.x, p.y, payload.work_z, payload.work_r)
+        for p in payload.path
+    ]
+
+    # Prepend the robot starting position (captured during POST /paths)
+    starting_wp = svc.calibration_robot_start
+    if starting_wp:
+        waypoints.insert(0, Waypoint(
+            x=starting_wp.x, y=starting_wp.y,
+            z=payload.work_z, r=payload.work_r,
+        ))
 
     # Decode optional snapshot image
     image_bytes: bytes | None = None
@@ -188,23 +202,6 @@ async def camera_feed(
     )
 
 
-@router.post("/streams/camera", status_code=status.HTTP_201_CREATED)
-def start_camera_stream(
-    svc: OrchestratorService = Depends(get_orchestrator),
-) -> dict:
-    """Start the camera stream (no-op — stream is started on first GET to /feed)."""
-    return {"streaming": True}
-
-
-@router.delete("/streams/camera", status_code=status.HTTP_204_NO_CONTENT)
-def stop_camera_stream(
-    svc: OrchestratorService = Depends(get_orchestrator),
-) -> Response:
-    """Stop the camera stream."""
-    svc.camera_vision.stop_camera_stream()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
 @router.get("/streams/detection/feed")
 async def detection_feed(
     svc: OrchestratorService = Depends(get_orchestrator),
@@ -216,29 +213,25 @@ async def detection_feed(
     )
 
 
-@router.post("/streams/detection", status_code=status.HTTP_201_CREATED)
-def start_detection_stream(
-    svc: OrchestratorService = Depends(get_orchestrator),
-) -> dict:
-    """Start the detection stream (no-op — stream is started on first GET to /feed)."""
-    return {"streaming": True}
-
-
-@router.delete("/streams/detection", status_code=status.HTTP_204_NO_CONTENT)
-def stop_detection_stream(
-    svc: OrchestratorService = Depends(get_orchestrator),
-) -> Response:
-    """Stop the detection stream."""
-    svc.camera_vision.stop_detection_stream()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
 @router.post("/paths", response_model=PathResponse, status_code=status.HTTP_201_CREATED)
 def create_path(
     payload: PathRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> PathResponse:
     result = svc.detect_path()
+
+    # Build calibration summary for the frontend
+    cal: CalibrationResponse | None = None
+    if svc.is_calibrated:
+        rs = svc.calibration_robot_start
+        cs = svc.calibration_canvas_start
+        cal = CalibrationResponse(
+            calibrated=True,
+            robot_start=WaypointSchema(x=rs.x, y=rs.y, z=rs.z, r=rs.r) if rs else None,
+            canvas_start=PixelPointSchema(x=cs[0], y=cs[1]) if cs else None,
+            pixels_per_mm=svc.calibration_pixels_per_mm,
+        )
+
     return PathResponse(
         ok=result.ok,
         detections=[
@@ -261,6 +254,7 @@ def create_path(
             )
             for mc in result.marker_corners
         ],
+        calibration=cal,
         error=result.error,
         options=payload.options,
     )

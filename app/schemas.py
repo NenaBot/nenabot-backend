@@ -110,6 +110,7 @@ class PathResponse(BaseModel):
         default_factory=list,
         alias="markerCorners",
     )
+    calibration: CalibrationResponse | None = None
     error: str | None = None
     options: dict[str, Any] | None = None
 
@@ -147,25 +148,43 @@ class RobotMoveResponse(BaseModel):
     error: str | None = None
 
 
+# ---- Pixel point (canvas coordinates) ----
+
+
+class PixelPointSchema(BaseModel):
+    """A point in canvas/pixel coordinates."""
+
+    x: float
+    y: float
+
+
+# ---- Calibration ----
+
+
+class CalibrationResponse(BaseModel):
+    """Returned by POST /paths to confirm calibration was captured."""
+
+    calibrated: bool = False
+    robot_start: WaypointSchema | None = Field(None, alias="robotStart")
+    canvas_start: PixelPointSchema | None = Field(None, alias="canvasStart")
+    pixels_per_mm: float | None = Field(None, alias="pixelsPerMm")
+
+    model_config = {"populate_by_name": True}
+
+
 # ---- Job creation request ----
 
 
 class JobCreateRequest(BaseModel):
-    path: list[WaypointSchema] = Field(default_factory=list)
+    path: list[PixelPointSchema] = Field(default_factory=list)
+    work_z: float = Field(0.0, alias="workZ")
+    work_r: float = Field(0.0, alias="workR")
     dry_run: bool = Field(False, alias="dryRun")
     options: dict[str, Any] | None = None
     image_base64: str | None = Field(
         None,
         alias="imageBase64",
-        description=("Base64-encoded JPEG snapshot to store with the job"),
-    )
-    starting_point: WaypointSchema | None = Field(
-        None,
-        alias="startingPoint",
-        description=(
-            "Robot starting position — prepended to path "
-            "so the arm moves there first"
-        ),
+        description="Base64-encoded JPEG snapshot to store with the job",
     )
 
     model_config = {"populate_by_name": True}
