@@ -175,9 +175,17 @@ def load():
             raise FileNotFoundError("libDobotDll.dylib not found in lib/dobot/.")
         return CDLL(dylib_path, RTLD_GLOBAL)
     if platform.system() == "Linux":
-        so_path = os.path.join(base_dir, "libDobotDll.so")
+        machine = platform.machine()
+        arch_map = {"x86_64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}
+        arch = arch_map.get(machine, machine)
+        so_path = os.path.join(base_dir, f"libDobotDll_{arch}.so")
         if not os.path.exists(so_path):
-            raise FileNotFoundError("libDobotDll.so not found in lib/dobot/.")
+            # Fall back to generic name for backwards compatibility
+            so_path = os.path.join(base_dir, "libDobotDll.so")
+        if not os.path.exists(so_path):
+            raise FileNotFoundError(
+                f"libDobotDll_{arch}.so (or libDobotDll.so) not found in lib/dobot/."
+            )
         return CDLL(so_path, RTLD_GLOBAL)
     raise RuntimeError(f"Unsupported platform: {platform.system()}")
 
