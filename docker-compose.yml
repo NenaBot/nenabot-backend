@@ -1,0 +1,22 @@
+# Base compose — works on macOS, Windows, Linux (without hardware).
+#
+# For Linux hosts with robot + camera connected, add the hardware override:
+#   docker compose -f docker-compose.yml -f docker-compose.hardware.yml up
+#
+# On a Raspberry Pi the same override works (ARM64 .so is included).
+
+services:
+  nenabot:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - nenabot-data:/app/data
+    environment:
+      - DB_PATH=data/nenabot.db
+      - DMS_BASE_URL=http://localhost:8080
+      - DMS_WS_BASE_URL=ws://localhost:8080
+    restart: unless-stopped
+
+volumes:
+  nenabot-data:

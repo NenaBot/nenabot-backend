@@ -1,0 +1,14 @@
+# Hardware override — Linux hosts only (x86_64, ARM64 / Raspberry Pi).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.hardware.yml up
+#
+# Adjust device paths to match your host:
+#   Dobot Magician may appear as /dev/ttyUSB0 or /dev/ttyACM0
+#   Camera is usually /dev/video0; add /dev/video1 etc. for extra cameras
+
+services:
+  nenabot:
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/video0:/dev/video0
