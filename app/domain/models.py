@@ -17,6 +17,8 @@ class Waypoint:
 class Measurement:
     waypoint_index: int
     waypoint: Waypoint
+    pixel_x: float | None = None
+    pixel_y: float | None = None
     scan_result: dict[str, Any] | None = None
     simulated: bool = False
     timestamp: str | None = None

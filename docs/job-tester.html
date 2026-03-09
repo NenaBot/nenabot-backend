@@ -373,8 +373,10 @@
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>X</th>
-                            <th>Y</th>
+                            <th>Pixel X</th>
+                            <th>Pixel Y</th>
+                            <th>Robot X</th>
+                            <th>Robot Y</th>
                             <th>Z</th>
                             <th>R</th>
                             <th>Simulated</th>
@@ -409,6 +411,7 @@
         // Path state
         let detectedPath = [];       // [{x, y}, ...] in pixel coords
         let lastSnapshotImg = null;  // Image object of last detection snapshot
+        let lastSnapshotBase64 = null; // raw base64 JPEG from POST /paths (clean, no overlays)
         let lastDetections = [];     // raw detection objects from last POST /paths
         let lastPixelsPerMm = null;  // scale factor (for display only)
         let lastMarkerCorners = [];  // ArUco marker corner data
@@ -590,6 +593,7 @@
                 updateCalibrationInfo();
 
                 if (data.image_base64) {
+                    lastSnapshotBase64 = data.image_base64;
                     const img = new Image();
                     img.onload = () => {
                         lastSnapshotImg = img;
@@ -877,12 +881,10 @@
 
             const body = { path, workZ, workR, dryRun };
 
-            // Capture canvas snapshot as base64
-            try {
-                const cv = $('snapCanvas');
-                const dataUrl = cv.toDataURL('image/jpeg', 0.85);
-                body.imageBase64 = dataUrl.split(',')[1];
-            } catch (_) { }
+            // Send the clean camera snapshot (from POST /paths) as the base image
+            if (lastSnapshotBase64) {
+                body.imageBase64 = lastSnapshotBase64;
+            }
 
             log(`Starting ${dryRun ? 'DRY RUN' : 'REAL'} job with ${path.length} pixel waypoints…`);
             try {
@@ -954,8 +956,11 @@
             for (const m of (job.measurements || [])) {
                 const w = m.waypoint || {};
                 const scanStr = m.scanResult ? JSON.stringify(m.scanResult).slice(0, 80) : '—';
+                const px = m.pixelX != null ? m.pixelX.toFixed(0) : '—';
+                const py = m.pixelY != null ? m.pixelY.toFixed(0) : '—';
                 tbody.innerHTML += `<tr>
       <td>${m.waypointIndex}</td>
+      <td>${px}</td><td>${py}</td>
       <td>${w.x?.toFixed(1)}</td><td>${w.y?.toFixed(1)}</td>
       <td>${w.z?.toFixed(1)}</td><td>${w.r?.toFixed(1)}</td>
       <td>${m.simulated ? 'Yes' : 'No'}</td>

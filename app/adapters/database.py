@@ -99,6 +99,8 @@ class Database:
                 y               REAL NOT NULL,
                 z               REAL NOT NULL DEFAULT 0,
                 r               REAL NOT NULL DEFAULT 0,
+                pixel_x         REAL,
+                pixel_y         REAL,
                 scan_result     TEXT,
                 simulated       INTEGER NOT NULL DEFAULT 0,
                 timestamp       TEXT
@@ -109,8 +111,30 @@ class Database:
                 job_id        TEXT NOT NULL UNIQUE
                               REFERENCES jobs(id) ON DELETE CASCADE,
                 image         BLOB NOT NULL,
+                base_image    BLOB,
                 content_type  TEXT NOT NULL DEFAULT 'image/jpeg'
             );
             """
         )
         self.commit()
+
+        # Migrate existing databases: add pixel_x/pixel_y if missing
+        try:
+            self.conn.execute(
+                "ALTER TABLE measurements ADD COLUMN pixel_x REAL"
+            )
+            self.conn.execute(
+                "ALTER TABLE measurements ADD COLUMN pixel_y REAL"
+            )
+            self.commit()
+        except sqlite3.OperationalError:
+            pass  # columns already exist
+
+        # Migrate existing databases: add base_image column if missing
+        try:
+            self.conn.execute(
+                "ALTER TABLE job_images ADD COLUMN base_image BLOB"
+            )
+            self.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists

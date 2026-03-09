@@ -101,6 +101,14 @@ def create_job(
         for p in payload.path
     ]
 
+    # Build pixel path for overlay rendering:
+    # Index 0 = canvas start (starting position), followed by each measurement point
+    canvas_start = svc.calibration_canvas_start
+    pixel_path: list[tuple[float, float]] = []
+    if canvas_start:
+        pixel_path.append(canvas_start)
+    pixel_path.extend((p.x, p.y) for p in payload.path)
+
     # Prepend the robot starting position (captured during POST /paths)
     starting_wp = svc.calibration_robot_start
     if starting_wp:
@@ -123,6 +131,8 @@ def create_job(
         options=payload.options,
         image_bytes=image_bytes,
         starting_point=starting_wp,
+        canvas_start=canvas_start,
+        pixel_path=pixel_path,
     )
     svc.run_job(job.id)
     return _to_job(job)
@@ -276,6 +286,8 @@ def _to_job(job: DomainJob) -> Job:
                     z=m.waypoint.z,
                     r=m.waypoint.r,
                 ),
+                pixel_x=m.pixel_x,
+                pixel_y=m.pixel_y,
                 scan_result=m.scan_result,
                 simulated=m.simulated,
                 timestamp=m.timestamp,
