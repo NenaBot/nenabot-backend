@@ -611,3 +611,30 @@ class OrchestratorService:
     @property
     def camera_vision(self) -> CameraVisionAdapter:
         return self._camera_vision
+
+    def latest_result(self) -> Optional[ResultSummary]:
+        return self._storage.latest_result()
+    
+
+    # WEBSOCKET SERVICES
+    async def initialize_dms(self) -> None:
+        """Initialize async WebSocket handlers, etc"""
+        await self._dms.initialize_websocket()
+        self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
+        self._dms.on_event("message.error", self._handle_error) 
+    
+    async def _close_dms(self) -> None:
+        """Clean up DMS connection and handlers"""
+        await self._dms.disconnect_websocket()
+        self._dms.off_event("scan.resultsProcessed", self._handle_scan_results_processed)
+        self._dms.off_event("message.error", self._handle_error) 
+    
+    async def _handle_scan_results_processed(self, data: dict) -> None:
+        """The results of the previously finished scan have been 
+        processed to the device storage."""
+        logger.info(f"Scan results have been processed: {data.get('body')}")
+
+    async def _handle_error(self, data: dict) -> None:
+        """message.error": An error or warning message. Contains 
+        unique error code."""
+        logger.warning(f"An error occurred: {data.get('code')}")
