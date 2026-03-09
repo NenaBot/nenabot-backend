@@ -17,6 +17,8 @@ class WaypointSchema(BaseModel):
 class MeasurementSchema(BaseModel):
     waypoint_index: int = Field(alias="waypointIndex")
     waypoint: WaypointSchema
+    pixel_x: float | None = Field(None, alias="pixelX")
+    pixel_y: float | None = Field(None, alias="pixelY")
     scan_result: dict[str, Any] | None = Field(None, alias="scanResult")
     simulated: bool = False
     timestamp: str | None = None

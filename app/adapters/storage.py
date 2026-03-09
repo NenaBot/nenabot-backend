@@ -100,8 +100,9 @@ class StorageAdapter:
     def save_measurement(self, job_id: str, m: Measurement) -> None:
         self._db.execute(
             """INSERT INTO measurements
-               (job_id, waypoint_index, x, y, z, r, scan_result, simulated, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (job_id, waypoint_index, x, y, z, r, pixel_x, pixel_y,
+                scan_result, simulated, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job_id,
                 m.waypoint_index,
@@ -109,6 +110,8 @@ class StorageAdapter:
                 m.waypoint.y,
                 m.waypoint.z,
                 m.waypoint.r,
+                m.pixel_x,
+                m.pixel_y,
                 json.dumps(m.scan_result) if m.scan_result else None,
                 int(m.simulated),
                 m.timestamp,
@@ -125,6 +128,8 @@ class StorageAdapter:
             Measurement(
                 waypoint_index=r["waypoint_index"],
                 waypoint=Waypoint(x=r["x"], y=r["y"], z=r["z"], r=r["r"]),
+                pixel_x=r["pixel_x"],
+                pixel_y=r["pixel_y"],
                 scan_result=json.loads(r["scan_result"]) if r["scan_result"] else None,
                 simulated=bool(r["simulated"]),
                 timestamp=r["timestamp"],
@@ -155,6 +160,27 @@ class StorageAdapter:
         if not row:
             return None
         return row["image"]
+
+    def save_job_base_image(
+        self,
+        job_id: str,
+        image_bytes: bytes,
+    ) -> None:
+        """Store the original (clean) snapshot before any overlay drawing."""
+        self._db.execute(
+            """UPDATE job_images SET base_image = ? WHERE job_id = ?""",
+            (image_bytes, job_id),
+        )
+        self._db.commit()
+
+    def get_job_base_image(self, job_id: str) -> bytes | None:
+        row = self._db.fetchone(
+            "SELECT base_image FROM job_images WHERE job_id = ?",
+            (job_id,),
+        )
+        if not row:
+            return None
+        return row["base_image"]
 
     # ---- internal ----
 

@@ -496,8 +496,12 @@ class CameraVisionAdapter:
         # --- measurement points (green numbered circles) ---
         if measurements:
             for m in measurements:
-                px = int(m.waypoint.x)
-                py = int(m.waypoint.y)
+                # Use pixel coordinates if available, skip if missing
+                if m.pixel_x is not None and m.pixel_y is not None:
+                    px = int(m.pixel_x)
+                    py = int(m.pixel_y)
+                else:
+                    continue  # no pixel coords → can't place on image
                 color = (0, 220, 100)  # green
                 cv2.circle(frame, (px, py), 10, color, -1)
                 cv2.circle(frame, (px, py), 10, (255, 255, 255), 1)

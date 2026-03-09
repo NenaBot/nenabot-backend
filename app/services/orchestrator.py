@@ -43,6 +43,9 @@ class OrchestratorService:
         self._cal_canvas_start: tuple[float, float] | None = None
         self._cal_pixels_per_mm: float | None = None
 
+        # Per-job pixel path for overlay rendering (job_id → pixel coords)
+        self._pixel_paths: dict[str, list[tuple[float, float]]] = {}
+
     # ---- Job CRUD (DB-backed) ----
 
     def create_job(
@@ -53,18 +56,26 @@ class OrchestratorService:
         image_bytes: bytes | None = None,
         detections: list | None = None,
         starting_point: Waypoint | None = None,
+        canvas_start: tuple[float, float] | None = None,
+        pixel_path: list[tuple[float, float]] | None = None,
     ) -> Job:
         job_id = str(uuid.uuid4())
         job = Job(id=job_id, options=options, path=path or [], dry_run=dry_run)
         self._storage.save_job(job)
 
+        # Store the pixel path for overlay rendering during execution
+        self._pixel_paths[job_id] = pixel_path or []
+
         # Store initial overlay image (detection snapshot with boxes drawn)
         if image_bytes:
-            sp_tuple = (starting_point.x, starting_point.y) if starting_point else None
+            sp_tuple = canvas_start  # already in pixel coordinates
             overlay = CameraVisionAdapter.render_overlay(
                 image_bytes, detections or [], [], starting_point=sp_tuple
             )
             self._storage.save_job_image(job_id, overlay)
+
+            # Save the clean base image so we can re-render overlays later
+            self._storage.save_job_base_image(job_id, image_bytes)
 
         return job
 
@@ -158,6 +169,12 @@ class OrchestratorService:
 
                 scan_result: dict | None = None
 
+                # Look up pixel coordinates for this waypoint
+                pp = self._pixel_paths.get(job.id, [])
+                pixel_coords: tuple[float, float] | None = None
+                if i < len(pp):
+                    pixel_coords = pp[i]
+
                 if not job.dry_run:
                     # Move robot to waypoint
                     move_res = self._robot.move(wp.x, wp.y, wp.z, wp.r)
@@ -214,6 +231,8 @@ class OrchestratorService:
                 measurement = Measurement(
                     waypoint_index=i,
                     waypoint=wp,
+                    pixel_x=pixel_coords[0] if pixel_coords else None,
+                    pixel_y=pixel_coords[1] if pixel_coords else None,
                     scan_result=scan_result,
                     simulated=job.dry_run,
                     timestamp=datetime.now(timezone.utc).isoformat(),
@@ -292,6 +311,7 @@ class OrchestratorService:
         finally:
             self._running_job_id = None
             self._stop_requested = False
+            self._pixel_paths.pop(job.id, None)
             job.updated_at = datetime.now(timezone.utc)
             self._storage.update_job_state(
                 job.id, job.state, job.last_point_processed, job.error
@@ -300,13 +320,17 @@ class OrchestratorService:
     def _update_overlay(self, job: Job) -> None:
         """Re-render the job overlay image with current measurements."""
         try:
-            existing = self._storage.get_job_image(job.id)
-            if not existing:
+            base = self._storage.get_job_base_image(job.id)
+            if not base:
                 return
-            # We need the original snapshot, but we only have the previously
-            # rendered overlay.  For simplicity we just re-render from it.
-            # The detection boxes are already burned in from create_job.
-            overlay = CameraVisionAdapter.render_overlay(existing, [], job.measurements)
+            # Determine starting-point pixel coords for the overlay
+            pp = self._pixel_paths.get(job.id, [])
+            sp_tuple: tuple[float, float] | None = None
+            if pp:
+                sp_tuple = pp[0]  # first entry is the starting position
+            overlay = CameraVisionAdapter.render_overlay(
+                base, [], job.measurements, starting_point=sp_tuple
+            )
             self._storage.save_job_image(job.id, overlay)
         except Exception:
             logger.debug("Overlay update failed for job %s", job.id, exc_info=True)
