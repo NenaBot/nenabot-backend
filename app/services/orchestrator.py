@@ -100,37 +100,26 @@ class OrchestratorService:
     def latest_result(self) -> Optional[ResultSummary]:
         return self._storage.latest_result()
     
+
+    # WEBSOCKET SERVICES
     async def initialize_dms(self) -> None:
         """Initialize async WebSocket handlers, etc"""
         await self._dms.initialize_websocket()
-        self._dms.on_event("scan.finished", self._handle_scan_finished)
+        self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
         self._dms.on_event("message.error", self._handle_error) 
     
     async def _close_dms(self) -> None:
         """Clean up DMS connection and handlers"""
         await self._dms.disconnect_websocket()
-        self._dms.off_event("scan.finished", self._handle_scan_finished)
+        self._dms.off_event("scan.resultsProcessed", self._handle_scan_results_processed)
         self._dms.off_event("message.error", self._handle_error) 
-
-    async def _handle_scan_finished(self, data: dict) -> None:
-        """scan.finished": A scan has been finished successfully. 
-        Results are still being processed."""
-        logger.info(f"Scan finished, message body received: {data.get('body')}")
+    
+    async def _handle_scan_results_processed(self, data: dict) -> None:
+        """The results of the previously finished scan have been 
+        processed to the device storage."""
+        logger.info(f"Scan results have been processed: {data.get('body')}")
 
     async def _handle_error(self, data: dict) -> None:
         """message.error": An error or warning message. Contains 
         unique error code."""
         logger.warning(f"An error occurred: {data.get('code')}")
-
-"""
-    - "scan.stopped": A scan has been stopped without finishing. No result data will be saved.
-    - "scan.finished": A scan has been finished successfully. Results are still being processed.
-    - "scan.resultsProcessed": The results of the finished scan have been processed to device storage.
-    - "scan.progress": The progress of an ongoing scan (0-100 percentage).
-    - "device.standbyButtonPressed": Standby button at front panel pressed. Shows "power off?" dialog.
-    - "device.shutdown": Device is powering off. Device APIs will not be usable shortly after.
-    - "message.error": An error or warning message. Contains unique error code.
-    - "message.limitError": User set or safety limit has been crossed.
-    - "backup.started": Backup process started. Scanning unavailable during this.
-    - "backup.finished": Backup process finished successfully. 
-"""
