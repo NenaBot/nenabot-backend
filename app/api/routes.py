@@ -112,10 +112,15 @@ def create_job(
     # Prepend the robot starting position (captured during POST /paths)
     starting_wp = svc.calibration_robot_start
     if starting_wp:
-        waypoints.insert(0, Waypoint(
-            x=starting_wp.x, y=starting_wp.y,
-            z=payload.work_z, r=payload.work_r,
-        ))
+        waypoints.insert(
+            0,
+            Waypoint(
+                x=starting_wp.x,
+                y=starting_wp.y,
+                z=payload.work_z,
+                r=payload.work_r,
+            ),
+        )
 
     # Decode optional snapshot image
     image_bytes: bytes | None = None

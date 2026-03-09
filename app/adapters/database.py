@@ -120,21 +120,15 @@ class Database:
 
         # Migrate existing databases: add pixel_x/pixel_y if missing
         try:
-            self.conn.execute(
-                "ALTER TABLE measurements ADD COLUMN pixel_x REAL"
-            )
-            self.conn.execute(
-                "ALTER TABLE measurements ADD COLUMN pixel_y REAL"
-            )
+            self.conn.execute("ALTER TABLE measurements ADD COLUMN pixel_x REAL")
+            self.conn.execute("ALTER TABLE measurements ADD COLUMN pixel_y REAL")
             self.commit()
         except sqlite3.OperationalError:
             pass  # columns already exist
 
         # Migrate existing databases: add base_image column if missing
         try:
-            self.conn.execute(
-                "ALTER TABLE job_images ADD COLUMN base_image BLOB"
-            )
+            self.conn.execute("ALTER TABLE job_images ADD COLUMN base_image BLOB")
             self.commit()
         except sqlite3.OperationalError:
             pass  # column already exists
