@@ -60,7 +60,9 @@ def test_jobs_lifecycle(client: TestClient) -> None:
     # Pixel coords — backend converts to robot mm using calibration
     # Calibration: robot_start=(100,200), canvas_start=(640,400), ppm=2
     path = [{"x": 650.0, "y": 390.0}, {"x": 660.0, "y": 380.0}]
-    response = client.post("/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0})
+    response = client.post(
+        "/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+    )
     assert response.status_code == 201
     job = response.json()
     job_id = job["id"]
@@ -102,7 +104,9 @@ def test_dry_run_job_measurements(client: TestClient) -> None:
         {"x": 660, "y": 400},  # 20px right → robot y decreases by 10mm
         {"x": 640, "y": 380},  # 20px up → robot x increases by 10mm
     ]
-    res = client.post("/jobs", json={"path": path, "dryRun": True, "workZ": 5, "workR": 0})
+    res = client.post(
+        "/jobs", json={"path": path, "dryRun": True, "workZ": 5, "workR": 0}
+    )
     assert res.status_code == 201
     job_id = res.json()["id"]
 
@@ -125,7 +129,9 @@ def test_stop_job(client: TestClient) -> None:
     """Stopping a running job should set state to stopped."""
     # Use many pixel waypoints so the job is still running when we stop it
     path = [{"x": float(i), "y": float(i)} for i in range(50)]
-    res = client.post("/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0})
+    res = client.post(
+        "/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+    )
     job_id = res.json()["id"]
     time.sleep(0.2)  # let it process a few
 
@@ -165,7 +171,9 @@ def test_profiles_and_paths(client: TestClient) -> None:
 def test_job_image_endpoint(client: TestClient) -> None:
     """GET /jobs/{id}/image returns 404 when no image is stored."""
     path = [{"x": 1, "y": 2}]
-    res = client.post("/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0})
+    res = client.post(
+        "/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+    )
     job_id = res.json()["id"]
 
     # Image endpoint should return 404 if no image was attached
@@ -176,7 +184,9 @@ def test_job_image_endpoint(client: TestClient) -> None:
 def test_job_persists_across_reads(client: TestClient) -> None:
     """Jobs should survive re-reads from DB after completion."""
     path = [{"x": 650, "y": 390}, {"x": 660, "y": 380}]
-    res = client.post("/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0})
+    res = client.post(
+        "/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+    )
     job_id = res.json()["id"]
 
     for _ in range(30):

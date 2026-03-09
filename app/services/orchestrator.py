@@ -416,11 +416,13 @@ class OrchestratorService:
 
     @property
     def is_calibrated(self) -> bool:
-        return all([
-            self._cal_robot_start is not None,
-            self._cal_canvas_start is not None,
-            self._cal_pixels_per_mm is not None,
-        ])
+        return all(
+            [
+                self._cal_robot_start is not None,
+                self._cal_canvas_start is not None,
+                self._cal_pixels_per_mm is not None,
+            ]
+        )
 
     @property
     def calibration_robot_start(self) -> Waypoint | None:
@@ -485,12 +487,13 @@ class OrchestratorService:
         # --- Calibration: capture robot pose + canvas start ----
         pose = self._robot.get_pose()
         if pose.ok:
-            self._cal_robot_start = Waypoint(
-                x=pose.x, y=pose.y, z=pose.z, r=pose.r
-            )
+            self._cal_robot_start = Waypoint(x=pose.x, y=pose.y, z=pose.z, r=pose.r)
             logger.info(
                 "Calibration: robot start → (%.1f, %.1f, %.1f, %.1f)",
-                pose.x, pose.y, pose.z, pose.r,
+                pose.x,
+                pose.y,
+                pose.z,
+                pose.r,
             )
         else:
             logger.warning("Calibration: could not read robot pose — %s", pose.error)
