@@ -621,18 +621,22 @@ class OrchestratorService:
         """Initialize async WebSocket handlers, etc"""
         await self._dms.initialize_websocket()
         self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
-        self._dms.on_event("message.error", self._handle_error) 
-    
+        self._dms.on_event("scan.stopped", self._handle_scan_stopped)   
+         
     async def _close_dms(self) -> None:
         """Clean up DMS connection and handlers"""
         await self._dms.disconnect_websocket()
         self._dms.off_event("scan.resultsProcessed", self._handle_scan_results_processed)
-        self._dms.off_event("message.error", self._handle_error) 
-    
+        self._dms.off_event("scan.stopped", self._handle_scan_stopped)    
+
     async def _handle_scan_results_processed(self, data: dict) -> None:
         """The results of the previously finished scan have been 
         processed to the device storage."""
         logger.info(f"Scan results have been processed: {data.get('body')}")
+
+    async def _handle_scan_stopped(self, data: dict) -> None:
+        """The scan has been stopped by the user or due to an error."""
+        logger.info(f"Scan has been stopped: {data.get('body')}")
 
     async def _handle_error(self, data: dict) -> None:
         """message.error": An error or warning message. Contains 
