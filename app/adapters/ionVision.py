@@ -34,7 +34,7 @@ class IVAdapter:
         self._ws = WebSocketAdapter(ws_base_url)
     
     def _request(self, method: str, endpoint: str, **kwargs) -> IVResult:
-        """Helper method to make HTTP requests to the IonVision API."""
+        """Make HTTP requests to the IonVision API."""
         try:
             if self._client is not None:
                 response = self._client.request(
@@ -60,8 +60,7 @@ class IVAdapter:
 
     # scan management    
     def get_current_scan(self) -> IVResult:
-        """Check if a scan is ongoing and get information about it.
-        """
+        """Check if a scan is ongoing and get information about it."""
         return self._request("GET", "currentScan")
 
     def start_new_scan(self) -> IVResult:
@@ -86,6 +85,7 @@ class IVAdapter:
     
     def replace_scan_comments(self, comments:dict) -> IVResult:
         """Add comments to the ongoing or next scan. Replaces the previous comments object.
+
         The /currentScan/comments object can first be fetched for editing using GET.
         """
         return self._request("PUT", "currentScan/comments", json=comments)  
@@ -109,6 +109,7 @@ class IVAdapter:
 
     def get_latest_dataobject(self) -> IVResult:
         """Get the data object of the latest scan result once it has been processed.
+        
         Please note that it can take some time for the device to process the scan 
         result data after a scan has already been finished.       
         """
