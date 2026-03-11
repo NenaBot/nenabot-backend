@@ -146,8 +146,10 @@ class StorageAdapter:
         content_type: str = "image/jpeg",
     ) -> None:
         self._db.execute(
-            """INSERT OR REPLACE INTO job_images (job_id, image, content_type)
-               VALUES (?, ?, ?)""",
+            """INSERT INTO job_images (job_id, image, content_type)
+               VALUES (?, ?, ?)
+               ON CONFLICT(job_id) DO UPDATE SET image = excluded.image,
+                                                 content_type = excluded.content_type""",
             (job_id, image_bytes, content_type),
         )
         self._db.commit()
