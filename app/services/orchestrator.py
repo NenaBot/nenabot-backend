@@ -47,6 +47,10 @@ class OrchestratorService:
         # Per-job pixel path for overlay rendering (job_id → pixel coords)
         self._pixel_paths: dict[str, list[tuple[float, float]]] = {}
 
+        # Per-job starting positions for return-to-start
+        self._starting_waypoints: dict[str, Waypoint] = {}
+        self._canvas_starts: dict[str, tuple[float, float]] = {}
+
         # SSE subscribers: job_id → list of queues (one per connected client)
         self._job_subscribers: dict[str, list[queue.Queue]] = {}
         self._subscribers_lock = threading.Lock()
@@ -97,6 +101,13 @@ class OrchestratorService:
 
         # Store the pixel path for overlay rendering during execution
         self._pixel_paths[job_id] = pixel_path or []
+
+        # Store starting positions separately (used for return-to-start
+        # and overlay rendering, but not included in the measurement loop)
+        if starting_point:
+            self._starting_waypoints[job_id] = starting_point
+        if canvas_start:
+            self._canvas_starts[job_id] = canvas_start
 
         # Store initial overlay image (detection snapshot with boxes drawn)
         if image_bytes:
@@ -352,9 +363,9 @@ class OrchestratorService:
                 self._update_overlay(job)
 
             if job.state == "running":
-                # Return to starting position (path[0] = the starting point)
-                if job.path:
-                    sp = job.path[0]
+                # Return to the starting position captured during calibration
+                sp = self._starting_waypoints.get(job.id)
+                if sp:
                     if not job.dry_run:
                         logger.info(
                             "Job %s — returning to start (%.1f, %.1f, %.1f, %.1f)",
@@ -413,6 +424,8 @@ class OrchestratorService:
             self._running_job_id = None
             self._stop_requested = False
             self._pixel_paths.pop(job.id, None)
+            self._starting_waypoints.pop(job.id, None)
+            self._canvas_starts.pop(job.id, None)
             job.updated_at = datetime.now(timezone.utc)
             self._storage.update_job_state(
                 job.id, job.state, job.last_point_processed, job.error
@@ -438,10 +451,7 @@ class OrchestratorService:
             if not base:
                 return
             # Determine starting-point pixel coords for the overlay
-            pp = self._pixel_paths.get(job.id, [])
-            sp_tuple: tuple[float, float] | None = None
-            if pp:
-                sp_tuple = pp[0]  # first entry is the starting position
+            sp_tuple = self._canvas_starts.get(job.id)
             overlay = CameraVisionAdapter.render_overlay(
                 base, [], job.measurements, starting_point=sp_tuple
             )

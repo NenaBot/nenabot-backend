@@ -282,11 +282,11 @@ def test_job_fails_on_arrival_timeout(tmp_path: Path) -> None:
 
 
 def test_return_to_start_after_completion(tmp_path: Path) -> None:
-    """After completing all waypoints, robot should move back to path[0]."""
+    """After completing all waypoints, robot should move back to the starting position."""
     svc = _make_svc(tmp_path)
     start = Waypoint(x=0, y=0, z=0, r=0)
     target = Waypoint(x=10, y=20, z=0, r=0)
-    job = svc.create_job(path=[start, target], dry_run=False)
+    job = svc.create_job(path=[target], dry_run=False, starting_point=start)
 
     move_calls: list[tuple[float, float, float, float]] = []
 
@@ -317,7 +317,7 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
     db_job = svc.get_job(job.id)
     assert db_job is not None
     assert db_job.state == "completed"
-    # Last move call should be back to the starting point (path[0])
+    # Last move call should be back to the starting point (stored separately)
     assert move_calls[-1] == (0.0, 0.0, 0.0, 0.0)
 
 

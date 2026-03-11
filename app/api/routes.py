@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.dependencies import get_orchestrator
-from app.domain.models import Job as DomainJob, Waypoint
+from app.domain.models import Job as DomainJob
 from app.schemas import (
     CalibrationResponse,
     ComponentHealth,
@@ -105,26 +105,12 @@ def create_job(
         for p in payload.path
     ]
 
-    # Build pixel path for overlay rendering:
-    # Index 0 = canvas start (starting position), followed by each measurement point
+    # Pixel coords for overlay rendering (one per measurement waypoint)
     canvas_start = svc.calibration_canvas_start
-    pixel_path: list[tuple[float, float]] = []
-    if canvas_start:
-        pixel_path.append(canvas_start)
-    pixel_path.extend((p.x, p.y) for p in payload.path)
+    pixel_path: list[tuple[float, float]] = [(p.x, p.y) for p in payload.path]
 
-    # Prepend the robot starting position (captured during POST /paths)
+    # Starting position for return-to-start (captured during POST /paths)
     starting_wp = svc.calibration_robot_start
-    if starting_wp:
-        waypoints.insert(
-            0,
-            Waypoint(
-                x=starting_wp.x,
-                y=starting_wp.y,
-                z=payload.work_z,
-                r=payload.work_r,
-            ),
-        )
 
     # Decode optional snapshot image
     image_bytes: bytes | None = None
