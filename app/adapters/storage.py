@@ -162,8 +162,6 @@ class StorageAdapter:
             return None
         return row["image"]
 
-
-
     # ---- internal ----
 
     def _row_to_job(self, row: sqlite3.Row) -> Job:

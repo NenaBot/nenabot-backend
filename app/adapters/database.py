@@ -123,5 +123,3 @@ class Database:
             self.commit()
         except sqlite3.OperationalError:
             pass  # columns already exist
-
-
