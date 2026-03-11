@@ -382,7 +382,6 @@ def _to_job(job: DomainJob) -> Job:
         options=job.options,
         path=[WaypointSchema(x=w.x, y=w.y, z=w.z, r=w.r) for w in job.path],
         dry_run=job.dry_run,
-        log=job.log,
         measurements=[
             MeasurementSchema(
                 waypoint_index=m.waypoint_index,
@@ -400,7 +399,6 @@ def _to_job(job: DomainJob) -> Job:
             )
             for m in job.measurements
         ],
-        path_image=job.path_image,
         status={
             "state": job.state,
             "lastPointProcessed": job.last_point_processed,

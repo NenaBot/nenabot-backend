@@ -42,9 +42,7 @@ class Job(BaseModel):
     options: dict[str, Any] | None = None
     path: list[WaypointSchema] = Field(default_factory=list)
     dry_run: bool = Field(False, alias="dryRun")
-    log: str | None = None
     measurements: list[MeasurementSchema] = Field(default_factory=list)
-    path_image: str | None = Field(None, alias="path-image")
     status: JobStatusState = Field(default_factory=JobStatusState)
 
     model_config = {"populate_by_name": True}

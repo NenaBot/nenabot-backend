@@ -30,9 +30,7 @@ class Job:
     options: dict[str, Any] | None = None
     path: list[Waypoint] = field(default_factory=list)
     dry_run: bool = False
-    log: str | None = None
     measurements: list[Measurement] = field(default_factory=list)
-    path_image: str | None = None
     state: str = "created"  # created | running | completed | failed | stopped
     last_point_processed: int = 0
     error: str | None = None
