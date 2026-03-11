@@ -13,6 +13,7 @@ import inspect
 import json
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
+
 import httpx
 import websockets
 
@@ -66,8 +67,7 @@ class IVAdapter:
 
     # scan management
     def get_current_scan(self) -> IVResult:
-        """
-        Check if a scan is ongoing and get information about it.
+        """Check if a scan is ongoing and get information about it.
         """
         return self._request("GET", "currentScan")
 
@@ -138,8 +138,7 @@ class IVAdapter:
         return self._request("GET", "results/latest")
 
     def get_latest_gas_detection(self) -> IVResult:
-        """
-        Get built-in gas detection results for the latest scan result.
+        """Get built-in gas detection results for the latest scan result.
         """
         return self._request("GET", "results/latest/gasDetection")
 
@@ -160,6 +159,13 @@ class IVAdapter:
         Get the comment object of a scan result.
         """
         return self._request("GET", f"results/id/{id}/comments")
+    
+    def put_scan_result_commentobject(self, id:str, comments: Dict[str, Any]) -> IVResult:
+        """Replaces the previous comments object of a scan result.
+        The /results/id/{id}/comments object can first be 
+        fetched for editing using GET.
+        """
+        return self._request("PUT", f"results/id/{id}/comments", json=comments)
 
     # parameters
     def get_parameter_ID(self) -> IVResult:
@@ -171,8 +177,7 @@ class IVAdapter:
 
     # WEBSCOKET EVENT HANDLING #
     async def initialize_websocket(self) -> None:
-        """
-        Initialize WebSocket connection for event streaming.
+        """Initialize WebSocket connection for event streaming.
         Must be called after instantiation to open the WebSocket.
         """
         await self._ws.connect()
@@ -188,8 +193,10 @@ class IVAdapter:
         Register a handler for a WebSocket event.
 
         Args:
+        ----
             event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
             handler: Async or sync callable that receives the event data dict
+
         """
         self._ws.on(event_type, handler)
 
@@ -200,15 +207,17 @@ class IVAdapter:
         Unregister a handler for a WebSocket event.
 
         Args:
+        ----
             event_type: The event type
             handler: The handler to remove
+
         """
         self._ws.off(event_type, handler)
 
 # Adapter for the IonVision WebSocket API
 class WebSocketAdapter:
-    """
-    Event-driven WebSocket adapter for IonVision API.
+    """Event-driven WebSocket adapter for IonVision API.
+
     Maintains a persistent connection and dispatches events to registered handlers.
     """
     
@@ -274,30 +283,33 @@ class WebSocketAdapter:
             self._running = False
     
     def on(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
-        """
-        Register a handler for an event type.
+        """Register a handler for an event type.
         
         Args:
+        ----
             event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
             handler: Async or sync callable that receives the event data dict
         
         Example:
+        -------
             async def handle_error(data):
                 print(f"Error: {data}")
             
             ws_adapter.on("message.error", handle_error)
+
         """
         if event_type not in self._handlers:
             self._handlers[event_type] = []
         self._handlers[event_type].append(handler)
     
     def off(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
-        """
-        Unregister a handler for an event type.
+        """Unregister a handler for an event type.
         
         Args:
+        ----
             event_type: The event type
             handler: The handler to remove
+
         """
         if event_type in self._handlers:
             try:
