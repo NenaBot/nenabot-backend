@@ -1,14 +1,17 @@
+"""Tests for the IonVision HTTP adapter."""
+
+import httpx
 import pytest
 import respx
-import httpx
-from app.adapters.ionVision import IVAdapter
 
+from app.adapters.ionVision import IVAdapter
 
 BASE_URL = "http://localhost:8080"
 WS_BASE_URL = "ws://localhost:8080"
 
 @pytest.fixture
 def iv_adapter() -> IVAdapter:
+    """Create an IonVision adapter for unit tests."""
     return IVAdapter(base_url=BASE_URL,
                      ws_base_url=WS_BASE_URL)
 

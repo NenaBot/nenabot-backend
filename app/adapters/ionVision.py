@@ -39,7 +39,7 @@ class IVAdapter:
         self._client = client
         self._ws = WebSocketAdapter(ws_base_url)
     def _request(self, method: str, endpoint: str, **kwargs) -> IVResult:
-        """Helper method to make HTTP requests to the IonVision API."""
+        """Make HTTP requests to the IonVision API."""
         try:
             if self._client is not None:
                 response = self._client.request(
@@ -67,8 +67,7 @@ class IVAdapter:
 
     # scan management
     def get_current_scan(self) -> IVResult:
-        """Check if a scan is ongoing and get information about it.
-        """
+        """Check if a scan is ongoing and get information about it."""
         return self._request("GET", "currentScan")
 
     def start_new_scan(self) -> IVResult:
