@@ -148,14 +148,17 @@ class OrchestratorService:
         )
         self._job_thread.start()
 
-        self._publish_event(job_id, {
-            "type": "job:started",
-            "job_id": job_id,
-            "state": "running",
-            "last_point_processed": 0,
-            "total_points": len(job.path),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        self._publish_event(
+            job_id,
+            {
+                "type": "job:started",
+                "job_id": job_id,
+                "state": "running",
+                "last_point_processed": 0,
+                "total_points": len(job.path),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
         return job
 
@@ -209,15 +212,18 @@ class OrchestratorService:
                     job.dry_run,
                 )
 
-                self._publish_event(job.id, {
-                    "type": "job:waypoint_started",
-                    "job_id": job.id,
-                    "state": "running",
-                    "last_point_processed": job.last_point_processed,
-                    "total_points": len(job.path),
-                    "waypoint_index": i,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
+                self._publish_event(
+                    job.id,
+                    {
+                        "type": "job:waypoint_started",
+                        "job_id": job.id,
+                        "state": "running",
+                        "last_point_processed": job.last_point_processed,
+                        "total_points": len(job.path),
+                        "waypoint_index": i,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
 
                 scan_result: dict | None = None
 
@@ -320,24 +326,27 @@ class OrchestratorService:
                     job.id, job.state, job.last_point_processed, job.error
                 )
 
-                self._publish_event(job.id, {
-                    "type": "job:waypoint_completed",
-                    "job_id": job.id,
-                    "state": "running",
-                    "last_point_processed": job.last_point_processed,
-                    "total_points": len(job.path),
-                    "waypoint_index": i,
-                    "measurement": {
-                        "waypointIndex": measurement.waypoint_index,
-                        "waypoint": {"x": wp.x, "y": wp.y, "z": wp.z, "r": wp.r},
-                        "pixelX": measurement.pixel_x,
-                        "pixelY": measurement.pixel_y,
-                        "scanResult": measurement.scan_result,
-                        "simulated": measurement.simulated,
-                        "timestamp": measurement.timestamp,
+                self._publish_event(
+                    job.id,
+                    {
+                        "type": "job:waypoint_completed",
+                        "job_id": job.id,
+                        "state": "running",
+                        "last_point_processed": job.last_point_processed,
+                        "total_points": len(job.path),
+                        "waypoint_index": i,
+                        "measurement": {
+                            "waypointIndex": measurement.waypoint_index,
+                            "waypoint": {"x": wp.x, "y": wp.y, "z": wp.z, "r": wp.r},
+                            "pixelX": measurement.pixel_x,
+                            "pixelY": measurement.pixel_y,
+                            "scanResult": measurement.scan_result,
+                            "simulated": measurement.simulated,
+                            "timestamp": measurement.timestamp,
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
+                )
 
                 # Re-render overlay image with accumulated measurements
                 self._update_overlay(job)
@@ -409,15 +418,18 @@ class OrchestratorService:
                 job.id, job.state, job.last_point_processed, job.error
             )
 
-            self._publish_event(job.id, {
-                "type": f"job:{job.state}",
-                "job_id": job.id,
-                "state": job.state,
-                "last_point_processed": job.last_point_processed,
-                "total_points": len(job.path),
-                "error": job.error,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+            self._publish_event(
+                job.id,
+                {
+                    "type": f"job:{job.state}",
+                    "job_id": job.id,
+                    "state": job.state,
+                    "last_point_processed": job.last_point_processed,
+                    "total_points": len(job.path),
+                    "error": job.error,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
 
     def _update_overlay(self, job: Job) -> None:
         """Re-render the job overlay image with current measurements."""
