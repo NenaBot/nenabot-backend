@@ -47,7 +47,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 
 - **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. It mirrors the connection pattern from DobotDemoForPython/minimal_connect.py.
 - **Camera/Vision**: `app/adapters/camera.py` and `app/adapters/vision.py` are based on camera_detection/main.py (ArUco marker detection). These adapters currently return placeholder pose values.
-- **DMS**: `app/adapters/ionVision/ionVision.py` calls the external DMS HTTP endpoint (`/dms/read`). Configure the base URL in `app/dependencies.py`.
+- **DMS**: `app/adapters/ionVision.py` calls the external DMS HTTP endpoint (`/dms/read`). Configure the base URL in `app/dependencies.py`.
 
 ## Tests
 
