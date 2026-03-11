@@ -429,8 +429,6 @@ class OrchestratorService:
                 },
             )
 
-
-
     # ---- Misc ----
 
     def health(self) -> dict[str, object]:
