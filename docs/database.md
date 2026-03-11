@@ -29,7 +29,6 @@ Stores job metadata and current state.
 | `options`              | TEXT    | nullable                      | JSON-encoded dict of job options                               |
 | `dry_run`              | INTEGER | NOT NULL, default 0           | 1 = simulated run (no robot/DMS)                               |
 | `state`                | TEXT    | NOT NULL, default `'created'` | One of: `created`, `running`, `completed`, `failed`, `stopped` |
-| `log`                  | TEXT    | nullable                      | Free-form log text                                             |
 | `error`                | TEXT    | nullable                      | Error message if `state = 'failed'`                            |
 | `last_point_processed` | INTEGER | NOT NULL, default 0           | Number of waypoints completed so far                           |
 | `created_at`           | TEXT    | NOT NULL                      | ISO-8601 timestamp                                             |
@@ -100,13 +99,11 @@ Route handler
       → Database.commit()
 ```
 
-## Overlay images
+## Job images
 
-When a job is created with an attached camera frame (`image_base64` in the POST body), `CameraVisionAdapter.render_overlay()` draws detection boxes on the image and stores the result as a BLOB in `job_images`.
+When a job is created with an attached camera frame (`image_base64` in the POST body), the clean snapshot is stored as a BLOB in `job_images`. No server-side annotations are drawn on the image — measurement points are rendered by the frontend using pixel coordinates from the measurement data.
 
-During job execution each completed measurement triggers a re-render of the overlay image: numbered green circles are drawn at each measured waypoint with scan-result labels. The updated BLOB is saved back to `job_images` after every waypoint.
-
-The overlay can be retrieved via `GET /jobs/{id}/image` (returns raw JPEG).
+The image can be retrieved via `GET /jobs/{id}/image` (returns raw JPEG).
 
 ## Backup and migration
 

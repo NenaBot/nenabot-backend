@@ -202,10 +202,29 @@
         }
 
         #overlayImg {
+            display: none;
+        }
+
+        .image-container {
+            position: relative;
+            width: 100%;
+        }
+
+        .image-container img {
             width: 100%;
             display: block;
             border-radius: 4px;
             background: #111;
+        }
+
+        .image-container canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 4px;
+            pointer-events: none;
         }
 
         table {
@@ -361,12 +380,16 @@
           </div>
         </div>
 
-        <!-- Overlay image -->
+        <!-- Base image with measurement overlay -->
         <div class="card">
-          <div class="card-hdr">Annotated Image</div>
+          <div class="card-hdr">Image</div>
           <div class="card-body" style="padding:0">
-            <img id="overlayImg" src="${imgUrl}" alt="overlay"
-                 onerror="this.style.display='none'" onload="this.style.display='block'" />
+            <div class="image-container">
+              <img id="baseImg" src="${imgUrl}" alt="base image"
+                   onerror="this.style.display='none';document.getElementById('noImgMsg').style.display='block'"
+                   onload="this.style.display='block';drawMeasurements()" />
+              <canvas id="overlayCanvas"></canvas>
+            </div>
             <div id="noImgMsg" style="padding:12px;color:var(--dim);font-size:13px;display:none">
               No image stored for this job
             </div>
@@ -386,14 +409,50 @@
       </div>
     `;
 
-                // Handle image load failure
-                const img = $('overlayImg');
-                if (img) {
-                    img.onerror = () => { img.style.display = 'none'; $('noImgMsg').style.display = 'block'; };
-                    img.onload = () => { img.style.display = 'block'; if ($('noImgMsg')) $('noImgMsg').style.display = 'none'; };
+                // Draw measurement points on canvas after image loads
+                window._currentMeasurements = job.measurements || [];
+                const img = $('baseImg');
+                if (img && img.complete && img.naturalWidth > 0) {
+                    drawMeasurements();
                 }
             } catch (e) {
                 console.error('renderDetail', e);
+            }
+        }
+
+        function drawMeasurements() {
+            const img = $('baseImg');
+            const canvas = $('overlayCanvas');
+            if (!img || !canvas || !img.naturalWidth) return;
+
+            const measurements = window._currentMeasurements || [];
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (const m of measurements) {
+                const px = m.pixelX;
+                const py = m.pixelY;
+                if (px == null || py == null) continue;
+
+                // Green filled circle
+                ctx.beginPath();
+                ctx.arc(px, py, 10, 0, 2 * Math.PI);
+                ctx.fillStyle = 'rgba(0, 220, 100, 0.85)';
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // Waypoint number
+                const label = String((m.waypointIndex ?? 0) + 1);
+                ctx.font = 'bold 11px sans-serif';
+                ctx.fillStyle = '#000';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(label, px, py);
             }
         }
 

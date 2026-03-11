@@ -44,12 +44,11 @@ class OrchestratorService:
         self._cal_canvas_start: tuple[float, float] | None = None
         self._cal_pixels_per_mm: float | None = None
 
-        # Per-job pixel path for overlay rendering (job_id → pixel coords)
+        # Per-job pixel path for measurement pixel coordinates
         self._pixel_paths: dict[str, list[tuple[float, float]]] = {}
 
         # Per-job starting positions for return-to-start
         self._starting_waypoints: dict[str, Waypoint] = {}
-        self._canvas_starts: dict[str, tuple[float, float]] = {}
 
         # SSE subscribers: job_id → list of queues (one per connected client)
         self._job_subscribers: dict[str, list[queue.Queue]] = {}
@@ -92,33 +91,23 @@ class OrchestratorService:
         image_bytes: bytes | None = None,
         detections: list | None = None,
         starting_point: Waypoint | None = None,
-        canvas_start: tuple[float, float] | None = None,
         pixel_path: list[tuple[float, float]] | None = None,
     ) -> Job:
         job_id = str(uuid.uuid4())
         job = Job(id=job_id, options=options, path=path or [], dry_run=dry_run)
         self._storage.save_job(job)
 
-        # Store the pixel path for overlay rendering during execution
+        # Store the pixel path for measurement pixel coordinates
         self._pixel_paths[job_id] = pixel_path or []
 
-        # Store starting positions separately (used for return-to-start
-        # and overlay rendering, but not included in the measurement loop)
+        # Store starting position separately (used for return-to-start,
+        # but not included in the measurement loop)
         if starting_point:
             self._starting_waypoints[job_id] = starting_point
-        if canvas_start:
-            self._canvas_starts[job_id] = canvas_start
 
-        # Store initial overlay image (detection snapshot with boxes drawn)
+        # Store the clean base image (frontend renders points on top)
         if image_bytes:
-            sp_tuple = canvas_start  # already in pixel coordinates
-            overlay = CameraVisionAdapter.render_overlay(
-                image_bytes, detections or [], [], starting_point=sp_tuple
-            )
-            self._storage.save_job_image(job_id, overlay)
-
-            # Save the clean base image so we can re-render overlays later
-            self._storage.save_job_base_image(job_id, image_bytes)
+            self._storage.save_job_image(job_id, image_bytes)
 
         return job
 
@@ -359,9 +348,6 @@ class OrchestratorService:
                     },
                 )
 
-                # Re-render overlay image with accumulated measurements
-                self._update_overlay(job)
-
             if job.state == "running":
                 # Return to the starting position captured during calibration
                 sp = self._starting_waypoints.get(job.id)
@@ -425,7 +411,6 @@ class OrchestratorService:
             self._stop_requested = False
             self._pixel_paths.pop(job.id, None)
             self._starting_waypoints.pop(job.id, None)
-            self._canvas_starts.pop(job.id, None)
             job.updated_at = datetime.now(timezone.utc)
             self._storage.update_job_state(
                 job.id, job.state, job.last_point_processed, job.error
@@ -444,20 +429,7 @@ class OrchestratorService:
                 },
             )
 
-    def _update_overlay(self, job: Job) -> None:
-        """Re-render the job overlay image with current measurements."""
-        try:
-            base = self._storage.get_job_base_image(job.id)
-            if not base:
-                return
-            # Determine starting-point pixel coords for the overlay
-            sp_tuple = self._canvas_starts.get(job.id)
-            overlay = CameraVisionAdapter.render_overlay(
-                base, [], job.measurements, starting_point=sp_tuple
-            )
-            self._storage.save_job_image(job.id, overlay)
-        except Exception:
-            logger.debug("Overlay update failed for job %s", job.id, exc_info=True)
+
 
     # ---- Misc ----
 

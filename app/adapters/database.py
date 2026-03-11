@@ -110,7 +110,6 @@ class Database:
                 job_id        TEXT NOT NULL UNIQUE
                               REFERENCES jobs(id) ON DELETE CASCADE,
                 image         BLOB NOT NULL,
-                base_image    BLOB,
                 content_type  TEXT NOT NULL DEFAULT 'image/jpeg'
             );
             """
@@ -125,9 +124,4 @@ class Database:
         except sqlite3.OperationalError:
             pass  # columns already exist
 
-        # Migrate existing databases: add base_image column if missing
-        try:
-            self.conn.execute("ALTER TABLE job_images ADD COLUMN base_image BLOB")
-            self.commit()
-        except sqlite3.OperationalError:
-            pass  # column already exists
+

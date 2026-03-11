@@ -26,6 +26,7 @@ In this project, Uvicorn is responsible for:
 - Keeping long-lived streaming connections open for MJPEG endpoints:
     - `GET /streams/camera/feed`
     - `GET /streams/detection/feed`
+- Serving Server-Sent Events (SSE) for real-time job progress via `GET /jobs/{id}/events`
 - Handling robot control endpoints for calibration and manual positioning
 - Supporting development reload mode (`--reload`) so code changes restart the server automatically
 
@@ -47,9 +48,9 @@ Notes about current behavior:
 
 - All job state is persisted in a SQLite database (`data/nenabot.db`) via `Database` + `StorageAdapter`.
 - WAL journal mode enables concurrent reads (API thread) and writes (background job thread).
-- Captured images and overlay renders are stored as BLOBs in the `job_images` table.
+- Captured images are stored as BLOBs in the `job_images` table.
 - `IVAdapter` (`app/adapters/ionVision/ionVision.py`) is an HTTP client to the external IonVision API.
-- `CameraVisionAdapter` handles image capture, contour detection, overlay rendering, and live stream generation.
+- `CameraVisionAdapter` handles image capture, contour detection, and live stream generation.
 - `RobotAdapter` (`app/adapters/robot.py`) wraps Dobot hardware control; supports both job automation and manual calibration moves.
 - Robot control endpoints:
     - `POST /robot/move` — manual positioning for calibration
@@ -70,7 +71,7 @@ nenabot-main/
 |  |- services/
 |  |  |- orchestrator.py                 # Core use-case orchestration and in-memory job state
 |  |- adapters/
-|  |  |- camera_vision.py                # Camera capture, ArUco/contour detection, overlay rendering, MJPEG streaming
+|    |- camera_vision.py                # Camera capture, ArUco/contour detection, MJPEG streaming
 |  |  |- database.py                     # Thin sqlite3 wrapper (WAL mode, foreign keys)
 |  |  |- ionVision/
 |  |  |  |- ionVision.py                 # IonVision HTTP adapter (IVAdapter)
@@ -88,7 +89,7 @@ nenabot-main/
 |  |- streaming.md                       # Streaming architecture and usage guide
 |  |- stream-viewer.html                 # Manual HTML viewer for camera/detection feeds
 |  |- job-tester.html                    # Job creation / testing UI
-|  |- job-results.html                   # Job results browser with annotated overlay images
+|  |- job-results.html                   # Job results browser with frontend-rendered measurement points
 |- Dockerfile                            # Docker image definition (python:3.10-slim)
 |- .dockerignore                         # Excludes __pycache__, .git, venv, etc.
 |- data/

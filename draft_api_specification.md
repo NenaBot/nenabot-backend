@@ -14,7 +14,7 @@ All endpoints are prefixed with `/api`.
 | **GET**    | `/api/jobs/<ID>/events`       | SSE stream of job progress events. | 200         | `text/event-stream` — real-time updates (see SSE Events below).        |
 | **GET**    | `/api/profiles`               | List configuration profiles.       | 200         | Returns array of available profiles.                                   |
 | **GET**    | `/api/profiles/default`       | Get default profile.               | 200         | Returns the default configuration profile.                             |
-| **GET**    | `/api/jobs/<ID>/image`        | Get job overlay image.             | 200         | Returns annotated JPEG image (base64 or binary).                       |
+| **GET**    | `/api/jobs/<ID>/image`        | Get job base image.                | 200         | Returns clean JPEG snapshot (no annotations).                          |
 | **GET**    | `/api/robot/pose`             | Get robot position.                | 200         | Returns current X, Y, Z, R and joint angles (J1-J4).                   |
 | **GET**    | `/api/streams/camera/feed`    | Camera video feed.                 | 200         | MJPEG live raw camera stream.                                          |
 | **GET**    | `/api/streams/detection/feed` | Detection video feed.              | 200         | MJPEG with ArUco markers and contour overlay.                          |

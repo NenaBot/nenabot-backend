@@ -321,33 +321,19 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
     assert move_calls[-1] == (0.0, 0.0, 0.0, 0.0)
 
 
-# ---- ORC-TC-017: Overlay re-rendered after each measurement ----
+# ---- ORC-TC-017: Clean base image saved (no overlay rendering) ----
 
 
-def test_overlay_rerendered_after_each_measurement(tmp_path: Path) -> None:
-    """_update_overlay should re-render the overlay after each waypoint."""
+def test_clean_image_saved_without_overlay(tmp_path: Path) -> None:
+    """create_job should save the clean image directly, not a rendered overlay."""
     svc = _make_svc(tmp_path)
 
-    render_measurement_counts: list[int] = []
+    dummy_image = b"fake_jpeg_data"
+    waypoints = [Waypoint(x=1, y=2), Waypoint(x=3, y=4)]
+    job = svc.create_job(path=waypoints, dry_run=True, image_bytes=dummy_image)
 
-    def mock_render(jpeg_bytes, detections, measurements=None, starting_point=None):
-        render_measurement_counts.append(len(measurements) if measurements else 0)
-        return b"overlay_data"
-
-    with patch.object(CameraVisionAdapter, "render_overlay", side_effect=mock_render):
-        dummy_image = b"fake_jpeg_data"
-        waypoints = [Waypoint(x=1, y=2), Waypoint(x=3, y=4)]
-        job = svc.create_job(path=waypoints, dry_run=True, image_bytes=dummy_image)
-        svc.run_job(job.id)
-        svc._job_thread.join(timeout=10)
-
-        db_job = svc.get_job(job.id)
-        assert db_job is not None
-        assert db_job.state == "completed"
-        # Call 0: create_job initial render with 0 measurements
-        # Call 1: after WP 0 with 1 measurement
-        # Call 2: after WP 1 with 2 measurements
-        assert render_measurement_counts == [0, 1, 2]
+    stored = svc.get_job_image(job.id)
+    assert stored == dummy_image  # saved as-is, no rendering
 
 
 # ---- ORC-TC-018: Profile listing and default selection ----
