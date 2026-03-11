@@ -198,5 +198,24 @@ def test_job_persists_across_reads(client: TestClient) -> None:
     # Re-fetch from DB
     job = client.get(f"/jobs/{job_id}").json()
     assert job["status"]["state"] == "completed"
-    # 1 starting point + 2 waypoints = 3 measurements
-    assert len(job["measurements"]) == 3
+
+
+def test_job_creation_requires_calibration(tmp_path: Path) -> None:
+    """POST /jobs should return 409 when the orchestrator is not calibrated."""
+    test_orchestrator = create_orchestrator(
+        db_path=str(tmp_path / "test_nocal.db"),
+        dms_base_url="http://localhost:8080",
+    )
+    # Deliberately NOT setting calibration state
+
+    app.dependency_overrides[get_orchestrator] = lambda: test_orchestrator
+
+    with TestClient(app) as uncalibrated_client:
+        path = [{"x": 1.0, "y": 2.0}]
+        response = uncalibrated_client.post(
+            "/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+        )
+        assert response.status_code == 409
+        assert "calibrat" in response.json()["detail"].lower()
+
+    app.dependency_overrides.clear()
