@@ -20,15 +20,14 @@ class StorageAdapter:
         """Insert or replace a full job (with waypoints)."""
         self._db.execute(
             """INSERT OR REPLACE INTO jobs
-               (id, options, dry_run, state, log, error,
+               (id, options, dry_run, state, error,
                 last_point_processed, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.id,
                 json.dumps(job.options) if job.options else None,
                 int(job.dry_run),
                 job.state,
-                job.log,
                 job.error,
                 job.last_point_processed,
                 (
@@ -202,7 +201,6 @@ class StorageAdapter:
             options=json.loads(row["options"]) if row["options"] else None,
             path=path,
             dry_run=bool(row["dry_run"]),
-            log=row["log"],
             measurements=measurements,
             state=row["state"],
             last_point_processed=row["last_point_processed"],

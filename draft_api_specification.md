@@ -21,11 +21,7 @@ All endpoints are prefixed with `/api`.
 | **POST**   | `/api/jobs`                   | Initiate a new job.                | 201         | **Body:** `options`, `path`<br>**Returns:** Full job object with `ID`. |
 | **POST**   | `/api/robot/stop`             | Stop active job.                   | 200         | Stops running job and halts robot.                                     |
 | **POST**   | `/api/robot/move`             | Move robot.                        | 200         | **Body:** `x`, `y`, `z`, `r`<br>Moves robot to position (calibration). |
-| **POST**   | `/api/streams/camera`         | Start camera stream.               | 201         | Activates raw video feed.                                              |
-| **POST**   | `/api/streams/detection`      | Start detection stream.            | 201         | Activates processed detection feed.                                    |
 | **POST**   | `/api/paths`                  | Generate a path.                   | 201         | **Body:** `options`<br>**Returns:** Path object with detections.       |
-| **DELETE** | `/api/streams/camera`         | Stop camera stream.                | 204         | Halts raw video feed.                                                  |
-| **DELETE** | `/api/streams/detection`      | Stop detection stream.             | 204         | Halts detection feed.                                                  |
 | **DELETE** | `/api/jobs/<jobID>`           | Delete job.                        | 204         | Removes job and related data.                                          |
 
 ---
@@ -38,14 +34,15 @@ The job object encapsulates the configuration, output data, and current processi
 
 ```json
 {
-    "options": "string/object",
-    "path": "string",
-    "log": "string",
+    "id": "string (uuid)",
+    "options": "object | null",
+    "path": [{ "x": 0.0, "y": 0.0, "z": 0.0, "r": 0.0 }],
+    "dryRun": false,
     "measurements": [],
-    "path-image": "string (url/base64)",
     "status": {
-        "lastPointProcessed": "integer",
-        "error": "string/null"
+        "state": "created | running | completed | failed | stopped",
+        "lastPointProcessed": 0,
+        "error": "string | null"
     }
 }
 ```

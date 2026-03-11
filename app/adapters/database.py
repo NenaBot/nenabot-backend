@@ -74,7 +74,6 @@ class Database:
                 options       TEXT,
                 dry_run       INTEGER NOT NULL DEFAULT 0,
                 state         TEXT NOT NULL DEFAULT 'created',
-                log           TEXT,
                 error         TEXT,
                 last_point_processed INTEGER NOT NULL DEFAULT 0,
                 created_at    TEXT NOT NULL,
