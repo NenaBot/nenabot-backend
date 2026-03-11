@@ -264,7 +264,7 @@ def test_job_sse_events(client: TestClient) -> None:
         events = []
         for line in response.iter_lines():
             if line.startswith("data: "):
-                events.append(_json.loads(line[len("data: "):]))
+                events.append(_json.loads(line[len("data: ") :]))
                 # Stop after terminal event
                 if events[-1].get("state") in ("completed", "failed", "stopped"):
                     break

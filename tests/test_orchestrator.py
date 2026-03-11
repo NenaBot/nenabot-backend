@@ -18,7 +18,9 @@ def _make_svc(tmp_path: Path) -> OrchestratorService:
     db.init_db()
 
     camera = CameraVisionAdapter()
-    camera.ping = MagicMock(return_value=CaptureResult(ok=False, error="no camera in test"))
+    camera.ping = MagicMock(
+        return_value=CaptureResult(ok=False, error="no camera in test")
+    )
 
     robot = RobotAdapter()
     robot.ping = MagicMock(return_value=RobotResult(ok=False, error="no robot in test"))
