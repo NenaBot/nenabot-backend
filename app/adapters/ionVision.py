@@ -13,6 +13,7 @@ import inspect
 import json
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
+
 import httpx
 import websockets
 
@@ -40,14 +41,14 @@ class IVAdapter:
                     method,
                     f"{self._base_url}/{endpoint}",
                     timeout=self._timeout,
-                    **kwargs
+                    **kwargs,
                 )
             else:
                 with httpx.Client(timeout=self._timeout) as client:
                     response = client.request(
                         method,
                         f"{self._base_url}/{endpoint}",
-                        **kwargs
+                        **kwargs,
                     )
 
             response.raise_for_status()
@@ -59,28 +60,24 @@ class IVAdapter:
 
     # scan management    
     def get_current_scan(self) -> IVResult:
-        """
-        Check if a scan is ongoing and get information about it.
+        """Check if a scan is ongoing and get information about it.
         """
         return self._request("GET", "currentScan")
 
     def start_new_scan(self) -> IVResult:
-        """
-        Starts a new scan using the current project and parameter preset. 
+        """Starts a new scan using the current project and parameter preset.
         A new scan can only be started if there is no scan currently ongoing.
         """
         return self._request("POST", "currentScan")
 
     def stop_current_scan(self) -> IVResult:
-        """
-        Starts a new scan using the current project and parameter preset. 
+        """Starts a new scan using the current project and parameter preset.
         A new scan can only be started if there is no scan currently ongoing.
         """
         return self._request("DELETE", "currentScan")
     
     def get_scan_comments(self) -> IVResult:
-        """
-        Get the comments object associated with the ongoing or next scan. 
+        """Get the comments object associated with the ongoing or next scan.
         The comments object is automatically reset once a scan finishes 
         and the previous comments object is saved to the result file 
         of the just finished scan.
@@ -88,8 +85,7 @@ class IVAdapter:
         return self._request("GET", "currentScan/comments")
     
     def replace_scan_comments(self, comments:dict) -> IVResult:
-        """
-        Add comments to the ongoing or next scan. Replaces the previous comments object. 
+        """Add comments to the ongoing or next scan. Replaces the previous comments object.
         The /currentScan/comments object can first be fetched for editing using GET.
         """
         return self._request("PUT", "currentScan/comments", json=comments)  
@@ -99,8 +95,7 @@ class IVAdapter:
     def get_results(self, max_results:int, page:int, 
                     search:str, start_date:str, sort_by:str, 
                     only_metadata:bool, ids:str) -> IVResult:
-        """
-        Search the scan results that are stored on the device.       
+        """Search the scan results that are stored on the device.
         """
         return self._request("GET", "results", params={
             "maxResults": max_results,
@@ -109,53 +104,53 @@ class IVAdapter:
             "startDate": start_date,
             "sortBy": sort_by,
             "onlyMetadata": only_metadata,
-            "ids": ids
+            "ids": ids,
         })   
 
     def get_latest_dataobject(self) -> IVResult:
-        """
-        Get the data object of the latest scan result once it has been processed. 
+        """Get the data object of the latest scan result once it has been processed.
         Please note that it can take some time for the device to process the scan 
         result data after a scan has already been finished.       
         """
         return self._request("GET", "results/latest")  
 
     def get_latest_gas_detection(self) -> IVResult:
-        """
-        Get built-in gas detection results for the latest scan result.
+        """Get built-in gas detection results for the latest scan result.
         """
         return self._request("GET", "results/latest/gasDetection") 
     
     def get_gas_detection_result(self, id:str) -> IVResult:
-        """
-        Get built-in gas detection results for a scan result.
+        """Get built-in gas detection results for a scan result.
         """
         return self._request("GET", f"results/id/{id}/gasDetection")
 
     def get_scan_dataobject(self, id:str) -> IVResult:
-        """
-        Get the complete data object of a scan result.
+        """Get the complete data object of a scan result.
         """
         return self._request("GET", f"results/id/{id}")
     
     def get_scan_result_commentobject(self, id:str) -> IVResult:
-        """
-        Get the comment object of a scan result.
+        """Get the comment object of a scan result.
         """
         return self._request("GET", f"results/id/{id}/comments")
+    
+    def put_scan_result_commentobject(self, id:str, comments: Dict[str, Any]) -> IVResult:
+        """Replaces the previous comments object of a scan result.
+        The /results/id/{id}/comments object can first be 
+        fetched for editing using GET.
+        """
+        return self._request("PUT", f"results/id/{id}/comments", json=comments)
 
     # parameters
     def get_parameter_ID(self) -> IVResult:
-        """
-        Get the ID of the parameter preset that currently is used for all new scans. 
+        """Get the ID of the parameter preset that currently is used for all new scans.
         To access other parameter related functionality, use the /parameter/* endpoints.        
         """
         return self._request("GET", "currentParameter")
 
     # WEBSCOKET EVENT HANDLING #
     async def initialize_websocket(self) -> None:
-        """
-        Initialize WebSocket connection for event streaming.
+        """Initialize WebSocket connection for event streaming.
         Must be called after instantiation to open the WebSocket.
         """
         await self._ws.connect()
@@ -165,35 +160,36 @@ class IVAdapter:
         await self._ws.disconnect()
     
     def on_event(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
-        """
-        Register a handler for a WebSocket event.
+        """Register a handler for a WebSocket event.
         
         Args:
+        ----
             event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
             handler: Async or sync callable that receives the event data dict
+
         """
         self._ws.on(event_type, handler)
     
     def off_event(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
-        """
-        Unregister a handler for a WebSocket event.
+        """Unregister a handler for a WebSocket event.
         
         Args:
+        ----
             event_type: The event type
             handler: The handler to remove
+
         """
         self._ws.off(event_type, handler)
 
 # Adapter for the IonVision WebSocket API
 class WebSocketAdapter:
-    """
-    Event-driven WebSocket adapter for IonVision API.
+    """Event-driven WebSocket adapter for IonVision API.
+
     Maintains a persistent connection and dispatches events to registered handlers.
-    
+
     Supported event types:
     - "scan.resultsProcessed": The results of the finished scan have been processed to device storage.
     - "message.error": An error or warning message. Contains unique error code.
-
     """
     
     def __init__(self, base_url: str) -> None:
@@ -258,30 +254,33 @@ class WebSocketAdapter:
             self._running = False
     
     def on(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
-        """
-        Register a handler for an event type.
+        """Register a handler for an event type.
         
         Args:
+        ----
             event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
             handler: Async or sync callable that receives the event data dict
         
         Example:
+        -------
             async def handle_error(data):
                 print(f"Error: {data}")
             
             ws_adapter.on("message.error", handle_error)
+
         """
         if event_type not in self._handlers:
             self._handlers[event_type] = []
         self._handlers[event_type].append(handler)
     
     def off(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
-        """
-        Unregister a handler for an event type.
+        """Unregister a handler for an event type.
         
         Args:
+        ----
             event_type: The event type
             handler: The handler to remove
+
         """
         if event_type in self._handlers:
             try:

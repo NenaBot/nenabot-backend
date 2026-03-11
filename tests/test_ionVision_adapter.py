@@ -1,17 +1,21 @@
 import pytest
 import respx
 import httpx
-from app.adapters.ionVision.ionVision import IVAdapter
+from app.adapters.ionVision import IVAdapter
 
+
+BASE_URL = "http://localhost:8080"
+WS_BASE_URL = "ws://localhost:8080"
 
 @pytest.fixture
-def iv_adapter():
-    return IVAdapter(base_url="http://localhost:8080")
+def iv_adapter() -> IVAdapter:
+    return IVAdapter(base_url=BASE_URL,
+                     ws_base_url=WS_BASE_URL)
 
 
 @respx.mock
-def test_get_current_scan_success(iv_adapter):
-    """Test successful GET /currentScan request"""
+def test_get_current_scan_success(iv_adapter) -> None:
+    """Test successful GET /currentScan request."""
     respx.get("http://localhost:8080/currentScan").mock(
         return_value=httpx.Response(200, json={"scanId": "123", "status": "ongoing"})
     )
@@ -23,8 +27,8 @@ def test_get_current_scan_success(iv_adapter):
 
 
 @respx.mock
-def test_get_current_scan_error(iv_adapter):
-    """Test failed GET /currentScan request"""
+def test_get_current_scan_error(iv_adapter: IVAdapter) -> None:
+    """Test failed GET /currentScan request."""
     respx.get("http://localhost:8080/currentScan").mock(
         return_value=httpx.Response(500, json={"error": "Internal error"})
     )
@@ -36,8 +40,8 @@ def test_get_current_scan_error(iv_adapter):
 
 
 @respx.mock
-def test_start_new_scan(iv_adapter):
-    """Test POST /currentScan request"""
+def test_start_new_scan(iv_adapter: IVAdapter) -> None:
+    """Test POST /currentScan request."""
     respx.post("http://localhost:8080/currentScan").mock(
         return_value=httpx.Response(201, json={"scanId": "456"})
     )
@@ -49,8 +53,8 @@ def test_start_new_scan(iv_adapter):
 
 
 @respx.mock
-def test_replace_scan_comments(iv_adapter):
-    """Test PUT /currentScan/comments request"""
+def test_replace_scan_comments(iv_adapter: IVAdapter) -> None:
+    """Test PUT /currentScan/comments request."""
     comments = {"notes": "test scan"}
     respx.put("http://localhost:8080/currentScan/comments").mock(
         return_value=httpx.Response(200, json={"success": True})
@@ -62,7 +66,7 @@ def test_replace_scan_comments(iv_adapter):
 
 
 @respx.mock
-def test__request_returns_ivresult_on_2xx(iv_adapter):
+def test__request_returns_ivresult_on_2xx(iv_adapter: IVAdapter) -> None:
     """Test that _request returns IVResult(ok=True, payload=parsed_json, error=None) on 2xx."""
     payload = {"status": "ok", "version": "1.2.3"}
     respx.get("http://localhost:8080/health").mock(
