@@ -18,7 +18,6 @@ from app.schemas import (
     Health,
     Job,
     JobCreateRequest,
-    JobEvent,
     MarkerCornersSchema,
     MeasurementSchema,
     PathItem,
