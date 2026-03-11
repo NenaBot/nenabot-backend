@@ -174,6 +174,24 @@ class CalibrationResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+# ---- SSE Job Events ----
+
+
+class JobEvent(BaseModel):
+    """Payload for server-sent events on GET /jobs/{id}/events."""
+
+    type: str  # job:started, job:waypoint_started, job:waypoint_completed, job:completed, job:failed, job:stopped, job:snapshot
+    job_id: str = Field(alias="jobId")
+    state: str
+    last_point_processed: int = Field(0, alias="lastPointProcessed")
+    total_points: int = Field(0, alias="totalPoints")
+    measurement: MeasurementSchema | None = None
+    error: str | None = None
+    timestamp: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+
 # ---- Job creation request ----
 
 

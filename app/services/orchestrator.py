@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import queue
 import threading
 import time
 import uuid
@@ -46,7 +47,38 @@ class OrchestratorService:
         # Per-job pixel path for overlay rendering (job_id → pixel coords)
         self._pixel_paths: dict[str, list[tuple[float, float]]] = {}
 
+        # SSE subscribers: job_id → list of queues (one per connected client)
+        self._job_subscribers: dict[str, list[queue.Queue]] = {}
+        self._subscribers_lock = threading.Lock()
+
     # ---- Job CRUD (DB-backed) ----
+
+    def subscribe(self, job_id: str) -> queue.Queue:
+        """Subscribe to SSE events for a job. Returns a Queue that receives event dicts."""
+        q: queue.Queue = queue.Queue()
+        with self._subscribers_lock:
+            self._job_subscribers.setdefault(job_id, []).append(q)
+        return q
+
+    def unsubscribe(self, job_id: str, q: queue.Queue) -> None:
+        """Remove a subscriber queue for a job."""
+        with self._subscribers_lock:
+            subs = self._job_subscribers.get(job_id, [])
+            try:
+                subs.remove(q)
+            except ValueError:
+                pass
+            if not subs:
+                self._job_subscribers.pop(job_id, None)
+
+    def _publish_event(self, job_id: str, event: dict) -> None:
+        """Push an event dict to all subscribers of a job."""
+        with self._subscribers_lock:
+            for q in self._job_subscribers.get(job_id, []):
+                try:
+                    q.put_nowait(event)
+                except queue.Full:
+                    pass
 
     def create_job(
         self,
@@ -115,6 +147,16 @@ class OrchestratorService:
             target=self._execute_job, args=(job,), daemon=True
         )
         self._job_thread.start()
+
+        self._publish_event(job_id, {
+            "type": "job:started",
+            "job_id": job_id,
+            "state": "running",
+            "last_point_processed": 0,
+            "total_points": len(job.path),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
         return job
 
     def stop_job(self) -> bool:
@@ -167,6 +209,16 @@ class OrchestratorService:
                     job.dry_run,
                 )
 
+                self._publish_event(job.id, {
+                    "type": "job:waypoint_started",
+                    "job_id": job.id,
+                    "state": "running",
+                    "last_point_processed": job.last_point_processed,
+                    "total_points": len(job.path),
+                    "waypoint_index": i,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+
                 scan_result: dict | None = None
 
                 # Look up pixel coordinates for this waypoint
@@ -214,6 +266,16 @@ class OrchestratorService:
                     # Here comes the reading of the DMS
                     scan_start = self._dms.start_new_scan()
                     if scan_start.ok:
+                        # # --- SSE: emit scan-started event (uncomment when DMS is connected) ---
+                        # self._publish_event(job.id, {
+                        #     "type": "job:scanning",
+                        #     "job_id": job.id,
+                        #     "state": "running",
+                        #     "last_point_processed": job.last_point_processed,
+                        #     "total_points": len(job.path),
+                        #     "waypoint_index": i,
+                        #     "timestamp": datetime.now(timezone.utc).isoformat(),
+                        # })
                         for _ in range(120):
                             time.sleep(1.5)
                             status = self._dms.get_current_scan()
@@ -222,6 +284,17 @@ class OrchestratorService:
                             payload = status.payload or {}
                             if payload.get("state") == "finished":
                                 break
+                            # # --- SSE: emit scan-progress event (uncomment when DMS is connected) ---
+                            # self._publish_event(job.id, {
+                            #     "type": "job:scan_progress",
+                            #     "job_id": job.id,
+                            #     "state": "running",
+                            #     "last_point_processed": job.last_point_processed,
+                            #     "total_points": len(job.path),
+                            #     "waypoint_index": i,
+                            #     "scan_state": payload.get("state"),
+                            #     "timestamp": datetime.now(timezone.utc).isoformat(),
+                            # })
                         latest = self._dms.get_latest_dataobject()
                         if latest.ok:
                             scan_result = latest.payload
@@ -246,6 +319,25 @@ class OrchestratorService:
                 self._storage.update_job_state(
                     job.id, job.state, job.last_point_processed, job.error
                 )
+
+                self._publish_event(job.id, {
+                    "type": "job:waypoint_completed",
+                    "job_id": job.id,
+                    "state": "running",
+                    "last_point_processed": job.last_point_processed,
+                    "total_points": len(job.path),
+                    "waypoint_index": i,
+                    "measurement": {
+                        "waypointIndex": measurement.waypoint_index,
+                        "waypoint": {"x": wp.x, "y": wp.y, "z": wp.z, "r": wp.r},
+                        "pixelX": measurement.pixel_x,
+                        "pixelY": measurement.pixel_y,
+                        "scanResult": measurement.scan_result,
+                        "simulated": measurement.simulated,
+                        "timestamp": measurement.timestamp,
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
 
                 # Re-render overlay image with accumulated measurements
                 self._update_overlay(job)
@@ -316,6 +408,16 @@ class OrchestratorService:
             self._storage.update_job_state(
                 job.id, job.state, job.last_point_processed, job.error
             )
+
+            self._publish_event(job.id, {
+                "type": f"job:{job.state}",
+                "job_id": job.id,
+                "state": job.state,
+                "last_point_processed": job.last_point_processed,
+                "total_points": len(job.path),
+                "error": job.error,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
 
     def _update_overlay(self, job: Job) -> None:
         """Re-render the job overlay image with current measurements."""
