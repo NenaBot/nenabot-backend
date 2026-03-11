@@ -80,7 +80,7 @@ def get_job_image(
     job_id: str,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> Response:
-    """Return the annotated overlay JPEG for a job."""
+    """Return the clean base JPEG for a job (no overlay annotations)."""
     img = svc.get_job_image(job_id)
     if not img:
         raise HTTPException(status_code=404, detail="No image for this job")
@@ -105,8 +105,7 @@ def create_job(
         for p in payload.path
     ]
 
-    # Pixel coords for overlay rendering (one per measurement waypoint)
-    canvas_start = svc.calibration_canvas_start
+    # Pixel coords for measurement points (one per measurement waypoint)
     pixel_path: list[tuple[float, float]] = [(p.x, p.y) for p in payload.path]
 
     # Starting position for return-to-start (captured during POST /paths)
@@ -126,7 +125,6 @@ def create_job(
         options=payload.options,
         image_bytes=image_bytes,
         starting_point=starting_wp,
-        canvas_start=canvas_start,
         pixel_path=pixel_path,
     )
     svc.run_job(job.id)

@@ -162,26 +162,7 @@ class StorageAdapter:
             return None
         return row["image"]
 
-    def save_job_base_image(
-        self,
-        job_id: str,
-        image_bytes: bytes,
-    ) -> None:
-        """Store the original (clean) snapshot before any overlay drawing."""
-        self._db.execute(
-            """UPDATE job_images SET base_image = ? WHERE job_id = ?""",
-            (image_bytes, job_id),
-        )
-        self._db.commit()
 
-    def get_job_base_image(self, job_id: str) -> bytes | None:
-        row = self._db.fetchone(
-            "SELECT base_image FROM job_images WHERE job_id = ?",
-            (job_id,),
-        )
-        if not row:
-            return None
-        return row["base_image"]
 
     # ---- internal ----
 

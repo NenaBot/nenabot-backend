@@ -6,18 +6,16 @@ natively supported by browsers.
 
 ## Available streams
 
-| Stream            | GET feed                      | Control (POST/DELETE)                                    | Description                                             |
-| ----------------- | ----------------------------- | -------------------------------------------------------- | ------------------------------------------------------- |
-| Camera (raw)      | `GET /streams/camera/feed`    | `POST /streams/camera`<br>`DELETE /streams/camera`       | Raw camera frames, no processing                        |
-| Detection overlay | `GET /streams/detection/feed` | `POST /streams/detection`<br>`DELETE /streams/detection` | Frames annotated with ArUco markers and battery contour |
+| Stream            | Endpoint                      | Description                                             |
+| ----------------- | ----------------------------- | ------------------------------------------------------- |
+| Camera (raw)      | `GET /streams/camera/feed`    | Raw camera frames, no processing                        |
+| Detection overlay | `GET /streams/detection/feed` | Frames annotated with ArUco markers and battery contour |
 
 ## Stream lifecycle
 
-Each stream has three endpoints:
+Each stream has a single endpoint:
 
-1. **POST** (optional) — Explicitly start a stream. This is optional because streams auto-start on first GET to the feed endpoint.
-2. **GET `/feed`** — Retrieve the live MJPEG stream data. This is a long-lived connection that streams frames continuously.
-3. **DELETE** — Stop the stream and free resources.
+- **GET `/feed`** — Retrieve the live MJPEG stream data. This is a long-lived connection that streams frames continuously. The stream starts automatically when a client connects and stops when the client disconnects.
 
 ## Quick-start
 
