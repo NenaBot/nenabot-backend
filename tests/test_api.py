@@ -82,8 +82,8 @@ def test_jobs_lifecycle(client: TestClient) -> None:
     job_id = job["id"]
     assert job["status"]["state"] in ("created", "running", "completed")
     assert job["dryRun"] is True
-    # path includes starting point prepended + 2 waypoints = 3
-    assert len(job["path"]) == 3
+    # path contains only the 2 measurement waypoints (starting point stored separately)
+    assert len(job["path"]) == 2
 
     # Wait for dry-run to finish (should be fast)
     for _ in range(20):
@@ -94,8 +94,8 @@ def test_jobs_lifecycle(client: TestClient) -> None:
 
     final = client.get(f"/api/jobs/{job_id}").json()
     assert final["status"]["state"] == "completed"
-    assert final["status"]["lastPointProcessed"] == 3  # start + 2 waypoints
-    assert len(final["measurements"]) == 3
+    assert final["status"]["lastPointProcessed"] == 2
+    assert len(final["measurements"]) == 2
     assert final["measurements"][0]["simulated"] is True
 
     response = client.get("/api/jobs")
@@ -132,8 +132,8 @@ def test_dry_run_job_measurements(client: TestClient) -> None:
         time.sleep(0.1)
 
     assert job["status"]["state"] == "completed"
-    # 1 starting point + 3 waypoints = 4
-    assert job["status"]["lastPointProcessed"] == 4
+    # 3 measurement waypoints (starting point not included)
+    assert job["status"]["lastPointProcessed"] == 3
     for m in job["measurements"]:
         assert m["simulated"] is True
         assert m["timestamp"]  # non-empty
