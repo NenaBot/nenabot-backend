@@ -403,10 +403,10 @@
 
     <script>
         const $ = id => document.getElementById(id);
-        const api = () => $('apiUrl').value.replace(/\/+$/, '');
+        const api = () => $('apiUrl').value.replace(/\/+$/, '') + '/api';
 
         let cameraOn = false, detectionOn = false;
-        let currentJobId = null, pollTimer = null;
+        let currentJobId = null, eventSource = null, pollTimer = null;
 
         // Path state
         let detectedPath = [];       // [{x, y}, ...] in pixel coords
@@ -902,7 +902,9 @@
                 currentJobId = job.id;
                 log(`Job created: ${job.id}  state=${job.status?.state}  waypoints=${job.path?.length}`);
                 renderJobStatus(job);
-                startPolling();
+                // Clear measurements table for fresh SSE updates
+                $('measurementsBody').innerHTML = '';
+                startSSE();
             } catch (e) {
                 log('Job creation error: ' + e.message);
             }
@@ -917,7 +919,91 @@
             }
         }
 
-        /* ---- Polling ---- */
+        /* ---- SSE (primary) with polling fallback ---- */
+        function startSSE() {
+            stopSSE();
+            if (!currentJobId) return;
+            const url = `${api()}/jobs/${currentJobId}/events`;
+            log(`SSE connecting → ${url}`);
+            eventSource = new EventSource(url);
+
+            eventSource.addEventListener('job:snapshot', e => {
+                const data = JSON.parse(e.data);
+                log(`SSE snapshot: state=${data.state} pts=${data.lastPointProcessed}/${data.totalPoints}`);
+                updateStatusFromEvent(data);
+            });
+
+            eventSource.addEventListener('job:started', e => {
+                const data = JSON.parse(e.data);
+                log(`SSE: job started`);
+                updateStatusFromEvent(data);
+            });
+
+            eventSource.addEventListener('job:waypoint_started', e => {
+                const data = JSON.parse(e.data);
+                log(`SSE: waypoint ${(data.waypointIndex ?? 0) + 1} started`);
+                updateStatusFromEvent(data);
+            });
+
+            eventSource.addEventListener('job:waypoint_completed', e => {
+                const data = JSON.parse(e.data);
+                log(`SSE: waypoint ${(data.waypointIndex ?? 0) + 1} completed`);
+                updateStatusFromEvent(data);
+                if (data.measurement) appendMeasurement(data.measurement);
+            });
+
+            for (const terminal of ['job:completed', 'job:failed', 'job:stopped']) {
+                eventSource.addEventListener(terminal, e => {
+                    const data = JSON.parse(e.data);
+                    log(`SSE: ${data.state}` + (data.error ? ` — ${data.error}` : ''));
+                    updateStatusFromEvent(data);
+                    stopSSE();
+                });
+            }
+
+            eventSource.onerror = () => {
+                log('SSE connection lost — falling back to polling');
+                stopSSE();
+                startPolling();
+            };
+        }
+
+        function stopSSE() {
+            if (eventSource) { eventSource.close(); eventSource = null; }
+        }
+
+        function updateStatusFromEvent(data) {
+            const s = {
+                state: data.state,
+                lastPointProcessed: data.lastPointProcessed ?? 0,
+                error: data.error || null,
+            };
+            $('jobStatus').innerHTML =
+                `<span class="status-pill state-${s.state}">${s.state.toUpperCase()}</span>` +
+                ` &nbsp; Job: <code>${currentJobId?.slice(0, 8)}…</code>`;
+            $('jobProgress').textContent =
+                `Processed: ${s.lastPointProcessed} / ${data.totalPoints ?? '?'}` +
+                (s.error ? `  —  Error: ${s.error}` : '');
+        }
+
+        function appendMeasurement(m) {
+            const tbody = $('measurementsBody');
+            const w = m.waypoint || {};
+            const scanStr = m.scanResult ? JSON.stringify(m.scanResult).slice(0, 80) : '—';
+            const px = m.pixelX != null ? m.pixelX.toFixed(0) : '—';
+            const py = m.pixelY != null ? m.pixelY.toFixed(0) : '—';
+            tbody.innerHTML += `<tr>
+      <td>${m.waypointIndex}</td>
+      <td>${px}</td><td>${py}</td>
+      <td>${w.x?.toFixed(1)}</td><td>${w.y?.toFixed(1)}</td>
+      <td>${w.z?.toFixed(1)}</td><td>${w.r?.toFixed(1)}</td>
+      <td>${m.simulated ? 'Yes' : 'No'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${scanStr}</td>
+      <td>${m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '—'}</td>
+    </tr>`;
+        }
+
+        /* ---- Polling fallback ---- */
         function startPolling() {
             stopPolling();
             pollTimer = setInterval(pollJob, 800);

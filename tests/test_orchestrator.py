@@ -1,10 +1,10 @@
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.adapters.camera_vision import CameraVisionAdapter
+from app.adapters.camera_vision import CameraVisionAdapter, CaptureResult
 from app.adapters.database import Database
 from app.adapters.ionVision import IVAdapter, IVResult
 from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
@@ -16,9 +16,16 @@ from app.services.orchestrator import OrchestratorService
 def _make_svc(tmp_path: Path) -> OrchestratorService:
     db = Database(db_path=str(tmp_path / "test.db"))
     db.init_db()
+
+    camera = CameraVisionAdapter()
+    camera.ping = MagicMock(return_value=CaptureResult(ok=False, error="no camera in test"))
+
+    robot = RobotAdapter()
+    robot.ping = MagicMock(return_value=RobotResult(ok=False, error="no robot in test"))
+
     return OrchestratorService(
-        camera_vision=CameraVisionAdapter(),
-        robot=RobotAdapter(),
+        camera_vision=camera,
+        robot=robot,
         storage=StorageAdapter(db=db),
         dms=IVAdapter(
             base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"

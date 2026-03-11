@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import queue
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.dependencies import get_orchestrator
 from app.domain.models import Job as DomainJob, Waypoint
@@ -14,6 +18,7 @@ from app.schemas import (
     Health,
     Job,
     JobCreateRequest,
+    JobEvent,
     MarkerCornersSchema,
     MeasurementSchema,
     PathItem,
@@ -273,6 +278,103 @@ def create_path(
         error=result.error,
         options=payload.options,
     )
+
+
+_SSE_DESCRIPTION = """\
+SSE stream of real-time job progress events.
+
+Connect with an `EventSource` (or any HTTP client that accepts
+`text/event-stream`).  The stream behaves as follows:
+
+1. **On connect** — a `job:snapshot` event is sent with the current state so
+   late-joining clients are synchronised immediately.
+2. **While the job runs** — events are pushed in real-time:
+   - `job:started` — job transitioned to *running*
+   - `job:waypoint_started` — about to process a waypoint (includes `waypointIndex`)
+   - `job:waypoint_completed` — measurement recorded (includes `waypointIndex` and `measurement`)
+3. **Terminal event** — one of `job:completed`, `job:failed`, or `job:stopped`.
+   The stream closes automatically after a terminal event.
+
+Each SSE message has an `event` field matching the event type and a JSON
+`data` field whose shape is described by the **JobEvent** schema.
+
+Multiple clients can subscribe to the same job simultaneously.
+"""
+
+
+@router.get(
+    "/jobs/{job_id}/events",
+    response_class=EventSourceResponse,
+    summary="Stream job progress (SSE)",
+    description=_SSE_DESCRIPTION,
+    responses={
+        200: {
+            "description": "SSE event stream.",
+            "content": {
+                "text/event-stream": {
+                    "schema": {"$ref": "#/components/schemas/JobEvent"},
+                },
+            },
+        },
+        404: {"description": "Job not found."},
+    },
+)
+async def job_events(
+    job_id: str,
+    svc: OrchestratorService = Depends(get_orchestrator),
+):
+    job = svc.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    q = svc.subscribe(job_id)
+
+    try:
+        # Snapshot so late-connecting clients get current state
+        yield ServerSentEvent(
+            data={
+                "type": "job:snapshot",
+                "jobId": job_id,
+                "state": job.state,
+                "lastPointProcessed": job.last_point_processed,
+                "totalPoints": len(job.path),
+                "error": job.error,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            event="job:snapshot",
+        )
+
+        if job.state in ("completed", "failed", "stopped"):
+            return
+
+        while True:
+            try:
+                event = q.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(1)
+                continue
+
+            event_type = event.get("type", "job:update")
+            payload = {
+                "type": event_type,
+                "jobId": event.get("job_id"),
+                "state": event.get("state"),
+                "lastPointProcessed": event.get("last_point_processed", 0),
+                "totalPoints": event.get("total_points", 0),
+                "error": event.get("error"),
+                "timestamp": event.get("timestamp"),
+            }
+            if event.get("measurement"):
+                payload["measurement"] = event["measurement"]
+            if "waypoint_index" in event:
+                payload["waypointIndex"] = event["waypoint_index"]
+
+            yield ServerSentEvent(data=payload, event=event_type)
+
+            if event.get("state") in ("completed", "failed", "stopped"):
+                return
+    finally:
+        svc.unsubscribe(job_id, q)
 
 
 def _to_job(job: DomainJob) -> Job:
