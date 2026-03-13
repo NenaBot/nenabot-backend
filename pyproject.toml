@@ -13,3 +13,6 @@ ignore = []
 [tool.ruff.lint.isort]
 combine-as-imports = true
 force-single-line = false
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["S101"]
