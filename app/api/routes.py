@@ -244,7 +244,6 @@ def create_path(
                 height_mm=d.height_mm,
                 center_x=d.center_x,
                 center_y=d.center_y,
-                confidence=d.confidence,
             )
             for d in result.detections
         ],

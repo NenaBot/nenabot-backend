@@ -24,7 +24,6 @@ class PoseEstimate:
     y: float = 0.0
     z: float = 0.0
     r: float = 0.0
-    confidence: float = 0.0
     error: str | None = None
 
 
@@ -41,7 +40,6 @@ class DetectionResult:
     height_mm: float = 0.0
     center_x: float = 0.0
     center_y: float = 0.0
-    confidence: float = 0.0
 
 
 @dataclass
@@ -60,6 +58,37 @@ class DetectionResults:
     marker_count: int = 0
     marker_corners: list[MarkerCorners] = field(default_factory=list)
     error: str | None = None
+
+
+@dataclass
+class DetectionCalibration:
+    """Contour-detection thresholds used by detect() and detect_live()."""
+
+    blur_kernel: int = 3
+    canny_low: int = 50
+    canny_high: int = 150
+    dilate_kernel: int = 3
+    dilate_iterations: int = 1
+    area_min: int = 8000
+    area_max: int = 150000
+    approx_epsilon: float = 0.02
+    vertices_min: int = 4
+    vertices_max: int = 8
+    aspect_min: float = 1.05
+    aspect_max: float = 3.5
+    max_mean_gray: int = 150
+    marker_size_mm: float = 48.0
+
+
+# Paste calibration output here (from: python docs/vision_calibration.py, key [s]).
+# Example:
+# DETECTION_CALIBRATION_OVERRIDES = {
+#     "canny_low": 60,
+#     "canny_high": 170,
+#     "area_min": 9000,
+#     "area_max": 130000,
+# }
+DETECTION_CALIBRATION_OVERRIDES: dict[str, int | float] = {}
 
 
 class CameraVisionAdapter:
@@ -82,12 +111,68 @@ class CameraVisionAdapter:
         self._device_index = device_index
         self._output_dir = Path(output_dir)
         self._marker_size_mm = marker_size_mm
+        self._detection = self._build_detection_calibration(marker_size_mm)
+        self._marker_size_mm = self._detection.marker_size_mm
         self._frame_width = frame_width
         self._frame_height = frame_height
 
         # Streaming state
         self._camera_streaming = False
         self._detection_streaming = False
+
+    @staticmethod
+    def _sanitize_detection_calibration(
+        cfg: DetectionCalibration,
+    ) -> DetectionCalibration:
+        blur_kernel = max(1, int(cfg.blur_kernel))
+        if blur_kernel % 2 == 0:
+            blur_kernel += 1
+
+        canny_low = max(0, int(cfg.canny_low))
+        canny_high = max(canny_low + 1, int(cfg.canny_high))
+
+        dilate_kernel = max(1, int(cfg.dilate_kernel))
+        dilate_iterations = max(0, int(cfg.dilate_iterations))
+
+        area_min = max(0, int(cfg.area_min))
+        area_max = max(area_min + 1, int(cfg.area_max))
+
+        approx_epsilon = max(0.001, float(cfg.approx_epsilon))
+
+        vertices_min = max(3, int(cfg.vertices_min))
+        vertices_max = max(vertices_min, int(cfg.vertices_max))
+
+        aspect_min = max(0.01, float(cfg.aspect_min))
+        aspect_max = max(aspect_min, float(cfg.aspect_max))
+
+        max_mean_gray = max(0, min(255, int(cfg.max_mean_gray)))
+        marker_size_mm = max(1.0, float(cfg.marker_size_mm))
+
+        return DetectionCalibration(
+            blur_kernel=blur_kernel,
+            canny_low=canny_low,
+            canny_high=canny_high,
+            dilate_kernel=dilate_kernel,
+            dilate_iterations=dilate_iterations,
+            area_min=area_min,
+            area_max=area_max,
+            approx_epsilon=approx_epsilon,
+            vertices_min=vertices_min,
+            vertices_max=vertices_max,
+            aspect_min=aspect_min,
+            aspect_max=aspect_max,
+            max_mean_gray=max_mean_gray,
+            marker_size_mm=marker_size_mm,
+        )
+
+    def _build_detection_calibration(
+        self, marker_size_mm: float
+    ) -> DetectionCalibration:
+        cfg = DetectionCalibration(marker_size_mm=marker_size_mm)
+        for key, value in DETECTION_CALIBRATION_OVERRIDES.items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+        return self._sanitize_detection_calibration(cfg)
 
     # ---- health check ----
 
@@ -146,6 +231,8 @@ class CameraVisionAdapter:
         if image is None:
             return DetectionResults(False, error="Unable to read image")
 
+        cfg = self._detection
+
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         # --- ArUco marker for scale ---
@@ -158,7 +245,7 @@ class CameraVisionAdapter:
         if ids is not None and len(marker_corners) > 0:
             first_corner = marker_corners[0][0]
             side_px = float(np.linalg.norm(first_corner[0] - first_corner[1]))
-            pixels_per_mm = side_px / self._marker_size_mm
+            pixels_per_mm = side_px / cfg.marker_size_mm
             for mc in marker_corners:
                 aruco_corners_out.append(
                     MarkerCorners(
@@ -169,10 +256,10 @@ class CameraVisionAdapter:
                 )
 
         # --- battery contour detection ---
-        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-        edges = cv2.Canny(blurred, 50, 150)
-        kernel = np.ones((3, 3), np.uint8)
-        edges = cv2.dilate(edges, kernel, iterations=1)
+        blurred = cv2.GaussianBlur(gray, (cfg.blur_kernel, cfg.blur_kernel), 0)
+        edges = cv2.Canny(blurred, cfg.canny_low, cfg.canny_high)
+        kernel = np.ones((cfg.dilate_kernel, cfg.dilate_kernel), np.uint8)
+        edges = cv2.dilate(edges, kernel, iterations=cfg.dilate_iterations)
         contours, _ = cv2.findContours(
             edges,
             cv2.RETR_EXTERNAL,
@@ -183,22 +270,22 @@ class CameraVisionAdapter:
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < 8000 or area > 150000:
+            if area < cfg.area_min or area > cfg.area_max:
                 continue
             peri = cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
-            if len(approx) < 4 or len(approx) > 8:
+            approx = cv2.approxPolyDP(contour, cfg.approx_epsilon * peri, True)
+            if len(approx) < cfg.vertices_min or len(approx) > cfg.vertices_max:
                 continue
             rect = cv2.minAreaRect(contour)
             w, h = rect[1]
             if w == 0 or h == 0:
                 continue
             aspect = max(w, h) / min(w, h)
-            if aspect < 1.05 or aspect > 3.5:
+            if aspect < cfg.aspect_min or aspect > cfg.aspect_max:
                 continue
             mask = np.zeros(gray.shape, dtype=np.uint8)
             cv2.drawContours(mask, [contour], -1, 255, -1)
-            if cv2.mean(gray, mask=mask)[0] > 150:
+            if cv2.mean(gray, mask=mask)[0] > cfg.max_mean_gray:
                 continue
 
             box = cv2.boxPoints(rect)
@@ -214,7 +301,6 @@ class CameraVisionAdapter:
                     height_mm=height_mm,
                     center_x=center_x,
                     center_y=center_y,
-                    confidence=0.7 if pixels_per_mm else 0.3,
                 )
             )
 
@@ -240,6 +326,8 @@ class CameraVisionAdapter:
         import cv2
         import numpy as np
 
+        cfg = self._detection
+
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         annotated = frame.copy()
 
@@ -256,12 +344,12 @@ class CameraVisionAdapter:
             )
             first_corner = marker_corners[0][0]
             side_px = float(np.linalg.norm(first_corner[0] - first_corner[1]))
-            pixels_per_mm = side_px / self._marker_size_mm
+            pixels_per_mm = side_px / cfg.marker_size_mm
 
-        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-        edges = cv2.Canny(blurred, 50, 150)
-        kernel = np.ones((3, 3), np.uint8)
-        edges = cv2.dilate(edges, kernel, iterations=1)
+        blurred = cv2.GaussianBlur(gray, (cfg.blur_kernel, cfg.blur_kernel), 0)
+        edges = cv2.Canny(blurred, cfg.canny_low, cfg.canny_high)
+        kernel = np.ones((cfg.dilate_kernel, cfg.dilate_kernel), np.uint8)
+        edges = cv2.dilate(edges, kernel, iterations=cfg.dilate_iterations)
         contours, _ = cv2.findContours(
             edges,
             cv2.RETR_EXTERNAL,
@@ -270,22 +358,22 @@ class CameraVisionAdapter:
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < 8000 or area > 150000:
+            if area < cfg.area_min or area > cfg.area_max:
                 continue
             peri = cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
-            if len(approx) < 4 or len(approx) > 8:
+            approx = cv2.approxPolyDP(contour, cfg.approx_epsilon * peri, True)
+            if len(approx) < cfg.vertices_min or len(approx) > cfg.vertices_max:
                 continue
             rect = cv2.minAreaRect(contour)
             w, h = rect[1]
             if w == 0 or h == 0:
                 continue
             aspect = max(w, h) / min(w, h)
-            if aspect < 1.05 or aspect > 3.5:
+            if aspect < cfg.aspect_min or aspect > cfg.aspect_max:
                 continue
             mask = np.zeros(gray.shape, dtype=np.uint8)
             cv2.drawContours(mask, [contour], -1, 255, -1)
-            if cv2.mean(gray, mask=mask)[0] > 150:
+            if cv2.mean(gray, mask=mask)[0] > cfg.max_mean_gray:
                 continue
 
             box = cv2.boxPoints(rect).astype(int)

@@ -93,7 +93,6 @@ class PathItem(BaseModel):
     height_mm: float = 0.0
     center_x: float = 0.0
     center_y: float = 0.0
-    confidence: float = 0.0
 
 
 class MarkerCornersSchema(BaseModel):
