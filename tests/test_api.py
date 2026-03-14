@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.camera_vision import CaptureResult
+from app.adapters.camera_vision import CaptureResult, DetectionResults
 from app.adapters.robot import RobotResult
 from app.dependencies import create_orchestrator, get_orchestrator
 from app.domain.models import Waypoint
@@ -23,6 +23,12 @@ def client(tmp_path: Path) -> TestClient:
     with patch(
         "app.adapters.camera_vision.CameraVisionAdapter.ping",
         return_value=CaptureResult(ok=False, error="no camera in test"),
+    ), patch(
+        "app.adapters.camera_vision.CameraVisionAdapter.capture",
+        return_value=CaptureResult(ok=True, image_path="/tmp/fake_capture.jpg"),
+    ), patch(
+        "app.adapters.camera_vision.CameraVisionAdapter.detect",
+        return_value=DetectionResults(ok=True, detections=[]),
     ), patch(
         "app.adapters.robot.RobotAdapter.connect_first_available",
         return_value=RobotResult(ok=False, error="no robot in test"),
