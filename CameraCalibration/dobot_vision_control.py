@@ -3,6 +3,24 @@ import numpy as np
 import json
 import DobotDllType as dType
 
+# INITIALIZE DOBOT
+import time
+
+api = dType.load()
+dType.ConnectDobot(api, "COM5", 115200)
+dType.SetQueuedCmdClear(api)
+dType.SetPTPCommonParams(api, 100, 100)
+
+# --- THE AUTOMATIC HOMING SEQUENCE ---
+print("Homing Dobot... Please stand clear!")
+dType.SetHOMECmd(api, temp=0, isQueued=1)
+
+# The homing sequence takes about 15 seconds to physically complete.
+# We pause the Python script here so the user can't click prematurely.
+time.sleep(15) 
+print("Homing Complete! System Ready.")
+
+
 # 1. LOAD DATA
 with open("camera_params.json", "r") as f:
     calib = json.load(f)
