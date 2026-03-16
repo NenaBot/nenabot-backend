@@ -4,7 +4,14 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.adapters.camera_vision import CameraVisionAdapter, CaptureResult
+from app.adapters.camera_vision import (
+    CameraVisionAdapter,
+    CaptureResult,
+    Corner,
+    DetectionResult,
+    DetectionResults,
+    MarkerCorners,
+)
 from app.adapters.database import Database
 from app.adapters.ionVision import IVAdapter, IVResult
 from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
@@ -216,6 +223,117 @@ def test_is_calibrated_property(tmp_path: Path) -> None:
 
     svc._cal_pixels_per_mm = 2.0
     assert svc.is_calibrated is True
+
+
+# ---- ORC-TC-013: sort_pixel_path_from_canvas_start path ordering ----
+
+
+def test_sort_pixel_path_from_canvas_start_orders_nearest_neighbor(
+    tmp_path: Path,
+) -> None:
+    """sort_pixel_path_from_canvas_start should anchor at canvas start and return sorted waypoints only."""
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+
+    waypoints = [
+        (700.0, 400.0),
+        (642.0, 401.0),
+        (650.0, 400.0),
+    ]
+
+    sorted_points = svc.sort_pixel_path_from_canvas_start(waypoints)
+    assert sorted_points == [
+        (642.0, 401.0),
+        (650.0, 400.0),
+        (700.0, 400.0),
+    ]
+    assert (640.0, 400.0) not in sorted_points
+
+
+def test_sort_pixel_path_from_canvas_start_raises_when_uncalibrated(
+    tmp_path: Path,
+) -> None:
+    """sort_pixel_path_from_canvas_start should raise without canvas start calibration."""
+    svc = _make_svc(tmp_path)
+    with pytest.raises(RuntimeError, match="Not calibrated"):
+        svc.sort_pixel_path_from_canvas_start([(1.0, 2.0)])
+
+
+def test_detect_path_returns_sorted_detections(tmp_path: Path) -> None:
+    """detect_path() should return detections sorted by nearest-neighbor from canvas start."""
+    svc = _make_svc(tmp_path)
+
+    image_path = tmp_path / "capture.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    marker = MarkerCorners(
+        corners=[
+            Corner(x=10.0, y=10.0),
+            Corner(x=20.0, y=10.0),
+            Corner(x=20.0, y=20.0),
+            Corner(x=10.0, y=20.0),
+        ]
+    )
+
+    # Create detections at various positions: unsorted
+    detections = [
+        DetectionResult(
+            corners=[],
+            width_mm=50.0,
+            height_mm=50.0,
+            center_x=700.0,  # far right
+            center_y=400.0,
+            confidence=0.9,
+        ),
+        DetectionResult(
+            corners=[],
+            width_mm=50.0,
+            height_mm=50.0,
+            center_x=642.0,  # closest to canvas start
+            center_y=401.0,
+            confidence=0.9,
+        ),
+        DetectionResult(
+            corners=[],
+            width_mm=50.0,
+            height_mm=50.0,
+            center_x=650.0,  # middle distance
+            center_y=400.0,
+            confidence=0.9,
+        ),
+    ]
+
+    with patch.object(
+        svc._camera_vision,
+        "capture",
+        return_value=CaptureResult(ok=True, image_path=str(image_path)),
+    ), patch.object(
+        svc._camera_vision,
+        "detect",
+        return_value=DetectionResults(
+            ok=True,
+            detections=detections,
+            pixels_per_mm=2.0,
+            marker_count=1,
+            marker_corners=[marker],
+            error=None,
+        ),
+    ), patch.object(
+        svc._robot,
+        "get_pose",
+        return_value=PoseResult(ok=True, x=100.0, y=200.0, z=0.0, r=0.0),
+    ):
+        result = svc.detect_path()
+
+    assert result.ok is True
+    assert len(result.detections) == 3
+    # Verify detections are sorted by nearest-neighbor from canvas start (640, 450)
+    # Expected order: (642, 401) → (650, 400) → (700, 400)
+    assert result.detections[0].center_x == 642.0
+    assert result.detections[0].center_y == 401.0
+    assert result.detections[1].center_x == 650.0
+    assert result.detections[1].center_y == 400.0
+    assert result.detections[2].center_x == 700.0
+    assert result.detections[2].center_y == 400.0
 
 
 # ---- ORC-TC-014: Job fails on robot move error ----

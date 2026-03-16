@@ -81,7 +81,7 @@ def test_jobs_lifecycle(client: TestClient) -> None:
     # Calibration: robot_start=(100,200), canvas_start=(640,400), ppm=2
     path = [{"x": 650.0, "y": 390.0}, {"x": 660.0, "y": 380.0}]
     response = client.post(
-        "/api/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+        "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
     assert response.status_code == 201
     job = response.json()
@@ -93,26 +93,26 @@ def test_jobs_lifecycle(client: TestClient) -> None:
 
     # Wait for dry-run to finish (should be fast)
     for _ in range(20):
-        resp = client.get(f"/api/jobs/{job_id}")
+        resp = client.get(f"/api/job/{job_id}")
         if resp.json()["status"]["state"] in ("completed", "failed", "stopped"):
             break
         time.sleep(0.1)
 
-    final = client.get(f"/api/jobs/{job_id}").json()
+    final = client.get(f"/api/job/{job_id}").json()
     assert final["status"]["state"] == "completed"
     assert final["status"]["lastPointProcessed"] == 2
     assert len(final["measurements"]) == 2
     assert final["measurements"][0]["simulated"] is True
 
-    response = client.get("/api/jobs")
+    response = client.get("/api/job")
     assert response.status_code == 200
     assert any(j["id"] == job_id for j in response.json())
 
-    response = client.get("/api/jobs/latest")
+    response = client.get("/api/job/latest")
     assert response.status_code == 200
     assert response.json()["id"] == job_id
 
-    response = client.delete(f"/api/jobs/{job_id}")
+    response = client.delete(f"/api/job/{job_id}")
     assert response.status_code == 204
 
 
@@ -125,14 +125,14 @@ def test_dry_run_job_measurements(client: TestClient) -> None:
         {"x": 640, "y": 380},  # 20px up → robot x increases by 10mm
     ]
     res = client.post(
-        "/api/jobs", json={"path": path, "dryRun": True, "workZ": 5, "workR": 0}
+        "/api/job", json={"path": path, "dryRun": True, "workZ": 5, "workR": 0}
     )
     assert res.status_code == 201
     job_id = res.json()["id"]
 
     # Poll until done
     for _ in range(30):
-        job = client.get(f"/api/jobs/{job_id}").json()
+        job = client.get(f"/api/job/{job_id}").json()
         if job["status"]["state"] in ("completed", "failed"):
             break
         time.sleep(0.1)
@@ -150,7 +150,7 @@ def test_stop_job(client: TestClient) -> None:
     # Use many pixel waypoints so the job is still running when we stop it
     path = [{"x": float(i), "y": float(i)} for i in range(50)]
     res = client.post(
-        "/api/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+        "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
     job_id = res.json()["id"]
     time.sleep(0.2)  # let it process a few
@@ -161,7 +161,7 @@ def test_stop_job(client: TestClient) -> None:
 
     # Wait for thread to finish
     for _ in range(20):
-        job = client.get(f"/api/jobs/{job_id}").json()
+        job = client.get(f"/api/job/{job_id}").json()
         if job["status"]["state"] in ("stopped", "completed"):
             break
         time.sleep(0.1)
@@ -172,15 +172,15 @@ def test_stop_job(client: TestClient) -> None:
 
 
 def test_profiles_and_paths(client: TestClient) -> None:
-    response = client.get("/api/profiles")
+    response = client.get("/api/profile")
     assert response.status_code == 200
     assert response.json()
 
-    response = client.get("/api/profiles/default")
+    response = client.get("/api/profile/default")
     assert response.status_code == 200
     assert response.json()["name"]
 
-    response = client.post("/api/paths", json={"options": {"speed": 1}})
+    response = client.post("/api/path/detect", json={"options": {"speed": 1}})
     assert response.status_code == 201
     body = response.json()
     assert "ok" in body
@@ -192,12 +192,12 @@ def test_job_image_endpoint(client: TestClient) -> None:
     """GET /jobs/{id}/image returns 404 when no image is stored."""
     path = [{"x": 1, "y": 2}]
     res = client.post(
-        "/api/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+        "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
     job_id = res.json()["id"]
 
     # Image endpoint should return 404 if no image was attached
-    img_res = client.get(f"/api/jobs/{job_id}/image")
+    img_res = client.get(f"/api/job/{job_id}/image")
     assert img_res.status_code == 404
 
 
@@ -205,18 +205,18 @@ def test_job_persists_across_reads(client: TestClient) -> None:
     """Jobs should survive re-reads from DB after completion."""
     path = [{"x": 650, "y": 390}, {"x": 660, "y": 380}]
     res = client.post(
-        "/api/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+        "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
     job_id = res.json()["id"]
 
     for _ in range(30):
-        job = client.get(f"/api/jobs/{job_id}").json()
+        job = client.get(f"/api/job/{job_id}").json()
         if job["status"]["state"] in ("completed", "failed"):
             break
         time.sleep(0.1)
 
     # Re-fetch from DB
-    job = client.get(f"/api/jobs/{job_id}").json()
+    job = client.get(f"/api/job/{job_id}").json()
     assert job["status"]["state"] == "completed"
 
 
@@ -243,7 +243,7 @@ def test_job_creation_requires_calibration(tmp_path: Path) -> None:
         with TestClient(app) as uncalibrated_client:
             path = [{"x": 1.0, "y": 2.0}]
             response = uncalibrated_client.post(
-                "/api/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+                "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
             )
             assert response.status_code == 409
             assert "calibrat" in response.json()["detail"].lower()
@@ -255,7 +255,7 @@ def test_job_sse_events(client: TestClient) -> None:
     """SSE endpoint should stream job progress events for a dry-run job."""
     path = [{"x": 650, "y": 390}, {"x": 660, "y": 380}]
     res = client.post(
-        "/api/jobs", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
+        "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
     assert res.status_code == 201
     job_id = res.json()["id"]
@@ -263,7 +263,7 @@ def test_job_sse_events(client: TestClient) -> None:
     # Connect to SSE stream
     import json as _json
 
-    with client.stream("GET", f"/api/jobs/{job_id}/events") as response:
+    with client.stream("GET", f"/api/job/{job_id}/events") as response:
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
 
@@ -286,3 +286,56 @@ def test_job_sse_events(client: TestClient) -> None:
     wp_completed = [e for e in events if e["type"] == "job:waypoint_completed"]
     assert len(wp_completed) >= 1
     assert wp_completed[0].get("measurement") is not None
+
+
+def test_path_check_sorts_from_canvas_start(client: TestClient) -> None:
+    """POST /path should sort waypoints using stored canvas start as anchor."""
+    # Fixture calibration sets canvas start to (640, 400)
+    payload = {
+        "waypoints": [
+            {"x": 700.0, "y": 400.0},
+            {"x": 642.0, "y": 401.0},
+            {"x": 650.0, "y": 400.0},
+        ]
+    }
+
+    response = client.post("/api/path", json=payload)
+    assert response.status_code == 200
+
+    body = response.json()
+    points = body.get("path")
+    assert points is not None
+    assert points == [
+        {"x": 642.0, "y": 401.0},
+        {"x": 650.0, "y": 400.0},
+        {"x": 700.0, "y": 400.0},
+    ]
+
+
+def test_path_check_requires_calibration(tmp_path: Path) -> None:
+    """POST /path should return 409 when canvas start is not available."""
+    with patch(
+        "app.adapters.camera_vision.CameraVisionAdapter.ping",
+        return_value=CaptureResult(ok=False, error="no camera in test"),
+    ), patch(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        return_value=RobotResult(ok=False, error="no robot in test"),
+    ), patch(
+        "app.adapters.robot.RobotAdapter.ping",
+        return_value=RobotResult(ok=False, error="no robot in test"),
+    ):
+        test_orchestrator = create_orchestrator(
+            db_path=str(tmp_path / "test_nocal_path.db"),
+            dms_base_url="http://localhost:8080",
+        )
+        app.dependency_overrides[get_orchestrator] = lambda: test_orchestrator
+
+        with TestClient(app) as uncalibrated_client:
+            response = uncalibrated_client.post(
+                "/api/path",
+                json={"waypoints": [{"x": 1.0, "y": 2.0}]},
+            )
+            assert response.status_code == 409
+            assert "calibrat" in response.json()["detail"].lower()
+
+        app.dependency_overrides.clear()

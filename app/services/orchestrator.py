@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
 import queue
 import threading
 import time
@@ -533,6 +534,44 @@ class OrchestratorService:
     def calibration_pixels_per_mm(self) -> float | None:
         return self._cal_pixels_per_mm
 
+    def sort_pixel_path_from_canvas_start(
+        self,
+        waypoints: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        """Order pixel waypoints by nearest-neighbor walk from canvas start.
+
+        The canvas start is prepended internally as the first point to anchor
+        the route, then removed from the returned list.
+        """
+        if self._cal_canvas_start is None:
+            raise RuntimeError(
+                "Not calibrated — call POST /path/detect first "
+                "(with robot arm at starting position)"
+            )
+
+        if not waypoints:
+            return []
+
+        start = self._cal_canvas_start
+        ordered_with_start: list[tuple[float, float]] = [start]
+        remaining = list(waypoints)
+        current = start
+
+        while remaining:
+            next_idx, next_point = min(
+                enumerate(remaining),
+                key=lambda item: math.hypot(
+                    item[1][0] - current[0],
+                    item[1][1] - current[1],
+                ),
+            )
+            ordered_with_start.append(next_point)
+            current = next_point
+            remaining.pop(next_idx)
+
+        # Remove the prepended canvas start before returning to clients.
+        return ordered_with_start[1:]
+
     def pixel_to_robot(
         self, px: float, py: float, work_z: float, work_r: float
     ) -> Waypoint:
@@ -608,6 +647,18 @@ class OrchestratorService:
         else:
             logger.warning("Calibration: no ArUco markers — canvas start not set")
 
+        # sort the detected corners into a path ordered by nearest neighbor from the canvas start
+        if result.detections:
+            waypoints = [(d.center_x, d.center_y) for d in result.detections]
+            sorted_waypoints = self.sort_pixel_path_from_canvas_start(waypoints)
+
+            # Map sorted waypoints back to their original detection objects
+            # Create a lookup by center coords to find corresponding detection
+            detection_map = {(d.center_x, d.center_y): d for d in result.detections}
+
+            result.detections = [
+                detection_map[wp] for wp in sorted_waypoints if wp in detection_map
+            ]
         return result
 
     @property

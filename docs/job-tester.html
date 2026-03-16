@@ -311,6 +311,7 @@
                     <div class="sep"></div>
                     <button class="secondary" onclick="clearAllWaypoints()">Clear Path</button>
                     <div class="sep"></div>
+                    <button class="secondary" onclick="checkPath()">Check Path</button>
                     <button class="secondary" onclick="testMoveToWP()">Test Move</button>
                 </div>
             </div>
@@ -575,7 +576,7 @@
         async function detectPath() {
             log('Detecting path (robot arm must be at start position)…');
             try {
-                const res = await fetch(`${api()}/paths`, {
+                const res = await fetch(`${api()}/path/detect`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ options: {} }),
@@ -659,6 +660,47 @@
                 ? '  ✓ calibrated'
                 : '  ⚠ uncalibrated (run Detect with robot at start pos)';
             $('pathInfo').textContent = text;
+        }
+
+        /* ---- Path checking (nearest-neighbor sorting) ---- */
+        async function checkPath() {
+            if (!detectedPath.length) {
+                log('⚠ No waypoints — detect or add waypoints first.');
+                return;
+            }
+            if (!calibration?.calibrated) {
+                log('⚠ Cannot check path — not calibrated. Run Detect with robot arm at start position.');
+                return;
+            }
+
+            log('Checking path (sorting from canvas start)…');
+            try {
+                const res = await fetch(`${api()}/path`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ waypoints: detectedPath.map(w => ({ x: w.x, y: w.y })) }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    log(`Path check error: ${err.detail || JSON.stringify(err)}`);
+                    return;
+                }
+
+                const data = await res.json();
+                const sorted = data.path || [];
+
+                log(`✓ Path checked: ${sorted.length} waypoints sorted from canvas start`);
+                log(`Sorted order: ${sorted.map((p, i) => `#${i + 1}(${p.x.toFixed(0)},${p.y.toFixed(0)})`).join(' → ')}`);
+
+                // Update detectedPath with sorted waypoints for visualization
+                detectedPath = sorted.map(p => ({ x: p.x, y: p.y }));
+                updatePathInfo();
+                redrawCanvas();
+
+            } catch (e) {
+                log('Path check error: ' + e.message);
+            }
         }
 
         function clearAllWaypoints() {
@@ -888,7 +930,7 @@
 
             log(`Starting ${dryRun ? 'DRY RUN' : 'REAL'} job with ${path.length} pixel waypoints…`);
             try {
-                const res = await fetch(`${api()}/jobs`, {
+                const res = await fetch(`${api()}/job`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
@@ -923,7 +965,7 @@
         function startSSE() {
             stopSSE();
             if (!currentJobId) return;
-            const url = `${api()}/jobs/${currentJobId}/events`;
+            const url = `${api()}/job/${currentJobId}/events`;
             log(`SSE connecting → ${url}`);
             eventSource = new EventSource(url);
 
@@ -1015,7 +1057,7 @@
         async function pollJob() {
             if (!currentJobId) return;
             try {
-                const res = await fetch(`${api()}/jobs/${currentJobId}`);
+                const res = await fetch(`${api()}/job/${currentJobId}`);
                 const job = await res.json();
                 renderJobStatus(job);
                 if (['completed', 'failed', 'stopped'].includes(job.status?.state)) {

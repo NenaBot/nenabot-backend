@@ -87,6 +87,14 @@ class PathRequest(BaseModel):
     options: dict[str, Any] | None = None
 
 
+class PathCheckRequest(BaseModel):
+    waypoints: list[PixelPointSchema] = Field(default_factory=list)
+
+
+class PathCheckResponse(BaseModel):
+    path: list[PixelPointSchema] = Field(default_factory=list)
+
+
 class PathItem(BaseModel):
     corners: list[CornerSchema] = Field(default_factory=list)
     width_mm: float = 0.0
