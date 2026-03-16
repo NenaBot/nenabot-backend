@@ -282,7 +282,6 @@ def test_detect_path_returns_sorted_detections(tmp_path: Path) -> None:
             height_mm=50.0,
             center_x=700.0,  # far right
             center_y=400.0,
-            confidence=0.9,
         ),
         DetectionResult(
             corners=[],
@@ -290,7 +289,6 @@ def test_detect_path_returns_sorted_detections(tmp_path: Path) -> None:
             height_mm=50.0,
             center_x=642.0,  # closest to canvas start
             center_y=401.0,
-            confidence=0.9,
         ),
         DetectionResult(
             corners=[],
@@ -298,7 +296,6 @@ def test_detect_path_returns_sorted_detections(tmp_path: Path) -> None:
             height_mm=50.0,
             center_x=650.0,  # middle distance
             center_y=400.0,
-            confidence=0.9,
         ),
     ]
 

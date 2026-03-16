@@ -78,8 +78,7 @@ The job object encapsulates the configuration, output data, and current processi
             "width_mm": 85.5,
             "height_mm": 92.3,
             "center_x": 150.0,
-            "center_y": 150.0,
-            "confidence": 0.95
+            "center_y": 150.0
         }
     ],
     "detections_sorted": "boolean — true if detections are ordered by nearest-neighbor from canvas start",

@@ -146,8 +146,7 @@ Example response (trimmed):
             "width_mm": 18.0,
             "height_mm": 18.0,
             "center_x": 473.6,
-            "center_y": 242.6,
-            "confidence": 0.97
+            "center_y": 242.6
         }
     ],
     "image_base64": "...",
