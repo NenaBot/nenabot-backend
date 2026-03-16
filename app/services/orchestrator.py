@@ -647,6 +647,19 @@ class OrchestratorService:
         else:
             logger.warning("Calibration: no ArUco markers — canvas start not set")
 
+        # sort the detected corners into a path ordered by nearest neighbor from the canvas start
+        if result.detections:
+            waypoints = [(d.center_x, d.center_y) for d in result.detections]
+            sorted_waypoints = self.sort_pixel_path_from_canvas_start(waypoints)
+
+            # Map sorted waypoints back to their original detection objects
+            # Create a lookup by center coords to find corresponding detection
+            detection_map = {(d.center_x, d.center_y): d for d in result.detections}
+
+            result.detections = [
+                detection_map[wp] for wp in sorted_waypoints
+                if wp in detection_map
+            ]
         return result
 
     @property

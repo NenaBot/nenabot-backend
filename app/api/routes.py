@@ -221,9 +221,6 @@ async def detection_feed(
 @router.post(
     "/path/detect", response_model=PathResponse, status_code=status.HTTP_201_CREATED
 )
-@router.post(
-    "/path/detect", response_model=PathResponse, status_code=status.HTTP_201_CREATED
-)
 def detect_path(
     payload: PathRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
