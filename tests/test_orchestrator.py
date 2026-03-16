@@ -218,6 +218,40 @@ def test_is_calibrated_property(tmp_path: Path) -> None:
     assert svc.is_calibrated is True
 
 
+# ---- ORC-TC-013: sort_pixel_path_from_canvas_start path ordering ----
+
+
+def test_sort_pixel_path_from_canvas_start_orders_nearest_neighbor(
+    tmp_path: Path,
+) -> None:
+    """sort_pixel_path_from_canvas_start should anchor at canvas start and return sorted waypoints only."""
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+
+    waypoints = [
+        (700.0, 400.0),
+        (642.0, 401.0),
+        (650.0, 400.0),
+    ]
+
+    sorted_points = svc.sort_pixel_path_from_canvas_start(waypoints)
+    assert sorted_points == [
+        (642.0, 401.0),
+        (650.0, 400.0),
+        (700.0, 400.0),
+    ]
+    assert (640.0, 400.0) not in sorted_points
+
+
+def test_sort_pixel_path_from_canvas_start_raises_when_uncalibrated(
+    tmp_path: Path,
+) -> None:
+    """sort_pixel_path_from_canvas_start should raise without canvas start calibration."""
+    svc = _make_svc(tmp_path)
+    with pytest.raises(RuntimeError, match="Not calibrated"):
+        svc.sort_pixel_path_from_canvas_start([(1.0, 2.0)])
+
+
 # ---- ORC-TC-014: Job fails on robot move error ----
 
 

@@ -20,6 +20,8 @@ from app.schemas import (
     JobCreateRequest,
     MarkerCornersSchema,
     MeasurementSchema,
+    PathCheckRequest,
+    PathCheckResponse,
     PathItem,
     PathRequest,
     PathResponse,
@@ -216,7 +218,9 @@ async def detection_feed(
     )
 
 
-@router.post("/paths", response_model=PathResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/path/detect", response_model=PathResponse, status_code=status.HTTP_201_CREATED
+)
 def create_path(
     payload: PathRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
@@ -358,6 +362,27 @@ async def job_events(
                 return
     finally:
         svc.unsubscribe(job_id, q)
+
+
+@router.post("/path", status_code=status.HTTP_200_OK)
+def check_path(
+    payload: PathCheckRequest,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> PathCheckResponse:
+    if not svc.calibration_canvas_start:
+        raise HTTPException(
+            status_code=409,
+            detail="Not calibrated — call POST /path/detect first "
+            "(with robot arm at starting position)",
+        )
+
+    sorted_points = svc.sort_pixel_path_from_canvas_start(
+        [(p.x, p.y) for p in payload.waypoints]
+    )
+
+    return PathCheckResponse(
+        path=[PixelPointSchema(x=x, y=y) for x, y in sorted_points]
+    )
 
 
 def _to_job(job: DomainJob) -> Job:

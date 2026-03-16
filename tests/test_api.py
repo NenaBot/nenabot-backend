@@ -286,3 +286,54 @@ def test_job_sse_events(client: TestClient) -> None:
     wp_completed = [e for e in events if e["type"] == "job:waypoint_completed"]
     assert len(wp_completed) >= 1
     assert wp_completed[0].get("measurement") is not None
+
+
+def test_path_check_sorts_from_canvas_start(client: TestClient) -> None:
+    """POST /path should sort waypoints using stored canvas start as anchor."""
+    # Fixture calibration sets canvas start to (640, 400)
+    payload = {
+        "waypoints": [
+            {"x": 700.0, "y": 400.0},
+            {"x": 642.0, "y": 401.0},
+            {"x": 650.0, "y": 400.0},
+        ]
+    }
+
+    response = client.post("/api/path", json=payload)
+    assert response.status_code == 200
+
+    points = response.json()["waypoints"]
+    assert points == [
+        {"x": 642.0, "y": 401.0},
+        {"x": 650.0, "y": 400.0},
+        {"x": 700.0, "y": 400.0},
+    ]
+
+
+def test_path_check_requires_calibration(tmp_path: Path) -> None:
+    """POST /path should return 409 when canvas start is not available."""
+    with patch(
+        "app.adapters.camera_vision.CameraVisionAdapter.ping",
+        return_value=CaptureResult(ok=False, error="no camera in test"),
+    ), patch(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        return_value=RobotResult(ok=False, error="no robot in test"),
+    ), patch(
+        "app.adapters.robot.RobotAdapter.ping",
+        return_value=RobotResult(ok=False, error="no robot in test"),
+    ):
+        test_orchestrator = create_orchestrator(
+            db_path=str(tmp_path / "test_nocal_path.db"),
+            dms_base_url="http://localhost:8080",
+        )
+        app.dependency_overrides[get_orchestrator] = lambda: test_orchestrator
+
+        with TestClient(app) as uncalibrated_client:
+            response = uncalibrated_client.post(
+                "/api/path",
+                json={"waypoints": [{"x": 1.0, "y": 2.0}]},
+            )
+            assert response.status_code == 409
+            assert "calibrat" in response.json()["detail"].lower()
+
+        app.dependency_overrides.clear()
