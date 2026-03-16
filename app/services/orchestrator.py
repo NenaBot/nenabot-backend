@@ -657,8 +657,7 @@ class OrchestratorService:
             detection_map = {(d.center_x, d.center_y): d for d in result.detections}
 
             result.detections = [
-                detection_map[wp] for wp in sorted_waypoints
-                if wp in detection_map
+                detection_map[wp] for wp in sorted_waypoints if wp in detection_map
             ]
         return result
 
