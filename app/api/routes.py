@@ -55,13 +55,13 @@ def status_route(svc: OrchestratorService = Depends(get_orchestrator)) -> Status
     return Status(state=svc.status())
 
 
-@router.get("/jobs", response_model=list[Job])
+@router.get("/job", response_model=list[Job])
 def list_jobs(svc: OrchestratorService = Depends(get_orchestrator)) -> list[Job]:
     jobs = svc.list_jobs()
     return [_to_job(job) for job in jobs]
 
 
-@router.get("/jobs/latest", response_model=Job)
+@router.get("/job/latest", response_model=Job)
 def latest_job(svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
     job = svc.latest_job()
     if not job:
@@ -69,7 +69,7 @@ def latest_job(svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
     return _to_job(job)
 
 
-@router.get("/jobs/{job_id}", response_model=Job)
+@router.get("/job/{job_id}", response_model=Job)
 def get_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
     job = svc.get_job(job_id)
     if not job:
@@ -77,7 +77,7 @@ def get_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)) -
     return _to_job(job)
 
 
-@router.get("/jobs/{job_id}/image")
+@router.get("/job/{job_id}/image")
 def get_job_image(
     job_id: str,
     svc: OrchestratorService = Depends(get_orchestrator),
@@ -89,7 +89,7 @@ def get_job_image(
     return Response(content=img, media_type="image/jpeg")
 
 
-@router.post("/jobs", response_model=Job, status_code=status.HTTP_201_CREATED)
+@router.post("/job", response_model=Job, status_code=status.HTTP_201_CREATED)
 def create_job(
     payload: JobCreateRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
@@ -97,7 +97,7 @@ def create_job(
     if not svc.is_calibrated:
         raise HTTPException(
             status_code=409,
-            detail="Not calibrated — call POST /paths first "
+            detail="Not calibrated — call POST /path/detect first "
             "(with robot arm at starting position)",
         )
 
@@ -110,7 +110,7 @@ def create_job(
     # Pixel coords for measurement points (one per measurement waypoint)
     pixel_path: list[tuple[float, float]] = [(p.x, p.y) for p in payload.path]
 
-    # Starting position for return-to-start (captured during POST /paths)
+    # Starting position for return-to-start (captured during POST /path/detect)
     starting_wp = svc.calibration_robot_start
 
     # Decode optional snapshot image
@@ -134,7 +134,7 @@ def create_job(
 
 
 @router.delete(
-    "/jobs/{job_id}",
+    "/job/{job_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_model=None,
 )
@@ -186,17 +186,17 @@ def robot_pose(
     )
 
 
-@router.get("/profiles", response_model=list[Profile])
+@router.get("/profile", response_model=list[Profile])
 def profiles(svc: OrchestratorService = Depends(get_orchestrator)) -> list[Profile]:
     return [Profile(**profile) for profile in svc.profiles()]
 
 
-@router.get("/profiles/default", response_model=Profile)
+@router.get("/profile/default", response_model=Profile)
 def default_profile(svc: OrchestratorService = Depends(get_orchestrator)) -> Profile:
     return Profile(**svc.default_profile())
 
 
-@router.get("/streams/camera/feed")
+@router.get("/stream/camera/feed")
 async def camera_feed(
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
@@ -207,7 +207,7 @@ async def camera_feed(
     )
 
 
-@router.get("/streams/detection/feed")
+@router.get("/stream/detection/feed")
 async def detection_feed(
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
@@ -221,7 +221,8 @@ async def detection_feed(
 @router.post(
     "/path/detect", response_model=PathResponse, status_code=status.HTTP_201_CREATED
 )
-def create_path(
+@router.post("/path/detect", response_model=PathResponse, status_code=status.HTTP_201_CREATED)
+def detect_path(
     payload: PathRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> PathResponse:
@@ -290,7 +291,7 @@ Multiple clients can subscribe to the same job simultaneously.
 
 
 @router.get(
-    "/jobs/{job_id}/events",
+    "/job/{job_id}/events",
     response_class=EventSourceResponse,
     summary="Stream job progress (SSE)",
     description=_SSE_DESCRIPTION,
@@ -379,10 +380,9 @@ def check_path(
     sorted_points = svc.sort_pixel_path_from_canvas_start(
         [(p.x, p.y) for p in payload.waypoints]
     )
+    points = [PixelPointSchema(x=x, y=y) for x, y in sorted_points]
 
-    return PathCheckResponse(
-        path=[PixelPointSchema(x=x, y=y) for x, y in sorted_points]
-    )
+    return PathCheckResponse(path=points)
 
 
 def _to_job(job: DomainJob) -> Job:
