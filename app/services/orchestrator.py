@@ -1,16 +1,25 @@
 from __future__ import annotations
 
-import uuid
+import base64
 import logging
-from typing import Dict, List, Optional
+import queue
+import threading
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
 
 from app.adapters.camera_vision import CameraVisionAdapter, DetectionResults
+from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
 from app.adapters.ionVision import IVAdapter
-from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
-from app.domain.models import Job, ResultSummary
+from app.domain.models import Job, Measurement, Waypoint
 
 logger = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
+
 
 class OrchestratorService:
     def __init__(
@@ -24,61 +33,542 @@ class OrchestratorService:
         self._robot = robot
         self._dms = dms
         self._storage = storage
-        self._jobs: Dict[str, Job] = {}
-        self._job_order: List[str] = []
+        self._started_at = time.monotonic()
         self._profiles = [
             {"name": "default", "description": "Default inspection profile"},
             {"name": "fast", "description": "Faster run, lower accuracy"},
         ]
+        self._running_job_id: str | None = None
+        self._stop_requested = False
+        self._job_thread: threading.Thread | None = None
 
-    def create_job(self, options: Optional[dict] = None, path: Optional[str] = None) -> Job:
+        # Calibration state — populated by detect_path()
+        self._cal_robot_start: Waypoint | None = None
+        self._cal_canvas_start: tuple[float, float] | None = None
+        self._cal_pixels_per_mm: float | None = None
+
+        # Per-job pixel path for measurement pixel coordinates
+        self._pixel_paths: dict[str, list[tuple[float, float]]] = {}
+
+        # Per-job starting positions for return-to-start
+        self._starting_waypoints: dict[str, Waypoint] = {}
+
+        # SSE subscribers: job_id → list of queues (one per connected client)
+        self._job_subscribers: dict[str, list[queue.Queue]] = {}
+        self._subscribers_lock = threading.Lock()
+
+    # ---- Job CRUD (DB-backed) ----
+
+    def subscribe(self, job_id: str) -> queue.Queue:
+        """Subscribe to SSE events for a job. Returns a Queue that receives event dicts."""
+        q: queue.Queue = queue.Queue()
+        with self._subscribers_lock:
+            self._job_subscribers.setdefault(job_id, []).append(q)
+        return q
+
+    def unsubscribe(self, job_id: str, q: queue.Queue) -> None:
+        """Remove a subscriber queue for a job."""
+        with self._subscribers_lock:
+            subs = self._job_subscribers.get(job_id, [])
+            try:
+                subs.remove(q)
+            except ValueError:
+                pass
+            if not subs:
+                self._job_subscribers.pop(job_id, None)
+
+    def _publish_event(self, job_id: str, event: dict) -> None:
+        """Push an event dict to all subscribers of a job."""
+        with self._subscribers_lock:
+            for q in self._job_subscribers.get(job_id, []):
+                try:
+                    q.put_nowait(event)
+                except queue.Full:
+                    pass
+
+    def create_job(
+        self,
+        path: list[Waypoint] | None = None,
+        dry_run: bool = False,
+        options: dict | None = None,
+        image_bytes: bytes | None = None,
+        detections: list | None = None,
+        starting_point: Waypoint | None = None,
+        pixel_path: list[tuple[float, float]] | None = None,
+    ) -> Job:
         job_id = str(uuid.uuid4())
-        job = Job(id=job_id, options=options, path=path)
-        self._jobs[job_id] = job
-        self._job_order.append(job_id)
+        job = Job(id=job_id, options=options, path=path or [], dry_run=dry_run)
+        self._storage.save_job(job)
+
+        # Store the pixel path for measurement pixel coordinates
+        self._pixel_paths[job_id] = pixel_path or []
+
+        # Store starting position separately (used for return-to-start,
+        # but not included in the measurement loop)
+        if starting_point:
+            self._starting_waypoints[job_id] = starting_point
+
+        # Store the clean base image (frontend renders points on top)
+        if image_bytes:
+            self._storage.save_job_image(job_id, image_bytes)
+
         return job
 
-    def get_job(self, job_id: str) -> Optional[Job]:
-        return self._jobs.get(job_id)
+    def get_job(self, job_id: str) -> Job | None:
+        return self._storage.get_job(job_id)
 
-    def list_jobs(self) -> List[Job]:
-        return [self._jobs[job_id] for job_id in self._job_order if job_id in self._jobs]
+    def list_jobs(self) -> list[Job]:
+        return self._storage.list_jobs()
 
-    def latest_job(self) -> Optional[Job]:
-        for job_id in reversed(self._job_order):
-            job = self._jobs.get(job_id)
-            if job:
-                return job
-        return None
+    def latest_job(self) -> Job | None:
+        return self._storage.latest_job()
 
     def delete_job(self, job_id: str) -> bool:
-        if job_id not in self._jobs:
+        return self._storage.delete_job(job_id)
+
+    def get_job_image(self, job_id: str) -> bytes | None:
+        return self._storage.get_job_image(job_id)
+
+    # ---- Job execution ----
+
+    def run_job(self, job_id: str) -> Job:
+        """Start job execution in a background thread. Returns the job immediately."""
+        job = self._storage.get_job(job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        if self._running_job_id:
+            raise RuntimeError("Another job is already running")
+
+        self._stop_requested = False
+        self._running_job_id = job_id
+        job.state = "running"
+        job.updated_at = datetime.now(timezone.utc)
+        self._storage.update_job_state(job_id, "running", job.last_point_processed)
+
+        self._job_thread = threading.Thread(
+            target=self._execute_job, args=(job,), daemon=True
+        )
+        self._job_thread.start()
+
+        self._publish_event(
+            job_id,
+            {
+                "type": "job:started",
+                "job_id": job_id,
+                "state": "running",
+                "last_point_processed": 0,
+                "total_points": len(job.path),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        return job
+
+    def stop_job(self) -> bool:
+        """Request the running job to stop. Returns True if a job was running."""
+        if not self._running_job_id:
             return False
-        self._jobs.pop(job_id, None)
+        self._stop_requested = True
+        self._robot.stop()
         return True
 
-    def health(self) -> Dict[str, str]:
+    def get_robot_pose(self) -> PoseResult:
+        """Read the current position of the robot arm."""
+        return self._robot.get_pose()
+
+    def move_robot(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        r: float,
+    ) -> RobotResult:
+        """Send the robot to a specific position (for calibration / testing)."""
+        logger.info(
+            "Manual move → (%.1f, %.1f, %.1f, %.1f)",
+            x,
+            y,
+            z,
+            r,
+        )
+        return self._robot.move(x, y, z, r)
+
+    def _execute_job(self, job: Job) -> None:
+        """Run the job waypoints sequentially (called in background thread)."""
+        try:
+            for i, wp in enumerate(job.path):
+                if self._stop_requested:
+                    job.state = "stopped"
+                    logger.info("Job %s stopped at waypoint %d", job.id, i)
+                    break
+
+                logger.info(
+                    "Job %s — WP %d/%d (%.1f, %.1f, %.1f, %.1f) dry=%s",
+                    job.id,
+                    i + 1,
+                    len(job.path),
+                    wp.x,
+                    wp.y,
+                    wp.z,
+                    wp.r,
+                    job.dry_run,
+                )
+
+                self._publish_event(
+                    job.id,
+                    {
+                        "type": "job:waypoint_started",
+                        "job_id": job.id,
+                        "state": "running",
+                        "last_point_processed": job.last_point_processed,
+                        "total_points": len(job.path),
+                        "waypoint_index": i,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+
+                scan_result: dict | None = None
+
+                # Look up pixel coordinates for this waypoint
+                pp = self._pixel_paths.get(job.id, [])
+                pixel_coords: tuple[float, float] | None = None
+                if i < len(pp):
+                    pixel_coords = pp[i]
+
+                if not job.dry_run:
+                    # Move robot to waypoint
+                    move_res = self._robot.move(wp.x, wp.y, wp.z, wp.r)
+                    if not move_res.ok:
+                        raise RuntimeError(f"Robot move failed: {move_res.error}")
+
+                    # Validate the arm actually reached the target position
+                    arrival = self._robot.wait_for_position(
+                        wp.x,
+                        wp.y,
+                        wp.z,
+                        wp.r,
+                        tolerance_mm=1.0,
+                        timeout_s=30.0,
+                    )
+                    if not arrival.ok:
+                        logger.warning(
+                            "Job %s — WP %d arrival validation failed: %s",
+                            job.id,
+                            i + 1,
+                            arrival.error,
+                        )
+                        msg = f"Arm did not reach waypoint {i + 1}: {arrival.error}"
+                        raise RuntimeError(msg)
+                    logger.info(
+                        "Job %s — WP %d reached: (%.1f, %.1f, %.1f) — dwelling 1.5 s",
+                        job.id,
+                        i + 1,
+                        arrival.x,
+                        arrival.y,
+                        arrival.z,
+                    )
+
+                    # Dwell at the waypoint for 1.5 seconds
+                    time.sleep(1.5)
+
+                    # Here comes the reading of the DMS
+                    scan_start = self._dms.start_new_scan()
+                    if scan_start.ok:
+                        # # --- SSE: emit scan-started event (uncomment when DMS is connected) ---
+                        # self._publish_event(job.id, {
+                        #     "type": "job:scanning",
+                        #     "job_id": job.id,
+                        #     "state": "running",
+                        #     "last_point_processed": job.last_point_processed,
+                        #     "total_points": len(job.path),
+                        #     "waypoint_index": i,
+                        #     "timestamp": datetime.now(timezone.utc).isoformat(),
+                        # })
+                        for _ in range(120):
+                            time.sleep(1.5)
+                            status = self._dms.get_current_scan()
+                            if not status.ok:
+                                break
+                            payload = status.payload or {}
+                            if payload.get("state") == "finished":
+                                break
+                            # # --- SSE: emit scan-progress event (uncomment when DMS is connected) ---
+                            # self._publish_event(job.id, {
+                            #     "type": "job:scan_progress",
+                            #     "job_id": job.id,
+                            #     "state": "running",
+                            #     "last_point_processed": job.last_point_processed,
+                            #     "total_points": len(job.path),
+                            #     "waypoint_index": i,
+                            #     "scan_state": payload.get("state"),
+                            #     "timestamp": datetime.now(timezone.utc).isoformat(),
+                            # })
+                        latest = self._dms.get_latest_dataobject()
+                        if latest.ok:
+                            scan_result = latest.payload
+                else:
+                    time.sleep(0.3)  # simulate settle time in dry run
+
+                measurement = Measurement(
+                    waypoint_index=i,
+                    waypoint=wp,
+                    pixel_x=pixel_coords[0] if pixel_coords else None,
+                    pixel_y=pixel_coords[1] if pixel_coords else None,
+                    scan_result=scan_result,
+                    simulated=job.dry_run,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+                job.measurements.append(measurement)
+                job.last_point_processed = i + 1
+                job.updated_at = datetime.now(timezone.utc)
+
+                # Persist measurement + state to DB
+                self._storage.save_measurement(job.id, measurement)
+                self._storage.update_job_state(
+                    job.id, job.state, job.last_point_processed, job.error
+                )
+
+                self._publish_event(
+                    job.id,
+                    {
+                        "type": "job:waypoint_completed",
+                        "job_id": job.id,
+                        "state": "running",
+                        "last_point_processed": job.last_point_processed,
+                        "total_points": len(job.path),
+                        "waypoint_index": i,
+                        "measurement": {
+                            "waypointIndex": measurement.waypoint_index,
+                            "waypoint": {"x": wp.x, "y": wp.y, "z": wp.z, "r": wp.r},
+                            "pixelX": measurement.pixel_x,
+                            "pixelY": measurement.pixel_y,
+                            "scanResult": measurement.scan_result,
+                            "simulated": measurement.simulated,
+                            "timestamp": measurement.timestamp,
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+
+            if job.state == "running":
+                # Return to the starting position captured during calibration
+                sp = self._starting_waypoints.get(job.id)
+                if sp:
+                    if not job.dry_run:
+                        logger.info(
+                            "Job %s — returning to start (%.1f, %.1f, %.1f, %.1f)",
+                            job.id,
+                            sp.x,
+                            sp.y,
+                            sp.z,
+                            sp.r,
+                        )
+                        move_res = self._robot.move(sp.x, sp.y, sp.z, sp.r)
+                        if not move_res.ok:
+                            logger.warning(
+                                "Return-to-start failed: %s",
+                                move_res.error,
+                            )
+                        else:
+                            arrival = self._robot.wait_for_position(
+                                sp.x,
+                                sp.y,
+                                sp.z,
+                                sp.r,
+                                tolerance_mm=1.0,
+                                timeout_s=30.0,
+                            )
+                            if not arrival.ok:
+                                logger.warning(
+                                    "Return-to-start validation failed: %s",
+                                    arrival.error,
+                                )
+                            else:
+                                logger.info(
+                                    "Job %s — back at start (%.1f, %.1f, %.1f)",
+                                    job.id,
+                                    arrival.x,
+                                    arrival.y,
+                                    arrival.z,
+                                )
+                    else:
+                        logger.info(
+                            "Job %s (dry run) — would return "
+                            "to start (%.1f, %.1f, %.1f, %.1f)",
+                            job.id,
+                            sp.x,
+                            sp.y,
+                            sp.z,
+                            sp.r,
+                        )
+                job.state = "completed"
+
+        except Exception as exc:
+            logger.exception("Job %s failed: %s", job.id, exc)
+            job.state = "failed"
+            job.error = str(exc)
+
+        finally:
+            self._running_job_id = None
+            self._stop_requested = False
+            self._pixel_paths.pop(job.id, None)
+            self._starting_waypoints.pop(job.id, None)
+            job.updated_at = datetime.now(timezone.utc)
+            self._storage.update_job_state(
+                job.id, job.state, job.last_point_processed, job.error
+            )
+
+            self._publish_event(
+                job.id,
+                {
+                    "type": f"job:{job.state}",
+                    "job_id": job.id,
+                    "state": job.state,
+                    "last_point_processed": job.last_point_processed,
+                    "total_points": len(job.path),
+                    "error": job.error,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
+    # ---- Misc ----
+
+    def health(self) -> dict[str, object]:
+        """Probe every subsystem and return a structured health report."""
+        components: dict[str, dict[str, str | None]] = {}
+
+        # Robot
+        try:
+            res = self._robot.ping()
+            components["robot"] = {
+                "status": "connected" if res.ok else "disconnected",
+                "error": res.error,
+            }
+        except Exception as exc:
+            components["robot"] = {"status": "error", "error": str(exc)}
+
+        # Camera
+        try:
+            res = self._camera_vision.ping()
+            components["camera"] = {
+                "status": "connected" if res.ok else "disconnected",
+                "error": res.error,
+            }
+        except Exception as exc:
+            components["camera"] = {"status": "error", "error": str(exc)}
+
+        # DMS (IonVision)
+        try:
+            res = self._dms.ping()
+            components["dms"] = {
+                "status": "connected" if res.ok else "disconnected",
+                "error": res.error,
+            }
+        except Exception as exc:
+            components["dms"] = {"status": "error", "error": str(exc)}
+
+        any_error = any(c["status"] == "error" for c in components.values())
+        overall = "degraded" if any_error else "ok"
+
         return {
-            "status": "ok",
-            "robot": "unknown",
-            "camera": "unknown",
-            "dms": "unknown",
+            "status": overall,
+            "uptime_s": round(time.monotonic() - self._started_at, 2),
+            **components,
         }
 
     def status(self) -> str:
-        return "busy" if self._jobs else "ready"
+        if self._running_job_id:
+            return "busy"
+        return "ready"
 
-    def profiles(self) -> List[dict]:
+    def profiles(self) -> list[dict]:
         return list(self._profiles)
 
     def default_profile(self) -> dict:
         return self._profiles[0]
 
-    def detect_path(self) -> DetectionResults:
-        """Capture an image, detect battery corners, return result with image."""
-        import base64
-        from pathlib import Path
+    # ---- Calibration ----
 
+    def _compute_canvas_start(
+        self, result: DetectionResults, offset_mm: float = 50.0
+    ) -> tuple[float, float] | None:
+        """Compute canvas start marker 50 mm below the first ArUco marker center.
+
+        Camera is mounted behind the arm, so "below" in the image (Y+)
+        corresponds to the arm being offset away from the marker.
+        """
+        if not result.marker_corners:
+            return None
+        mc = result.marker_corners[0].corners
+        if len(mc) < 4:
+            return None
+
+        cx = sum(c.x for c in mc) / len(mc)
+        cy = sum(c.y for c in mc) / len(mc)
+
+        ppm = result.pixels_per_mm
+        offset_px = (offset_mm * ppm) if ppm else 50.0
+        return (cx, cy + offset_px)
+
+    @property
+    def is_calibrated(self) -> bool:
+        return all(
+            [
+                self._cal_robot_start is not None,
+                self._cal_canvas_start is not None,
+                self._cal_pixels_per_mm is not None,
+            ]
+        )
+
+    @property
+    def calibration_robot_start(self) -> Waypoint | None:
+        return self._cal_robot_start
+
+    @property
+    def calibration_canvas_start(self) -> tuple[float, float] | None:
+        return self._cal_canvas_start
+
+    @property
+    def calibration_pixels_per_mm(self) -> float | None:
+        return self._cal_pixels_per_mm
+
+    def pixel_to_robot(
+        self, px: float, py: float, work_z: float, work_r: float
+    ) -> Waypoint:
+        """Convert canvas pixel coordinates → robot mm coordinates.
+
+        Uses the calibration state captured during ``detect_path()``.
+        Camera orientation (mounted behind the arm):
+          • image Y decreasing (up) → robot +X
+          • image X increasing (right) → robot −Y
+        """
+        if not self.is_calibrated:
+            raise RuntimeError(
+                "Not calibrated — call POST /paths first "
+                "(with robot arm at starting position)"
+            )
+        cs_x, cs_y = self._cal_canvas_start  # type: ignore[misc]
+        rs = self._cal_robot_start  # type: ignore[union-attr]
+        ppm = self._cal_pixels_per_mm  # type: ignore[assignment]
+
+        dpx = px - cs_x  # pixel delta X (+ = right)
+        dpy = py - cs_y  # pixel delta Y (+ = down)
+        return Waypoint(
+            x=rs.x - (dpy / ppm),  # pixel Y↑ → robot +X
+            y=rs.y - (dpx / ppm),  # pixel X→ → robot −Y
+            z=work_z,
+            r=work_r,
+        )
+
+    def detect_path(self) -> DetectionResults:
+        """Capture an image, detect battery corners, and calibrate.
+
+        This also reads the robot’s current pose (assumed to be at the
+        starting position) and computes the canvas start point from the
+        first ArUco marker.  All three calibration ingredients are stored
+        so that ``pixel_to_robot()`` can convert coordinates.
+        """
         capture = self._camera_vision.capture()
         if not capture.ok or not capture.image_path:
             return DetectionResults(ok=False, error=capture.error or "Capture failed")
@@ -89,7 +579,34 @@ class OrchestratorService:
             raw = Path(capture.image_path).read_bytes()
             result.image_base64 = base64.b64encode(raw).decode("ascii")
         except Exception:
-            pass  # image encoding is best-effort
+            logger.debug("Image encoding failed", exc_info=True)
+
+        # --- Calibration: capture robot pose + canvas start ----
+        pose = self._robot.get_pose()
+        if pose.ok:
+            self._cal_robot_start = Waypoint(x=pose.x, y=pose.y, z=pose.z, r=pose.r)
+            logger.info(
+                "Calibration: robot start → (%.1f, %.1f, %.1f, %.1f)",
+                pose.x,
+                pose.y,
+                pose.z,
+                pose.r,
+            )
+        else:
+            logger.warning("Calibration: could not read robot pose — %s", pose.error)
+
+        self._cal_pixels_per_mm = result.pixels_per_mm
+        self._cal_canvas_start = self._compute_canvas_start(result)
+
+        if self._cal_canvas_start:
+            logger.info(
+                "Calibration: canvas start → (%.0f, %.0f) px, ppm=%.4f",
+                self._cal_canvas_start[0],
+                self._cal_canvas_start[1],
+                self._cal_pixels_per_mm or 0,
+            )
+        else:
+            logger.warning("Calibration: no ArUco markers — canvas start not set")
 
         return result
 
@@ -97,25 +614,26 @@ class OrchestratorService:
     def camera_vision(self) -> CameraVisionAdapter:
         return self._camera_vision
 
-    def latest_result(self) -> Optional[ResultSummary]:
+    def latest_result(self) -> Optional[dict]:
         return self._storage.latest_result()
-    
 
     # WEBSOCKET SERVICES
     async def initialize_dms(self) -> None:
         """Initialize async WebSocket handlers, etc"""
         await self._dms.initialize_websocket()
         self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
-        self._dms.on_event("scan.stopped", self._handle_scan_stopped)   
-         
+        self._dms.on_event("scan.stopped", self._handle_scan_stopped)
+
     async def _close_dms(self) -> None:
         """Clean up DMS connection and handlers"""
         await self._dms.disconnect_websocket()
-        self._dms.off_event("scan.resultsProcessed", self._handle_scan_results_processed)
-        self._dms.off_event("scan.stopped", self._handle_scan_stopped)    
+        self._dms.off_event(
+            "scan.resultsProcessed", self._handle_scan_results_processed
+        )
+        self._dms.off_event("scan.stopped", self._handle_scan_stopped)
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
-        """The results of the previously finished scan have been 
+        """The results of the previously finished scan have been
         processed to the device storage."""
         logger.info(f"Scan results have been processed: {data.get('body')}")
 
