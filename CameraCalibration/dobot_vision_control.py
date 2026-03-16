@@ -79,7 +79,7 @@ def on_click(event, u, v, flags, param):
             dist = np.sqrt(rx**2 + ry**2)
             
             # Dobot Magician Safe Zone
-            if 160 < dist < 310:
+            if 160 < dist < 330:
                 # IMPORTANT: Clear the queue to ensure immediate response
                 dType.SetQueuedCmdClear(api)
                 
