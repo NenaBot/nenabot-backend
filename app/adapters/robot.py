@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import glob
 import sys
+import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -246,6 +247,30 @@ class RobotAdapter:
         DobotDllType.SetQueuedCmdClear(self._api)
         DobotDllType.SetQueuedCmdStartExec(self._api)
         return RobotResult(True)
+
+    def wait_until_queue_empty(self, timeout_s: float = 10.0, poll_interval_s: float = 0.05) -> RobotResult:
+        """Block until the queued command execution finishes or timeout is reached."""
+        if not self._api:
+            return RobotResult(False, "Not connected")
+        try:
+            from app.adapters import DobotDllType
+        except Exception as exc:
+            return RobotResult(False, f"Dobot DLL not available: {exc}")
+
+        deadline = time.monotonic() + max(timeout_s, 0.0)
+        while time.monotonic() <= deadline:
+            try:
+                finished_raw = DobotDllType.GetQueuedCmdMotionFinish(self._api)
+                finished = bool(finished_raw[0]) if isinstance(finished_raw, (tuple, list)) else bool(finished_raw)
+                if finished:
+                    return RobotResult(True)
+            except Exception as exc:
+                return RobotResult(False, str(exc))
+
+            if poll_interval_s > 0:
+                time.sleep(poll_interval_s)
+
+        return RobotResult(False, "Timed out waiting for queue to finish")
 
     # ---- cleanup ----
 
