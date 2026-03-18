@@ -1,5 +1,7 @@
 """Tests for the IonVision HTTP adapter."""
 
+from unittest.mock import AsyncMock
+
 import httpx
 import pytest
 import respx
@@ -79,6 +81,18 @@ def test_get_latest_dataobject(iv_adapter: IVAdapter) -> None:
     assert result.ok is True
     assert result.payload == {}
 
+@respx.mock
+def test_replace_scan_commets_with_empty_dict(iv_adapter: IVAdapter) -> None:
+    """Test PUT /currentScan/comments with empty dict."""
+    respx.put("http://localhost:8080/currentScan/comments").mock(
+        return_value=httpx.Response(200, 
+                                    json={"message": "Comments updated successfully."}),
+    )
+    
+    result = iv_adapter.replace_scan_comments({})
+    
+    assert result.ok is True
+    assert "message" in result.payload
 
 # IVAdapter _request tests
 @respx.mock
@@ -156,3 +170,18 @@ def test__request_base_url_with_trailing_slashes() -> None:
     assert result.payload == {"message": "ok"}
     assert result.error is None
     
+# WebSocket test cases
+@pytest.mark.asyncio
+async def test_websocket_connect_and_disconnect_called_once(iv_adapter: IVAdapter) -> None:  # noqa: E501
+    """Test that initialize_websocket and disconnect_websocket call the underlying WebSocketAdapter methods exactly once."""  # noqa: E501
+    # Arrange: replace WebSocketAdapter methods with awaitable mocks
+    iv_adapter._ws.connect = AsyncMock()
+    iv_adapter._ws.disconnect = AsyncMock()
+
+    # Act: single connect/disconnect flow
+    await iv_adapter.initialize_websocket()
+    await iv_adapter.disconnect_websocket()
+
+    # Assert: each called exactly once
+    iv_adapter._ws.connect.assert_awaited_once()
+    iv_adapter._ws.disconnect.assert_awaited_once()
