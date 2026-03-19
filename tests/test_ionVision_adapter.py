@@ -156,7 +156,7 @@ def test__request_json_decode_error(iv_adapter: IVAdapter) -> None:
 @respx.mock
 def test__request_base_url_with_trailing_slashes() -> None:
     """Test that _request doesn't fail on double trailing slashes."""
-    iv_test_adapter = IVAdapter(base_url="http://localhost:8080/", ws_base_url="ws://localhost:8080/")
+    iv_test_adapter = IVAdapter(base_url="http://localhost:8080/", ws_base_url="ws://localhost:8080")
 
     respx.get("http://localhost:8080/health").mock(
         return_value=httpx.Response(
@@ -173,7 +173,7 @@ def test__request_base_url_with_trailing_slashes() -> None:
 # WebSocket test cases
 @pytest.mark.asyncio
 async def test_websocket_connect_and_disconnect_called_once(iv_adapter: IVAdapter) -> None:  # noqa: E501
-    """Test that initialize_websocket and disconnect_websocket call the underlying WebSocketAdapter methods exactly once."""  # noqa: E501
+    """Test that initialize_websocket and disconnect_websocket call the underlying WebSocketAdapter methods exactly once without parameters.""" #noqa: E501
     # Arrange: replace WebSocketAdapter methods with awaitable mocks
     iv_adapter._ws.connect = AsyncMock()
     iv_adapter._ws.disconnect = AsyncMock()
@@ -182,6 +182,44 @@ async def test_websocket_connect_and_disconnect_called_once(iv_adapter: IVAdapte
     await iv_adapter.initialize_websocket()
     await iv_adapter.disconnect_websocket()
 
-    # Assert: each called exactly once
-    iv_adapter._ws.connect.assert_awaited_once()
-    iv_adapter._ws.disconnect.assert_awaited_once()
+    # Assert: each called exactly once and no args were forwarded
+    iv_adapter._ws.connect.assert_awaited_once_with()
+    iv_adapter._ws.disconnect.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_initialize_websocket_propagates_connect_error(iv_adapter: IVAdapter) -> None:  # noqa: E501
+    """Test that initialize_websocket re-raises the same connect exception."""
+    connect_error = RuntimeError("connect failed")
+    iv_adapter._ws.connect = AsyncMock(side_effect=connect_error)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await iv_adapter.initialize_websocket()
+
+    assert exc_info.value is connect_error
+    iv_adapter._ws.connect.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_websocket_propagates_disconnect_error(iv_adapter: IVAdapter) -> None:  # noqa: E501
+    """Test that disconnect_websocket re-raises the same disconnect exception."""
+    disconnect_error = RuntimeError("disconnect failed")
+    iv_adapter._ws.disconnect = AsyncMock(side_effect=disconnect_error)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await iv_adapter.disconnect_websocket()
+
+    assert exc_info.value is disconnect_error
+    iv_adapter._ws.disconnect.assert_awaited_once_with()
+
+def test_ws_base_url_trimmed_on_initialization() -> None:
+    """Test that ws_base_url trailing slashes are removed when creating _ws."""
+    # Create adapter with trailing slash in ws_base_url
+    iv_adapter = IVAdapter(
+        base_url="http://localhost:8080",
+        ws_base_url="ws://localhost:8080/",
+    )
+    
+    # Verify the internal _ws was initialized with the trimmed URL
+    assert iv_adapter._ws._base_url == "ws://localhost:8080"
+
