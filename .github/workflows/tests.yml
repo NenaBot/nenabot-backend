@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -103,6 +107,11 @@ jobs:
           status = "PASSED" if exit_code == "0" else "FAILED"
           status_emoji = "✅" if exit_code == "0" else "❌"
           py_ver = os.environ.get("PYTHON_VERSION", "3.12")
+            run_url = (
+              f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
+              f"{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/"
+              f"{os.environ.get('GITHUB_RUN_ID')}"
+            )
 
           coverage_bar = "N/A"
           coverage_emoji = "📊"
@@ -155,7 +164,62 @@ jobs:
                       f.write(f"`{skipped} test(s) skipped`\n\n")
                   
                   f.write("</details>\n")
+
+              comment_path = pathlib.Path("pr-test-comment.md")
+              with comment_path.open("w", encoding="utf-8") as f:
+                  f.write("<!-- test-results-bot -->\n")
+                  f.write("## Test Results\n\n")
+                  f.write(f"{status_emoji} **{status}** on Python {py_ver}.\n\n")
+                  f.write(
+                      f"- Quick stats: {passed} passed, {failures} failed, {errors} errors, {skipped} skipped\\n"
+                  )
+                  f.write(f"- Coverage: {coverage_bar}\\n")
+                  f.write(f"- View full Job Summary and logs: {run_url}\\n")
+                  f.write("> This comment updates automatically on each push to this PR.\n")
           PY
+
+      - name: Comment test results on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'pr-test-comment.md';
+            if (!fs.existsSync(path)) {
+              core.warning('pr-test-comment.md not found, skipping PR comment');
+              return;
+            }
+
+            const body = fs.readFileSync(path, 'utf8');
+            const marker = '<!-- test-results-bot -->';
+            const issue_number = context.payload.pull_request.number;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(
+              (c) => c.user?.type === 'Bot' && c.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+            }
 
       - name: Add failure excerpt to summary
         if: always() && steps.tests.outputs.exit_code != '0'
