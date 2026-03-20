@@ -1,4 +1,4 @@
-name: Tests
+name: Unit Tests and Coverage
 
 on:
   push:
@@ -62,6 +62,7 @@ jobs:
           import xml.etree.ElementTree as ET
 
           tests = failures = errors = skipped = 0
+          passed_test_names = []
           failed_test_names = []
           junit_path = pathlib.Path("pytest-report.xml")
           if junit_path.exists():
@@ -73,12 +74,18 @@ jobs:
                   errors += int(suite.attrib.get("errors", 0))
                   skipped += int(suite.attrib.get("skipped", 0))
                   for case in suite.findall("testcase"):
+                      classname = case.attrib.get("classname", "")
+                      name = case.attrib.get("name", "unknown")
+                      test_id = f"{classname}::{name}" if classname else name
+                      
                       has_failure = case.find("failure") is not None
                       has_error = case.find("error") is not None
+                      has_skip = case.find("skipped") is not None
+                      
                       if has_failure or has_error:
-                          classname = case.attrib.get("classname", "")
-                          name = case.attrib.get("name", "unknown")
-                          failed_test_names.append(f"{classname}::{name}" if classname else name)
+                          failed_test_names.append(test_id)
+                      elif not has_skip:
+                          passed_test_names.append(test_id)
 
           passed = max(tests - failures - errors - skipped, 0)
 
@@ -125,13 +132,15 @@ jobs:
               f.write(f"| {coverage_emoji} Coverage | {coverage_bar} |\n")
               f.write("| 📦 Artifact | `coverage-html-py3.12` |\n")
 
-              if passed > 0 or failed_test_names:
+              if passed > 0 or failed_test_names or skipped > 0:
                   f.write("\n<details>\n")
                   f.write(f"<summary><strong>📝 Test Details</strong></summary>\n\n")
                   
                   if passed > 0:
                       f.write("#### ✅ Passed Tests\n")
-                      f.write(f"`{passed} test(s) passed`\n\n")
+                      for test_name in passed_test_names:
+                          f.write(f"- `{test_name}`\n")
+                      f.write("\n")
                   
                   if failed_test_names:
                       f.write("#### ❌ Failed Tests\n")
@@ -140,6 +149,10 @@ jobs:
                       if len(failed_test_names) > 10:
                           f.write(f"- ... and {len(failed_test_names) - 10} more\n")
                       f.write("\n")
+                  
+                  if skipped > 0:
+                      f.write("#### ⊘ Skipped Tests\n")
+                      f.write(f"`{skipped} test(s) skipped`\n\n")
                   
                   f.write("</details>\n")
           PY
