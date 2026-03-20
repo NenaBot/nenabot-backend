@@ -107,7 +107,7 @@ jobs:
           status = "PASSED" if exit_code == "0" else "FAILED"
           status_emoji = "✅" if exit_code == "0" else "❌"
           py_ver = os.environ.get("PYTHON_VERSION", "3.12")
-            run_url = (
+          run_url = (
               f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
               f"{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/"
               f"{os.environ.get('GITHUB_RUN_ID')}"
