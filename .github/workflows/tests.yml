@@ -13,17 +13,14 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.11"]' || '["3.10", "3.11", "3.12"]') }}
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
 
@@ -49,7 +46,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-html-py${{ matrix.python-version }}
+          name: coverage-html-py3.12
           path: htmlcov
           retention-days: 21
 
@@ -57,7 +54,7 @@ jobs:
         if: always()
         env:
           TEST_EXIT_CODE: ${{ steps.tests.outputs.exit_code }}
-          PYTHON_VERSION: ${{ matrix.python-version }}
+          PYTHON_VERSION: "3.12"
         run: |
           python - <<'PY'
           import os
@@ -97,9 +94,7 @@ jobs:
 
           exit_code = os.environ.get("TEST_EXIT_CODE", "1")
           status = "PASSED" if exit_code == "0" else "FAILED"
-          status_badge = "PASS" if exit_code == "0" else "FAIL"
-          py_ver = os.environ.get("PYTHON_VERSION", "unknown")
-          artifact_name = f"coverage-html-py{py_ver}"
+          py_ver = os.environ.get("PYTHON_VERSION", "3.12")
 
           coverage_bar = "N/A"
           if coverage_value is not None:
@@ -109,25 +104,25 @@ jobs:
 
           summary_path = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
           with summary_path.open("a", encoding="utf-8") as f:
-              f.write("## Test Results\\n\\n")
-              f.write("| Item | Value |\\n")
-              f.write("|---|---:|\\n")
-              f.write(f"| Status | **{status_badge}** ({status}) |\\n")
-              f.write(f"| Python | `{py_ver}` |\\n")
-              f.write(f"| Total | {tests} |\\n")
-              f.write(f"| Passed | {passed} |\\n")
-              f.write(f"| Failed | {failures} |\\n")
-              f.write(f"| Errors | {errors} |\\n")
-              f.write(f"| Skipped | {skipped} |\\n")
-              f.write(f"| Coverage | {coverage_bar} |\\n")
-              f.write(f"| Artifact | `{artifact_name}` |\\n")
+              f.write("## Test Results\n\n")
+              f.write("| Item | Value |\n")
+              f.write("|---|---:|\n")
+              f.write(f"| Status | **{status}** |\n")
+              f.write(f"| Python | {py_ver} |\n")
+              f.write(f"| Total | {tests} |\n")
+              f.write(f"| Passed | {passed} |\n")
+              f.write(f"| Failed | {failures} |\n")
+              f.write(f"| Errors | {errors} |\n")
+              f.write(f"| Skipped | {skipped} |\n")
+              f.write(f"| Coverage | {coverage_bar} |\n")
+              f.write("| Artifact | coverage-html-py3.12 |\n")
 
               if failed_test_names:
-                  f.write("\\n<details>\\n")
-                  f.write("<summary><strong>Failed tests (up to 10)</strong></summary>\\n\\n")
+                  f.write("\n<details>\n")
+                  f.write("<summary><strong>Failed tests (up to 10)</strong></summary>\n\n")
                   for test_name in failed_test_names[:10]:
-                      f.write(f"- `{test_name}`\\n")
-                  f.write("\\n</details>\\n")
+                      f.write(f"- {test_name}\n")
+                  f.write("\n</details>\n")
           PY
 
       - name: Add failure excerpt to summary
