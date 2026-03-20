@@ -2,24 +2,30 @@ name: Tests
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feature/ci-test-report]
   pull_request:
     branches: [main, develop]
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.11"]' || '["3.10", "3.11", "3.12"]') }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: |
@@ -27,13 +33,118 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run tests with coverage
+        id: tests
         run: |
-          python -m pytest -q --cov=app --cov-report=xml --cov-report=term-missing
+          set -o pipefail
+          python -m pytest \
+            --junitxml=pytest-report.xml \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=html:htmlcov \
+            --cov-report=term-missing \
+            2>&1 | tee pytest-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+      - name: Upload test and coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          files: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
+          name: coverage-html-py${{ matrix.python-version }}
+          path: htmlcov
+          retention-days: 21
+
+      - name: Add compact test summary
+        if: always()
+        env:
+          TEST_EXIT_CODE: ${{ steps.tests.outputs.exit_code }}
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          tests = failures = errors = skipped = 0
+          failed_test_names = []
+          junit_path = pathlib.Path("pytest-report.xml")
+          if junit_path.exists():
+              root = ET.parse(junit_path).getroot()
+              suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+              for suite in suites:
+                  tests += int(suite.attrib.get("tests", 0))
+                  failures += int(suite.attrib.get("failures", 0))
+                  errors += int(suite.attrib.get("errors", 0))
+                  skipped += int(suite.attrib.get("skipped", 0))
+                  for case in suite.findall("testcase"):
+                      has_failure = case.find("failure") is not None
+                      has_error = case.find("error") is not None
+                      if has_failure or has_error:
+                          classname = case.attrib.get("classname", "")
+                          name = case.attrib.get("name", "unknown")
+                          failed_test_names.append(f"{classname}::{name}" if classname else name)
+
+          passed = max(tests - failures - errors - skipped, 0)
+
+          coverage_pct = "N/A"
+          coverage_value = None
+          coverage_path = pathlib.Path("coverage.xml")
+          if coverage_path.exists():
+              coverage_root = ET.parse(coverage_path).getroot()
+              line_rate = coverage_root.attrib.get("line-rate")
+              if line_rate is not None:
+                  coverage_value = float(line_rate) * 100
+                  coverage_pct = f"{coverage_value:.2f}%"
+
+          exit_code = os.environ.get("TEST_EXIT_CODE", "1")
+          status = "PASSED" if exit_code == "0" else "FAILED"
+          status_badge = "PASS" if exit_code == "0" else "FAIL"
+          py_ver = os.environ.get("PYTHON_VERSION", "unknown")
+          artifact_name = f"coverage-html-py{py_ver}"
+
+          coverage_bar = "N/A"
+          if coverage_value is not None:
+              filled = int(round(coverage_value / 10))
+              filled = max(0, min(10, filled))
+              coverage_bar = f"{'#' * filled}{'-' * (10 - filled)} {coverage_pct}"
+
+          summary_path = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary_path.open("a", encoding="utf-8") as f:
+              f.write("## Test Results\\n\\n")
+              f.write("| Item | Value |\\n")
+              f.write("|---|---:|\\n")
+              f.write(f"| Status | **{status_badge}** ({status}) |\\n")
+              f.write(f"| Python | `{py_ver}` |\\n")
+              f.write(f"| Total | {tests} |\\n")
+              f.write(f"| Passed | {passed} |\\n")
+              f.write(f"| Failed | {failures} |\\n")
+              f.write(f"| Errors | {errors} |\\n")
+              f.write(f"| Skipped | {skipped} |\\n")
+              f.write(f"| Coverage | {coverage_bar} |\\n")
+              f.write(f"| Artifact | `{artifact_name}` |\\n")
+
+              if failed_test_names:
+                  f.write("\\n<details>\\n")
+                  f.write("<summary><strong>Failed tests (up to 10)</strong></summary>\\n\\n")
+                  for test_name in failed_test_names[:10]:
+                      f.write(f"- `{test_name}`\\n")
+                  f.write("\\n</details>\\n")
+          PY
+
+      - name: Add failure excerpt to summary
+        if: always() && steps.tests.outputs.exit_code != '0'
+        run: |
+          {
+            echo ""
+            echo "<details>"
+            echo "<summary><strong>Failure log excerpt (last 80 lines)</strong></summary>"
+            echo ""
+            echo '```text'
+            tail -n 80 pytest-output.txt || true
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if tests failed
+        if: steps.tests.outputs.exit_code != '0'
+        run: exit 1
