@@ -94,35 +94,54 @@ jobs:
 
           exit_code = os.environ.get("TEST_EXIT_CODE", "1")
           status = "PASSED" if exit_code == "0" else "FAILED"
+          status_emoji = "✅" if exit_code == "0" else "❌"
           py_ver = os.environ.get("PYTHON_VERSION", "3.12")
 
           coverage_bar = "N/A"
+          coverage_emoji = "📊"
           if coverage_value is not None:
+              if coverage_value >= 80:
+                  coverage_emoji = "🟢"
+              elif coverage_value >= 60:
+                  coverage_emoji = "🟡"
+              else:
+                  coverage_emoji = "🔴"
               filled = int(round(coverage_value / 10))
               filled = max(0, min(10, filled))
-              coverage_bar = f"{'#' * filled}{'-' * (10 - filled)} {coverage_pct}"
+              coverage_bar = f"{'█' * filled}{'░' * (10 - filled)} {coverage_pct}"
 
           summary_path = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
           with summary_path.open("a", encoding="utf-8") as f:
               f.write("## Test Results\n\n")
               f.write("| Item | Value |\n")
               f.write("|---|---:|\n")
-              f.write(f"| Status | **{status}** |\n")
-              f.write(f"| Python | {py_ver} |\n")
-              f.write(f"| Total | {tests} |\n")
-              f.write(f"| Passed | {passed} |\n")
-              f.write(f"| Failed | {failures} |\n")
-              f.write(f"| Errors | {errors} |\n")
-              f.write(f"| Skipped | {skipped} |\n")
-              f.write(f"| Coverage | {coverage_bar} |\n")
-              f.write("| Artifact | coverage-html-py3.12 |\n")
+              f.write(f"| {status_emoji} Status | **{status}** |\n")
+              f.write(f"| 🐍 Python | `{py_ver}` |\n")
+              f.write(f"| 📋 Total | `{tests}` |\n")
+              f.write(f"| ✅ Passed | `{passed}` |\n")
+              f.write(f"| ❌ Failed | `{failures}` |\n")
+              f.write(f"| ⚠️ Errors | `{errors}` |\n")
+              f.write(f"| ⊘ Skipped | `{skipped}` |\n")
+              f.write(f"| {coverage_emoji} Coverage | {coverage_bar} |\n")
+              f.write("| 📦 Artifact | `coverage-html-py3.12` |\n")
 
-              if failed_test_names:
+              if passed > 0 or failed_test_names:
                   f.write("\n<details>\n")
-                  f.write("<summary><strong>Failed tests (up to 10)</strong></summary>\n\n")
-                  for test_name in failed_test_names[:10]:
-                      f.write(f"- {test_name}\n")
-                  f.write("\n</details>\n")
+                  f.write(f"<summary><strong>📝 Test Details</strong></summary>\n\n")
+                  
+                  if passed > 0:
+                      f.write("#### ✅ Passed Tests\n")
+                      f.write(f"`{passed} test(s) passed`\n\n")
+                  
+                  if failed_test_names:
+                      f.write("#### ❌ Failed Tests\n")
+                      for test_name in failed_test_names[:10]:
+                          f.write(f"- `{test_name}`\n")
+                      if len(failed_test_names) > 10:
+                          f.write(f"- ... and {len(failed_test_names) - 10} more\n")
+                      f.write("\n")
+                  
+                  f.write("</details>\n")
           PY
 
       - name: Add failure excerpt to summary
