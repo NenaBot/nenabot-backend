@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nenabot — Job Results</title>
+    <style>
+        :root {
+            --bg: #1e1e2e;
+            --card: #282840;
+            --border: #3a3a5c;
+            --fg: #cdd6f4;
+            --dim: #888;
+            --accent: #89b4fa;
+            --green: #a6e3a1;
+            --red: #f38ba8;
+            --orange: #fab387;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            padding: 12px 20px;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        header h1 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        #apiUrl {
+            background: var(--bg);
+            color: var(--fg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 13px;
+            width: 260px;
+        }
+
+        button {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        button:hover {
+            filter: brightness(1.15);
+        }
+
+        .content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* ---- left panel: job list ---- */
+        .job-list {
+            width: 280px;
+            min-width: 220px;
+            border-right: 1px solid var(--border);
+            background: var(--card);
+            overflow-y: auto;
+        }
+
+        .job-list-hdr {
+            padding: 10px 12px;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .job-item {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .job-item:hover {
+            background: rgba(137, 180, 250, .08);
+        }
+
+        .job-item.active {
+            background: rgba(137, 180, 250, .15);
+            border-left: 3px solid var(--accent);
+        }
+
+        .job-item .jid {
+            font-family: monospace;
+            color: var(--accent);
+        }
+
+        .job-item .jmeta {
+            font-size: 11px;
+            color: var(--dim);
+            margin-top: 2px;
+        }
+
+        .status-pill {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 6px;
+        }
+
+        .state-created {
+            background: var(--border);
+            color: var(--fg);
+        }
+
+        .state-running {
+            background: var(--orange);
+            color: #000;
+        }
+
+        .state-completed {
+            background: var(--green);
+            color: #000;
+        }
+
+        .state-failed {
+            background: var(--red);
+            color: #000;
+        }
+
+        .state-stopped {
+            background: var(--dim);
+            color: #fff;
+        }
+
+        /* ---- right panel: detail ---- */
+        .detail {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .detail-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--dim);
+            font-size: 14px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 14px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .card-hdr {
+            padding: 8px 12px;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-body {
+            padding: 10px 12px;
+        }
+
+        #overlayImg {
+            display: none;
+        }
+
+        .image-container {
+            position: relative;
+            width: 100%;
+        }
+
+        .image-container img {
+            width: 100%;
+            display: block;
+            border-radius: 4px;
+            background: #111;
+        }
+
+        .image-container canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 4px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            color: var(--dim);
+            font-weight: 600;
+        }
+
+        .meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .meta-grid dt {
+            color: var(--dim);
+            font-size: 11px;
+        }
+
+        .meta-grid dd {
+            margin: 0 0 6px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>Nenabot — Job Results</h1>
+        <input id="apiUrl" type="text" value="http://localhost:8000" placeholder="API base URL" />
+        <button onclick="loadJobs()">Refresh</button>
+    </header>
+
+    <div class="content">
+        <!-- Job list -->
+        <div class="job-list">
+            <div class="job-list-hdr"><span>Jobs</span></div>
+            <div id="jobListItems"></div>
+        </div>
+
+        <!-- Detail panel -->
+        <div class="detail" id="detailPanel">
+            <div class="detail-empty">Select a job to view results</div>
+        </div>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        const api = () => $('apiUrl').value.replace(/\/+$/, '') + '/api';
+        let selectedJobId = null;
+        let autoTimer = null;
+
+        async function loadJobs() {
+            try {
+                const res = await fetch(`${api()}/jobs`);
+                const jobs = await res.json();
+                const container = $('jobListItems');
+                container.innerHTML = '';
+                // Show newest first
+                jobs.reverse();
+                for (const j of jobs) {
+                    const s = j.status || {};
+                    const div = document.createElement('div');
+                    div.className = 'job-item' + (j.id === selectedJobId ? ' active' : '');
+                    div.innerHTML = `
+        <span class="jid">${j.id.slice(0, 8)}…</span>
+        <span class="status-pill state-${s.state || 'created'}">${(s.state || 'created').toUpperCase()}</span>
+        <div class="jmeta">${j.path?.length || 0} pts · ${j.dryRun ? 'dry run' : 'real'}</div>
+      `;
+                    div.onclick = () => selectJob(j.id);
+                    container.appendChild(div);
+                }
+            } catch (e) {
+                console.error('loadJobs', e);
+            }
+        }
+
+        async function selectJob(jobId) {
+            selectedJobId = jobId;
+            // Re-highlight
+            document.querySelectorAll('.job-item').forEach(el => el.classList.remove('active'));
+            const items = document.querySelectorAll('.job-item');
+            items.forEach(el => {
+                if (el.querySelector('.jid')?.textContent.startsWith(jobId.slice(0, 8))) el.classList.add('active');
+            });
+            await renderDetail(jobId);
+            // Auto-refresh if running
+            clearInterval(autoTimer);
+            autoTimer = setInterval(async () => {
+                if (!selectedJobId) return;
+                const res = await fetch(`${api()}/jobs/${selectedJobId}`);
+                const j = await res.json();
+                if (['completed', 'failed', 'stopped'].includes(j.status?.state)) {
+                    clearInterval(autoTimer);
+                    loadJobs();  // refresh list pills
+                }
+                renderDetail(selectedJobId);
+            }, 1200);
+        }
+
+        async function renderDetail(jobId) {
+            try {
+                const res = await fetch(`${api()}/jobs/${jobId}`);
+                const job = await res.json();
+                const s = job.status || {};
+                const panel = $('detailPanel');
+
+                // Build measurements rows
+                let rows = '';
+                for (const m of (job.measurements || [])) {
+                    const w = m.waypoint || {};
+                    const scan = m.scanResult ? JSON.stringify(m.scanResult).slice(0, 120) : '—';
+                    rows += `<tr>
+        <td>${(m.waypointIndex ?? 0) + 1}</td>
+        <td>${w.x?.toFixed(1)}</td><td>${w.y?.toFixed(1)}</td>
+        <td>${w.z?.toFixed(1)}</td><td>${w.r?.toFixed(1)}</td>
+        <td>${m.simulated ? 'Yes' : 'No'}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${scan}</td>
+        <td>${m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '—'}</td>
+      </tr>`;
+                }
+
+                const imgUrl = `${api()}/jobs/${jobId}/image?t=${Date.now()}`;
+
+                panel.innerHTML = `
+      <div class="detail-grid">
+        <!-- Meta -->
+        <div class="card">
+          <div class="card-hdr">
+            <span>Job ${jobId.slice(0, 8)}…</span>
+            <span class="status-pill state-${s.state}">${(s.state || '?').toUpperCase()}</span>
+          </div>
+          <div class="card-body">
+            <dl class="meta-grid">
+              <div><dt>State</dt><dd>${s.state}</dd></div>
+              <div><dt>Points</dt><dd>${s.lastPointProcessed ?? 0} / ${job.path?.length ?? 0}</dd></div>
+              <div><dt>Mode</dt><dd>${job.dryRun ? 'Dry Run' : 'Real'}</dd></div>
+            </dl>
+            ${s.error ? `<div style="color:var(--red);margin-top:6px">Error: ${s.error}</div>` : ''}
+          </div>
+        </div>
+
+        <!-- Base image with measurement overlay -->
+        <div class="card">
+          <div class="card-hdr">Image</div>
+          <div class="card-body" style="padding:0">
+            <div class="image-container">
+              <img id="baseImg" src="${imgUrl}" alt="base image"
+                   onerror="this.style.display='none';document.getElementById('noImgMsg').style.display='block'"
+                   onload="this.style.display='block';drawMeasurements()" />
+              <canvas id="overlayCanvas"></canvas>
+            </div>
+            <div id="noImgMsg" style="padding:12px;color:var(--dim);font-size:13px;display:none">
+              No image stored for this job
+            </div>
+          </div>
+        </div>
+
+        <!-- Measurements -->
+        <div class="card">
+          <div class="card-hdr">Measurements (${job.measurements?.length ?? 0})</div>
+          <div class="card-body" style="padding:0;overflow-x:auto">
+            <table>
+              <thead><tr><th>#</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>Sim</th><th>Scan Result</th><th>Time</th></tr></thead>
+              <tbody>${rows || '<tr><td colspan="8" style="color:var(--dim)">No measurements yet</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+
+                // Draw measurement points on canvas after image loads
+                window._currentMeasurements = job.measurements || [];
+                const img = $('baseImg');
+                if (img && img.complete && img.naturalWidth > 0) {
+                    drawMeasurements();
+                }
+            } catch (e) {
+                console.error('renderDetail', e);
+            }
+        }
+
+        function drawMeasurements() {
+            const img = $('baseImg');
+            const canvas = $('overlayCanvas');
+            if (!img || !canvas || !img.naturalWidth) return;
+
+            const measurements = window._currentMeasurements || [];
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (const m of measurements) {
+                const px = m.pixelX;
+                const py = m.pixelY;
+                if (px == null || py == null) continue;
+
+                // Green filled circle
+                ctx.beginPath();
+                ctx.arc(px, py, 10, 0, 2 * Math.PI);
+                ctx.fillStyle = 'rgba(0, 220, 100, 0.85)';
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // Waypoint number
+                const label = String((m.waypointIndex ?? 0) + 1);
+                ctx.font = 'bold 11px sans-serif';
+                ctx.fillStyle = '#000';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(label, px, py);
+            }
+        }
+
+        // Initial load
+        loadJobs();
+    </script>
+</body>
+
+</html>

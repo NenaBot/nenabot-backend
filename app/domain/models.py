@@ -2,30 +2,37 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+
+@dataclass
+class Waypoint:
+    x: float
+    y: float
+    z: float = 0.0
+    r: float = 0.0
+
+
+@dataclass
+class Measurement:
+    waypoint_index: int
+    waypoint: Waypoint
+    pixel_x: float | None = None
+    pixel_y: float | None = None
+    scan_result: dict[str, Any] | None = None
+    simulated: bool = False
+    timestamp: str | None = None
 
 
 @dataclass
 class Job:
     id: str
-    options: Optional[Dict[str, Any]] = None
-    path: Optional[str] = None
-    log: Optional[str] = None
-    measurements: List[Any] = field(default_factory=list)
-    path_image: Optional[str] = None
+    options: dict[str, Any] | None = None
+    path: list[Waypoint] = field(default_factory=list)
+    dry_run: bool = False
+    measurements: list[Measurement] = field(default_factory=list)
+    state: str = "created"  # created | running | completed | failed | stopped
     last_point_processed: int = 0
-    error: Optional[str] = None
+    error: str | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
-
-
-@dataclass
-class ResultSummary:
-    id: str
-    pack_id: str
-    started_at: datetime
-    finished_at: Optional[datetime]
-    decision: str
-    dms_ppb: Optional[float] = None
-    dms_compound: Optional[str] = None
-    image_path: Optional[str] = None

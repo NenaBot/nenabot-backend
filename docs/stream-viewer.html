@@ -2,410 +2,410 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NenaBot Stream Viewer</title>
-  <style>
-    *,
-    *::before,
-    *::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-    }
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NenaBot Stream Viewer</title>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
-    body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #0f1117;
-    color: #e4e4e7;
-    min-height: 100vh;
-    padding: 1.5rem;
-    }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f1117;
+            color: #e4e4e7;
+            min-height: 100vh;
+            padding: 1.5rem;
+        }
 
-    h1 {
-    font-size: 1.4rem;
-    font-weight: 600;
-    margin-bottom: 1rem;
-    color: #fff;
-    }
+        h1 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #fff;
+        }
 
-    .controls {
-    display: flex;
-    gap: 0.75rem;
-    align-items: center;
-    flex-wrap: wrap;
-    margin-bottom: 1.25rem;
-    }
+        .controls {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 1.25rem;
+        }
 
-    label {
-    font-size: 0.85rem;
-    color: #a1a1aa;
-    }
+        label {
+            font-size: 0.85rem;
+            color: #a1a1aa;
+        }
 
-    input[type="text"] {
-    background: #1e1e2e;
-    border: 1px solid #3f3f46;
-    border-radius: 6px;
-    padding: 0.45rem 0.65rem;
-    color: #e4e4e7;
-    font-size: 0.85rem;
-    width: 280px;
-    }
+        input[type="text"] {
+            background: #1e1e2e;
+            border: 1px solid #3f3f46;
+            border-radius: 6px;
+            padding: 0.45rem 0.65rem;
+            color: #e4e4e7;
+            font-size: 0.85rem;
+            width: 280px;
+        }
 
-    input[type="text"]:focus {
-    outline: none;
-    border-color: #6366f1;
-    }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #6366f1;
+        }
 
-    button {
-    padding: 0.45rem 1rem;
-    border: none;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s;
-    }
+        button {
+            padding: 0.45rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
 
-    .btn-primary {
-    background: #6366f1;
-    color: #fff;
-    }
+        .btn-primary {
+            background: #6366f1;
+            color: #fff;
+        }
 
-    .btn-primary:hover {
-    background: #4f46e5;
-    }
+        .btn-primary:hover {
+            background: #4f46e5;
+        }
 
-    .btn-danger {
-    background: #dc2626;
-    color: #fff;
-    }
+        .btn-danger {
+            background: #dc2626;
+            color: #fff;
+        }
 
-    .btn-danger:hover {
-    background: #b91c1c;
-    }
+        .btn-danger:hover {
+            background: #b91c1c;
+        }
 
-    .btn-secondary {
-    background: #27272a;
-    color: #a1a1aa;
-    border: 1px solid #3f3f46;
-    }
+        .btn-secondary {
+            background: #27272a;
+            color: #a1a1aa;
+            border: 1px solid #3f3f46;
+        }
 
-    .btn-secondary:hover {
-    background: #3f3f46;
-    color: #fff;
-    }
+        .btn-secondary:hover {
+            background: #3f3f46;
+            color: #fff;
+        }
 
-    .feeds {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
-    gap: 1.25rem;
-    }
+        .feeds {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+            gap: 1.25rem;
+        }
 
-    .feed-card {
-    background: #1e1e2e;
-    border: 1px solid #27272a;
-    border-radius: 10px;
-    overflow: hidden;
-    }
+        .feed-card {
+            background: #1e1e2e;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+            overflow: hidden;
+        }
 
-    .feed-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid #27272a;
-    }
+        .feed-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #27272a;
+        }
 
-    .feed-header h2 {
-    font-size: 0.95rem;
-    font-weight: 600;
-    }
+        .feed-header h2 {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
 
-    .badge {
-    font-size: 0.7rem;
-    padding: 0.2rem 0.55rem;
-    border-radius: 999px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    }
+        .badge {
+            font-size: 0.7rem;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
 
-    .badge-off {
-    background: #3f3f46;
-    color: #71717a;
-    }
+        .badge-off {
+            background: #3f3f46;
+            color: #71717a;
+        }
 
-    .badge-live {
-    background: #16a34a22;
-    color: #4ade80;
-    }
+        .badge-live {
+            background: #16a34a22;
+            color: #4ade80;
+        }
 
-    .feed-body {
-    position: relative;
-    background: #000;
-    min-height: 280px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    }
+        .feed-body {
+            position: relative;
+            background: #000;
+            min-height: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
 
-    .feed-body img {
-    width: 100%;
-    display: block;
-    }
+        .feed-body img {
+            width: 100%;
+            display: block;
+        }
 
-    .feed-body canvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    }
+        .feed-body canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
 
-    .feed-body .placeholder {
-    color: #52525b;
-    font-size: 0.85rem;
-    }
+        .feed-body .placeholder {
+            color: #52525b;
+            font-size: 0.85rem;
+        }
 
-    .feed-footer {
-    padding: 0.6rem 1rem;
-    display: flex;
-    gap: 0.5rem;
-    }
+        .feed-footer {
+            padding: 0.6rem 1rem;
+            display: flex;
+            gap: 0.5rem;
+        }
 
-    .log {
-    margin-top: 1.25rem;
-    background: #1e1e2e;
-    border: 1px solid #27272a;
-    border-radius: 10px;
-    padding: 0.75rem 1rem;
-    max-height: 160px;
-    overflow-y: auto;
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 0.78rem;
-    color: #71717a;
-    line-height: 1.6;
-    }
+        .log {
+            margin-top: 1.25rem;
+            background: #1e1e2e;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+            padding: 0.75rem 1rem;
+            max-height: 160px;
+            overflow-y: auto;
+            font-family: "SF Mono", "Fira Code", monospace;
+            font-size: 0.78rem;
+            color: #71717a;
+            line-height: 1.6;
+        }
 
-    .log .ts {
-    color: #52525b;
-    }
+        .log .ts {
+            color: #52525b;
+        }
 
-    .log .ok {
-    color: #4ade80;
-    }
+        .log .ok {
+            color: #4ade80;
+        }
 
-    .log .err {
-    color: #f87171;
-    }
-  </style>
+        .log .err {
+            color: #f87171;
+        }
+    </style>
 </head>
 
 <body>
 
-  <h1>NenaBot — Stream Viewer</h1>
+    <h1>NenaBot — Stream Viewer</h1>
 
-  <div class="controls">
-    <label for="apiUrl">API URL</label>
-    <input id="apiUrl" type="text" value="http://localhost:8000" />
-  </div>
-
-  <div class="feeds">
-    <!-- Camera feed -->
-    <div class="feed-card" id="card-camera">
-    <div class="feed-header">
-        <h2>Camera (raw)</h2>
-        <span class="badge badge-off" id="badge-camera">OFF</span>
-    </div>
-    <div class="feed-body">
-        <img id="img-camera" style="display:none" />
-        <span class="placeholder" id="ph-camera">Stream not started</span>
-    </div>
-    <div class="feed-footer">
-        <button class="btn-primary" onclick="startFeed('camera')">Start</button>
-        <button class="btn-danger" onclick="stopFeed('camera')">Stop</button>
-    </div>
+    <div class="controls">
+        <label for="apiUrl">API URL</label>
+        <input id="apiUrl" type="text" value="http://localhost:8000" />
     </div>
 
-    <!-- Detection feed -->
-    <div class="feed-card" id="card-detection">
-    <div class="feed-header">
-        <h2>Detection overlay</h2>
-        <span class="badge badge-off" id="badge-detection">OFF</span>
+    <div class="feeds">
+        <!-- Camera feed -->
+        <div class="feed-card" id="card-camera">
+            <div class="feed-header">
+                <h2>Camera (raw)</h2>
+                <span class="badge badge-off" id="badge-camera">OFF</span>
+            </div>
+            <div class="feed-body">
+                <img id="img-camera" style="display:none" />
+                <span class="placeholder" id="ph-camera">Stream not started</span>
+            </div>
+            <div class="feed-footer">
+                <button class="btn-primary" onclick="startFeed('camera')">Start</button>
+                <button class="btn-danger" onclick="stopFeed('camera')">Stop</button>
+            </div>
+        </div>
+
+        <!-- Detection feed -->
+        <div class="feed-card" id="card-detection">
+            <div class="feed-header">
+                <h2>Detection overlay</h2>
+                <span class="badge badge-off" id="badge-detection">OFF</span>
+            </div>
+            <div class="feed-body">
+                <img id="img-detection" style="display:none" />
+                <span class="placeholder" id="ph-detection">Stream not started</span>
+            </div>
+            <div class="feed-footer">
+                <button class="btn-primary" onclick="startFeed('detection')">Start</button>
+                <button class="btn-danger" onclick="stopFeed('detection')">Stop</button>
+            </div>
+        </div>
+
+        <!-- Snapshot / path detection -->
+        <div class="feed-card" id="card-snapshot">
+            <div class="feed-header">
+                <h2>Path detection</h2>
+                <span class="badge badge-off" id="badge-snapshot">-</span>
+            </div>
+            <div class="feed-body">
+                <img id="img-snapshot" style="display:none" />
+                <canvas id="canvas-snapshot"></canvas>
+                <span class="placeholder" id="ph-snapshot">Click Snapshot to capture</span>
+            </div>
+            <div class="feed-footer">
+                <button class="btn-secondary" onclick="snapshot()">📷 Snapshot</button>
+                <span id="snapshot-info" style="font-size:0.78rem; color:#a1a1aa; align-self:center;"></span>
+            </div>
+        </div>
     </div>
-    <div class="feed-body">
-        <img id="img-detection" style="display:none" />
-        <span class="placeholder" id="ph-detection">Stream not started</span>
-    </div>
-    <div class="feed-footer">
-        <button class="btn-primary" onclick="startFeed('detection')">Start</button>
-        <button class="btn-danger" onclick="stopFeed('detection')">Stop</button>
-    </div>
-    </div>
 
-    <!-- Snapshot / path detection -->
-    <div class="feed-card" id="card-snapshot">
-    <div class="feed-header">
-        <h2>Path detection</h2>
-        <span class="badge badge-off" id="badge-snapshot">-</span>
-    </div>
-    <div class="feed-body">
-        <img id="img-snapshot" style="display:none" />
-        <canvas id="canvas-snapshot"></canvas>
-        <span class="placeholder" id="ph-snapshot">Click Snapshot to capture</span>
-    </div>
-    <div class="feed-footer">
-        <button class="btn-secondary" onclick="snapshot()">📷 Snapshot</button>
-        <span id="snapshot-info" style="font-size:0.78rem; color:#a1a1aa; align-self:center;"></span>
-    </div>
-    </div>
-  </div>
+    <div class="log" id="log"></div>
 
-  <div class="log" id="log"></div>
+    <script>
+        const $ = (id) => document.getElementById(id);
 
-  <script>
-    const $ = (id) => document.getElementById(id);
-
-    function base() {
-    return $("apiUrl").value.replace(/\/+$/, "");
-    }
-
-    function log(msg, cls = "") {
-    const el = $("log");
-    const ts = new Date().toLocaleTimeString();
-    el.innerHTML += `<div><span class="ts">[${ts}]</span> <span class="${cls}">${msg}</span></div>`;
-    el.scrollTop = el.scrollHeight;
-    }
-
-    function startFeed(type) {
-    const img = $(`img-${type}`);
-    const ph = $(`ph-${type}`);
-    const badge = $(`badge-${type}`);
-    const url = `${base()}/streams/${type}/feed`;
-
-    img.src = url;
-    img.style.display = "block";
-    img.onerror = () => {
-        log(`${type} feed error — is the server running?`, "err");
-        stopFeed(type);
-    };
-    ph.style.display = "none";
-    badge.className = "badge badge-live";
-    badge.textContent = "LIVE";
-    log(`${type} feed started → ${url}`, "ok");
-    }
-
-    function stopFeed(type) {
-    const img = $(`img-${type}`);
-    const ph = $(`ph-${type}`);
-    const badge = $(`badge-${type}`);
-
-    img.src = "";
-    img.style.display = "none";
-    ph.style.display = "";
-    badge.className = "badge badge-off";
-    badge.textContent = "OFF";
-
-    log(`${type} feed stopped`);
-    }
-
-    async function snapshot() {
-    const badge = $("badge-snapshot");
-    const img = $("img-snapshot");
-    const ph = $("ph-snapshot");
-    const info = $("snapshot-info");
-    const canvas = $("canvas-snapshot");
-
-    const colors = ["#facc15", "#38bdf8", "#a78bfa", "#fb923c", "#4ade80", "#f87171"];
-
-    badge.className = "badge badge-live";
-    badge.textContent = "...";
-    info.textContent = "";
-
-    try {
-        const r = await fetch(`${base()}/paths`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ options: {} }),
-        });
-        const data = await r.json();
-        const count = data.detections?.length ?? 0;
-        log(`POST /paths → ok=${data.ok}, detections=${count}`, data.ok ? "ok" : "err");
-        data.detections?.forEach((d, i) => {
-        log(`  #${i + 1}: ${d.corners.length} corners, ${d.width_mm.toFixed(1)}×${d.height_mm.toFixed(1)} mm, conf ${(d.confidence * 100).toFixed(0)}%`);
-        });
-        if (data.error) log(`  error: ${data.error}`, "err");
-
-        if (data.image_base64) {
-        img.src = `data:image/jpeg;base64,${data.image_base64}`;
-        img.style.display = "block";
-        ph.style.display = "none";
-
-        img.onload = () => {
-            const natW = img.naturalWidth;
-            const natH = img.naturalHeight;
-            canvas.width = natW;
-            canvas.height = natH;
-            const ctx = canvas.getContext("2d");
-            ctx.clearRect(0, 0, natW, natH);
-
-            (data.detections || []).forEach((d, idx) => {
-            const color = colors[idx % colors.length];
-            if (d.corners?.length) {
-                // Draw polygon
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                d.corners.forEach((c, i) => {
-                i === 0 ? ctx.moveTo(c.x, c.y) : ctx.lineTo(c.x, c.y);
-                });
-                ctx.closePath();
-                ctx.stroke();
-
-                // Draw corner dots
-                ctx.fillStyle = color;
-                d.corners.forEach((c) => {
-                ctx.beginPath();
-                ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
-                ctx.fill();
-                });
-
-                // Label
-                ctx.font = "bold 14px sans-serif";
-                ctx.fillStyle = "#fff";
-                ctx.strokeStyle = "#000";
-                ctx.lineWidth = 3;
-                const label = `#${idx + 1} ${d.width_mm.toFixed(0)}×${d.height_mm.toFixed(0)}mm`;
-                const lx = d.center_x - 40;
-                const ly = d.center_y - 10;
-                ctx.strokeText(label, lx, ly);
-                ctx.fillText(label, lx, ly);
-            }
-            });
-        };
-
-        badge.className = "badge badge-live";
-        badge.textContent = data.ok ? `${count} found` : "FAIL";
-        info.textContent = `${count} detection${count !== 1 ? "s" : ""}`;
-        } else {
-        img.style.display = "none";
-        ph.style.display = "";
-        ph.textContent = "No image returned";
-        canvas.width = 0;
-        badge.className = "badge badge-off";
-        badge.textContent = "-";
+        function base() {
+            return $("apiUrl").value.replace(/\/+$/, "") + "/api";
         }
-    } catch (e) {
-        log(`snapshot failed: ${e.message}`, "err");
-        badge.className = "badge badge-off";
-        badge.textContent = "ERR";
-    }
-    }
 
-    log("Ready — enter API URL and click Start");
-  </script>
+        function log(msg, cls = "") {
+            const el = $("log");
+            const ts = new Date().toLocaleTimeString();
+            el.innerHTML += `<div><span class="ts">[${ts}]</span> <span class="${cls}">${msg}</span></div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function startFeed(type) {
+            const img = $(`img-${type}`);
+            const ph = $(`ph-${type}`);
+            const badge = $(`badge-${type}`);
+            const url = `${base()}/streams/${type}/feed`;
+
+            img.src = url;
+            img.style.display = "block";
+            img.onerror = () => {
+                log(`${type} feed error — is the server running?`, "err");
+                stopFeed(type);
+            };
+            ph.style.display = "none";
+            badge.className = "badge badge-live";
+            badge.textContent = "LIVE";
+            log(`${type} feed started → ${url}`, "ok");
+        }
+
+        function stopFeed(type) {
+            const img = $(`img-${type}`);
+            const ph = $(`ph-${type}`);
+            const badge = $(`badge-${type}`);
+
+            img.src = "";
+            img.style.display = "none";
+            ph.style.display = "";
+            badge.className = "badge badge-off";
+            badge.textContent = "OFF";
+
+            log(`${type} feed stopped`);
+        }
+
+        async function snapshot() {
+            const badge = $("badge-snapshot");
+            const img = $("img-snapshot");
+            const ph = $("ph-snapshot");
+            const info = $("snapshot-info");
+            const canvas = $("canvas-snapshot");
+
+            const colors = ["#facc15", "#38bdf8", "#a78bfa", "#fb923c", "#4ade80", "#f87171"];
+
+            badge.className = "badge badge-live";
+            badge.textContent = "...";
+            info.textContent = "";
+
+            try {
+                const r = await fetch(`${base()}/paths`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ options: {} }),
+                });
+                const data = await r.json();
+                const count = data.detections?.length ?? 0;
+                log(`POST /paths → ok=${data.ok}, detections=${count}`, data.ok ? "ok" : "err");
+                data.detections?.forEach((d, i) => {
+                    log(`  #${i + 1}: ${d.corners.length} corners, ${d.width_mm.toFixed(1)}×${d.height_mm.toFixed(1)} mm, conf ${(d.confidence * 100).toFixed(0)}%`);
+                });
+                if (data.error) log(`  error: ${data.error}`, "err");
+
+                if (data.image_base64) {
+                    img.src = `data:image/jpeg;base64,${data.image_base64}`;
+                    img.style.display = "block";
+                    ph.style.display = "none";
+
+                    img.onload = () => {
+                        const natW = img.naturalWidth;
+                        const natH = img.naturalHeight;
+                        canvas.width = natW;
+                        canvas.height = natH;
+                        const ctx = canvas.getContext("2d");
+                        ctx.clearRect(0, 0, natW, natH);
+
+                        (data.detections || []).forEach((d, idx) => {
+                            const color = colors[idx % colors.length];
+                            if (d.corners?.length) {
+                                // Draw polygon
+                                ctx.strokeStyle = color;
+                                ctx.lineWidth = 3;
+                                ctx.beginPath();
+                                d.corners.forEach((c, i) => {
+                                    i === 0 ? ctx.moveTo(c.x, c.y) : ctx.lineTo(c.x, c.y);
+                                });
+                                ctx.closePath();
+                                ctx.stroke();
+
+                                // Draw corner dots
+                                ctx.fillStyle = color;
+                                d.corners.forEach((c) => {
+                                    ctx.beginPath();
+                                    ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
+                                    ctx.fill();
+                                });
+
+                                // Label
+                                ctx.font = "bold 14px sans-serif";
+                                ctx.fillStyle = "#fff";
+                                ctx.strokeStyle = "#000";
+                                ctx.lineWidth = 3;
+                                const label = `#${idx + 1} ${d.width_mm.toFixed(0)}×${d.height_mm.toFixed(0)}mm`;
+                                const lx = d.center_x - 40;
+                                const ly = d.center_y - 10;
+                                ctx.strokeText(label, lx, ly);
+                                ctx.fillText(label, lx, ly);
+                            }
+                        });
+                    };
+
+                    badge.className = "badge badge-live";
+                    badge.textContent = data.ok ? `${count} found` : "FAIL";
+                    info.textContent = `${count} detection${count !== 1 ? "s" : ""}`;
+                } else {
+                    img.style.display = "none";
+                    ph.style.display = "";
+                    ph.textContent = "No image returned";
+                    canvas.width = 0;
+                    badge.className = "badge badge-off";
+                    badge.textContent = "-";
+                }
+            } catch (e) {
+                log(`snapshot failed: ${e.message}`, "err");
+                badge.className = "badge badge-off";
+                badge.textContent = "ERR";
+            }
+        }
+
+        log("Ready — enter API URL and click Start");
+    </script>
 
 </body>
 
