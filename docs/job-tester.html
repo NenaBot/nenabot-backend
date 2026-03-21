@@ -588,7 +588,7 @@
                     body: JSON.stringify({ options: {} }),
                 });
                 const data = await res.json();
-                log(`Path result: ok=${data.ok}, ${data.detections?.length ?? 0} detections, ` +
+                log(`Path result: requestSucceeded=${data.requestSucceeded}, ${data.detections?.length ?? 0} detections, ` +
                     `pixelsPerMm=${data.pixelsPerMm ?? '?'}, markers=${data.markerCount ?? 0}`);
 
                 lastDetections = data.detections || [];
@@ -863,7 +863,7 @@
             try {
                 const res = await fetch(`${api()}/robot/pose`);
                 const data = await res.json();
-                if (data.ok) {
+                if (data.requestSucceeded) {
                     $('poseInfo').textContent = `Robot position: (${data.x.toFixed(1)}, ${data.y.toFixed(1)}, ${data.z.toFixed(1)}, ${data.r.toFixed(1)}) mm`;
                     $('poseInfo').style.color = 'var(--green)';
                     log(`Robot pose (mm): x=${data.x.toFixed(1)} y=${data.y.toFixed(1)} z=${data.z.toFixed(1)} r=${data.r.toFixed(1)}`);
@@ -900,7 +900,7 @@
                     body: JSON.stringify({ x: rs.robotX, y: rs.robotY, z: rs.robotZ, r: rs.robotR }),
                 });
                 const data = await res.json();
-                if (data.ok) {
+                if (data.requestSucceeded) {
                     log('  ✓ Move command sent. Check physical robot position.');
                 } else {
                     log(`  ✗ Move failed: ${data.error}`);

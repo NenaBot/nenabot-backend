@@ -19,7 +19,7 @@ All endpoints are prefixed with `/api`.
 | **GET**    | `/api/stream/camera/feed`    | Camera video feed.                   | 200         | MJPEG live raw camera stream.                                                                      |
 | **GET**    | `/api/stream/detection/feed` | Detection video feed.                | 200         | MJPEG with ArUco markers and contour overlay.                                                      |
 | **POST**   | `/api/job`                   | Initiate a new job.                  | 201         | **Body:** `options`, `path`, `workZ`, `workR`, `dryRun`<br>**Returns:** Full job object with `ID`. |
-| **POST**   | `/api/path/detect`           | Detect battery path & calibrate.     | 201         | **Body:** `options`<br>**Returns:** Detections ordered by distance from canvas start.              |
+| **POST**   | `/api/path/detect`           | Detect battery path & calibrate.     | 201         | **Body:** `options`<br>**Returns:** Initial detections in detector-native order.                   |
 | **POST**   | `/api/path/populate`         | Populate perimeter measurement path. | 200         | **Body:** `batteries`, `measuringPointsPerCm`<br>**Returns:** indexed measurement points.          |
 | **POST**   | `/api/robot/move`            | Move robot.                          | 200         | **Body:** `x`, `y`, `z`, `r`<br>Moves robot to position (calibration).                             |
 | **POST**   | `/api/robot/stop`            | Stop active job.                     | 200         | Stops running job and halts robot.                                                                 |
@@ -135,7 +135,7 @@ The job object encapsulates the configuration, output data, and current processi
 
 **Key behavior:**
 
-- **Detections are sorted by direct distance from `canvas_start`** (closest battery first).
+- **Detections are returned in detector-native order** (not sorted by backend).
 - Pixel coordinates are represented as `pixelX`/`pixelY` in path-related payloads.
 - Canvas start = marker center + (50mm × pixels_per_mm) in Y direction.
 - The response includes calibration data required for path population and job creation.

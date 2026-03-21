@@ -5,8 +5,13 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.camera_vision import CaptureResult, DetectionResults
-from app.adapters.robot import RobotResult
+from app.adapters.camera_vision import (
+    CaptureResult,
+    Corner,
+    DetectionResults,
+    MarkerCorners,
+)
+from app.adapters.robot import PoseResult, RobotResult
 from app.dependencies import create_orchestrator, get_orchestrator
 from app.domain.models import Waypoint
 from app.main import app
@@ -186,9 +191,70 @@ def test_profiles_and_paths(client: TestClient) -> None:
     response = client.post("/api/path/detect", json={"options": {"speed": 1}})
     assert response.status_code == 201
     body = response.json()
-    assert "ok" in body
+    assert "requestSucceeded" in body
     assert "detections" in body
     assert isinstance(body["detections"], list)
+
+
+def test_paths_returns_ok_when_detection_is_empty_but_calibration_succeeds(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "capture.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    marker = MarkerCorners(
+        corners=[
+            Corner(x=10.0, y=10.0),
+            Corner(x=20.0, y=10.0),
+            Corner(x=20.0, y=20.0),
+            Corner(x=10.0, y=20.0),
+        ]
+    )
+
+    with patch(
+        "app.adapters.camera_vision.CameraVisionAdapter.ping",
+        return_value=CaptureResult(ok=False, error="no camera in test"),
+    ), patch(
+        "app.adapters.camera_vision.CameraVisionAdapter.capture",
+        return_value=CaptureResult(ok=True, image_path=str(image_path)),
+    ), patch(
+        "app.adapters.camera_vision.CameraVisionAdapter.detect",
+        return_value=DetectionResults(
+            ok=False,
+            detections=[],
+            pixels_per_mm=2.0,
+            marker_count=1,
+            marker_corners=[marker],
+            error="No battery contour detected",
+        ),
+    ), patch(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        return_value=RobotResult(ok=False, error="no robot in test"),
+    ), patch(
+        "app.adapters.robot.RobotAdapter.ping",
+        return_value=RobotResult(ok=False, error="no robot in test"),
+    ), patch(
+        "app.adapters.robot.RobotAdapter.get_pose",
+        return_value=PoseResult(ok=True, x=100.0, y=200.0, z=0.0, r=0.0),
+    ):
+        test_orchestrator = create_orchestrator(
+            db_path=str(tmp_path / "test_paths_ok.db"),
+            dms_base_url="http://localhost:8080",
+        )
+        app.dependency_overrides[get_orchestrator] = lambda: test_orchestrator
+
+        with TestClient(app) as client:
+            response = client.post("/api/path/detect", json={"options": {}})
+
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["requestSucceeded"] is True
+    assert body["detections"] == []
+    assert body["markerCount"] == 1
+    assert body["calibration"]["calibrated"] is True
+    assert body["calibration"]["robotStart"]["robotX"] == pytest.approx(100.0)
+    assert "No battery contour detected" in body["error"]
 
 
 def test_job_image_endpoint(client: TestClient) -> None:

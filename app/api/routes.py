@@ -261,7 +261,7 @@ def detect_path(
         )
 
     return PathResponse(
-        ok=result.ok,
+        request_succeeded=result.ok or cal is not None,
         detections=[
             PathItem(
                 corners=[CornerSchema(pixel_x=c.x, pixel_y=c.y) for c in d.corners],
