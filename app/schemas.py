@@ -2,16 +2,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ---- Waypoint / Measurement ----
 
 
 class WaypointSchema(BaseModel):
-    x: float
-    y: float
-    z: float = 0.0
-    r: float = 0.0
+    robot_x: float = Field(alias="robotX")
+    robot_y: float = Field(alias="robotY")
+    robot_z: float = Field(0.0, alias="robotZ")
+    robot_r: float = Field(0.0, alias="robotR")
+    index: str | None = None
+    battery_nr: int | None = Field(None, alias="batteryNr")
+    corner_index: int | None = Field(None, alias="cornerIndex")
+    measurement_index: int | None = Field(None, alias="measurementIndex")
+
+    model_config = {"populate_by_name": True}
 
 
 class MeasurementSchema(BaseModel):
@@ -79,28 +85,53 @@ class Profile(BaseModel):
 
 
 class CornerSchema(BaseModel):
-    x: float
-    y: float
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+
+    model_config = {"populate_by_name": True}
 
 
 class PathRequest(BaseModel):
     options: dict[str, Any] | None = None
 
 
-class PathCheckRequest(BaseModel):
-    waypoints: list[PixelPointSchema] = Field(default_factory=list)
+class BatteryCornersSchema(BaseModel):
+    corners: list[CornerSchema] = Field(default_factory=list)
 
 
-class PathCheckResponse(BaseModel):
-    path: list[PixelPointSchema] = Field(default_factory=list)
+class PopulatedPathPointSchema(BaseModel):
+    index: str
+    battery_nr: int = Field(alias="batteryNr")
+    corner_index: int = Field(alias="cornerIndex")
+    measurement_index: int = Field(alias="measurementIndex")
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+
+    model_config = {"populate_by_name": True}
+
+
+class PathPopulateRequest(BaseModel):
+    batteries: list[BatteryCornersSchema] = Field(default_factory=list)
+    measuring_points_per_cm: float = Field(alias="measuringPointsPerCm", gt=0.0)
+
+    model_config = {"populate_by_name": True}
+
+
+class PathPopulateResponse(BaseModel):
+    path: list[PopulatedPathPointSchema] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
 
 
 class PathItem(BaseModel):
     corners: list[CornerSchema] = Field(default_factory=list)
     width_mm: float = 0.0
     height_mm: float = 0.0
-    center_x: float = 0.0
-    center_y: float = 0.0
+    center_x: float = Field(0.0, alias="pixelCenterX")
+    center_y: float = Field(0.0, alias="pixelCenterY")
+    confidence: float = 0.0
+
+    model_config = {"populate_by_name": True}
 
 
 class MarkerCornersSchema(BaseModel):
@@ -161,8 +192,10 @@ class RobotMoveResponse(BaseModel):
 class PixelPointSchema(BaseModel):
     """A point in canvas/pixel coordinates."""
 
-    x: float
-    y: float
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+
+    model_config = {"populate_by_name": True}
 
 
 # ---- Calibration ----
@@ -201,7 +234,25 @@ class JobEvent(BaseModel):
 
 
 class JobCreateRequest(BaseModel):
-    path: list[PixelPointSchema] = Field(default_factory=list)
+    class JobPathPointSchema(BaseModel):
+        pixel_x: float | None = Field(None, alias="pixelX")
+        pixel_y: float | None = Field(None, alias="pixelY")
+        index: str | None = None
+        battery_nr: int | None = Field(None, alias="batteryNr")
+        corner_index: int | None = Field(None, alias="cornerIndex")
+        measurement_index: int | None = Field(None, alias="measurementIndex")
+
+        @model_validator(mode="after")
+        def validate_coordinates(self) -> JobCreateRequest.JobPathPointSchema:
+            has_pixel = self.pixel_x is not None and self.pixel_y is not None
+            if not has_pixel:
+                msg = "Each path point must include (pixelX,pixelY)"
+                raise ValueError(msg)
+            return self
+
+        model_config = {"populate_by_name": True}
+
+    path: list[JobPathPointSchema] = Field(default_factory=list)
     work_z: float = Field(0.0, alias="workZ")
     work_r: float = Field(0.0, alias="workR")
     dry_run: bool = Field(False, alias="dryRun")

@@ -259,56 +259,68 @@ def test_sort_pixel_path_from_canvas_start_raises_when_uncalibrated(
         svc.sort_pixel_path_from_canvas_start([(1.0, 2.0)])
 
 
-def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
+def test_populate_pixel_path_from_batteries_generates_perimeter_points(
     tmp_path: Path,
 ) -> None:
-    """detect_path() should not keep calibration when the robot pose is all zeros."""
     svc = _make_svc(tmp_path)
-    svc._cal_robot_start = Waypoint(x=100.0, y=200.0, z=0.0, r=0.0)
     svc._cal_canvas_start = (640.0, 400.0)
     svc._cal_pixels_per_mm = 2.0
 
-    image_path = tmp_path / "capture.jpg"
-    image_path.write_bytes(b"fake-jpeg")
-    marker = MarkerCorners(
-        corners=[
-            Corner(x=10.0, y=10.0),
-            Corner(x=20.0, y=10.0),
-            Corner(x=20.0, y=20.0),
-            Corner(x=10.0, y=20.0),
-        ]
+    path = svc.populate_pixel_path_from_batteries(
+        batteries=[
+            [
+                (650.0, 390.0),
+                (690.0, 390.0),
+                (690.0, 430.0),
+                (650.0, 430.0),
+            ]
+        ],
+        measuring_points_per_cm=0.5,
     )
 
-    with patch.object(
-        svc._camera_vision,
-        "capture",
-        return_value=CaptureResult(ok=True, image_path=str(image_path)),
-    ), patch.object(
-        svc._camera_vision,
-        "detect",
-        return_value=DetectionResults(
-            ok=False,
-            detections=[],
-            pixels_per_mm=2.0,
-            marker_count=1,
-            marker_corners=[marker],
-            error="No battery contour detected",
-        ),
-    ), patch.object(
-        svc._robot,
-        "get_pose",
-        return_value=PoseResult(ok=True, x=0.0, y=0.0, z=0.0, r=0.0),
-    ):
-        result = svc.detect_path()
+    assert len(path) == 4
+    assert path[0]["index"] == "0-0-0"
+    assert path[0]["batteryNr"] == 0
+    assert path[0]["cornerIndex"] == 0
+    assert path[0]["measurementIndex"] == 0
+    assert path[0]["pixelX"] == pytest.approx(650.0)
+    assert path[0]["pixelY"] == pytest.approx(390.0)
 
-    assert result.ok is False
-    assert "origin" in (result.error or "").lower()
-    assert svc.calibration_robot_start is None
-    assert svc.is_calibrated is False
+
+def test_populate_pixel_path_from_batteries_orders_batteries_by_start_distance(
+    tmp_path: Path,
+) -> None:
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+    svc._cal_pixels_per_mm = 2.0
+
+    path = svc.populate_pixel_path_from_batteries(
+        batteries=[
+            [
+                (900.0, 500.0),
+                (940.0, 500.0),
+                (940.0, 540.0),
+                (900.0, 540.0),
+            ],
+            [
+                (650.0, 390.0),
+                (690.0, 390.0),
+                (690.0, 430.0),
+                (650.0, 430.0),
+            ],
+        ],
+        measuring_points_per_cm=0.5,
+    )
+
+    assert path
+    assert path[0]["batteryNr"] == 0
+    assert path[0]["pixelX"] == pytest.approx(650.0)
+    assert path[0]["pixelY"] == pytest.approx(390.0)
+    assert any(point["batteryNr"] == 1 for point in path)
 
 
 def test_detect_path_keeps_detection_order(tmp_path: Path) -> None:
-    """detect_path() should keep detections in detector-native order."""
+    """detect_path() should keep detector output order unchanged."""
     svc = _make_svc(tmp_path)
 
     image_path = tmp_path / "capture.jpg"
@@ -345,7 +357,6 @@ def test_detect_path_keeps_detection_order(tmp_path: Path) -> None:
             center_y=400.0,
         ),
     ]
-
     with patch.object(
         svc._camera_vision,
         "capture",
@@ -376,6 +387,53 @@ def test_detect_path_keeps_detection_order(tmp_path: Path) -> None:
     assert result.detections[1].center_y == 401.0
     assert result.detections[2].center_x == 650.0
     assert result.detections[2].center_y == 400.0
+
+
+def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
+    tmp_path: Path,
+) -> None:
+    """detect_path() should not keep calibration when the robot pose is all zeros."""
+    svc = _make_svc(tmp_path)
+    svc._cal_robot_start = Waypoint(x=100.0, y=200.0, z=0.0, r=0.0)
+    svc._cal_canvas_start = (640.0, 400.0)
+    svc._cal_pixels_per_mm = 2.0
+    image_path = tmp_path / "capture.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    marker = MarkerCorners(
+        corners=[
+            Corner(x=10.0, y=10.0),
+            Corner(x=20.0, y=10.0),
+            Corner(x=20.0, y=20.0),
+            Corner(x=10.0, y=20.0),
+        ]
+    )
+
+    with patch.object(
+        svc._camera_vision,
+        "capture",
+        return_value=CaptureResult(ok=True, image_path=str(image_path)),
+    ), patch.object(
+        svc._camera_vision,
+        "detect",
+        return_value=DetectionResults(
+            ok=False,
+            detections=[],
+            pixels_per_mm=2.0,
+            marker_count=1,
+            marker_corners=[marker],
+            error="No battery contour detected",
+        ),
+    ), patch.object(
+        svc._robot,
+        "get_pose",
+        return_value=PoseResult(ok=True, x=0.0, y=0.0, z=0.0, r=0.0),
+    ):
+        origin_result = svc.detect_path()
+
+    assert origin_result.ok is False
+    assert "origin" in (origin_result.error or "").lower()
+    assert svc.calibration_robot_start is None
+    assert svc.is_calibrated is False
 
 
 # ---- ORC-TC-014: Job fails on robot move error ----
@@ -454,9 +512,7 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         svc._dms,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
-    ), patch(
-        "time.sleep"
-    ):
+    ), patch("time.sleep"):
         svc.run_job(job.id)
         svc._job_thread.join(timeout=10)
 

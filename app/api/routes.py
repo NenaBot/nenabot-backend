@@ -11,6 +11,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.dependencies import get_orchestrator
 from app.domain.models import Job as DomainJob
+from app.domain.models import Waypoint
 from app.schemas import (
     CalibrationResponse,
     ComponentHealth,
@@ -20,11 +21,12 @@ from app.schemas import (
     JobCreateRequest,
     MarkerCornersSchema,
     MeasurementSchema,
-    PathCheckRequest,
-    PathCheckResponse,
     PathItem,
+    PathPopulateRequest,
+    PathPopulateResponse,
     PathRequest,
     PathResponse,
+    PopulatedPathPointSchema,
     PixelPointSchema,
     Profile,
     RobotMoveRequest,
@@ -101,14 +103,27 @@ def create_job(
             "(with robot arm at starting position)",
         )
 
-    # Convert pixel waypoints → robot mm using stored calibration
-    waypoints = [
-        svc.pixel_to_robot(p.x, p.y, payload.work_z, payload.work_r)
+    pixel_points = [
+        (
+            p.pixel_x,
+            p.pixel_y,
+        )
         for p in payload.path
     ]
 
+    robot_waypoints: list[Waypoint] = []
+    for point, (pixel_x, pixel_y) in zip(payload.path, pixel_points):
+        wp = svc.pixel_to_robot(pixel_x, pixel_y, payload.work_z, payload.work_r)
+        wp.index = point.index
+        wp.battery_nr = point.battery_nr
+        wp.corner_index = point.corner_index
+        wp.measurement_index = point.measurement_index
+        robot_waypoints.append(wp)
+
     # Pixel coords for measurement points (one per measurement waypoint)
-    pixel_path: list[tuple[float, float]] = [(p.x, p.y) for p in payload.path]
+    pixel_path: list[tuple[float, float]] = [
+        (pixel_x, pixel_y) for pixel_x, pixel_y in pixel_points
+    ]
 
     # Starting position for return-to-start (captured during POST /path/detect)
     starting_wp = svc.calibration_robot_start
@@ -122,7 +137,7 @@ def create_job(
             pass  # — best-effort decode
 
     job = svc.create_job(
-        path=waypoints,
+        path=robot_waypoints,
         dry_run=payload.dry_run,
         options=payload.options,
         image_bytes=image_bytes,
@@ -234,8 +249,14 @@ def detect_path(
         cs = svc.calibration_canvas_start
         cal = CalibrationResponse(
             calibrated=True,
-            robot_start=WaypointSchema(x=rs.x, y=rs.y, z=rs.z, r=rs.r) if rs else None,
-            canvas_start=PixelPointSchema(x=cs[0], y=cs[1]) if cs else None,
+            robot_start=(
+                WaypointSchema(robot_x=rs.x, robot_y=rs.y, robot_z=rs.z, robot_r=rs.r)
+                if rs
+                else None
+            ),
+            canvas_start=(
+                PixelPointSchema(pixel_x=cs[0], pixel_y=cs[1]) if cs else None
+            ),
             pixels_per_mm=svc.calibration_pixels_per_mm,
         )
 
@@ -243,7 +264,7 @@ def detect_path(
         request_succeeded=result.ok or cal is not None,
         detections=[
             PathItem(
-                corners=[CornerSchema(x=c.x, y=c.y) for c in d.corners],
+                corners=[CornerSchema(pixel_x=c.x, pixel_y=c.y) for c in d.corners],
                 width_mm=d.width_mm,
                 height_mm=d.height_mm,
                 center_x=d.center_x,
@@ -256,7 +277,7 @@ def detect_path(
         marker_count=result.marker_count,
         marker_corners=[
             MarkerCornersSchema(
-                corners=[CornerSchema(x=c.x, y=c.y) for c in mc.corners]
+                corners=[CornerSchema(pixel_x=c.x, pixel_y=c.y) for c in mc.corners]
             )
             for mc in result.marker_corners
         ],
@@ -363,40 +384,62 @@ async def job_events(
         svc.unsubscribe(job_id, q)
 
 
-@router.post("/path", status_code=status.HTTP_200_OK)
-def check_path(
-    payload: PathCheckRequest,
+@router.post("/path/populate", status_code=status.HTTP_200_OK)
+def populate_path(
+    payload: PathPopulateRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
-) -> PathCheckResponse:
-    if not svc.calibration_canvas_start:
+) -> PathPopulateResponse:
+    if not svc.is_calibrated:
         raise HTTPException(
             status_code=409,
             detail="Not calibrated — call POST /path/detect first "
             "(with robot arm at starting position)",
         )
 
-    sorted_points = svc.sort_pixel_path_from_canvas_start(
-        [(p.x, p.y) for p in payload.waypoints]
+    batteries: list[list[tuple[float, float]]] = [
+        [(corner.pixel_x, corner.pixel_y) for corner in battery.corners]
+        for battery in payload.batteries
+    ]
+    populated = svc.populate_pixel_path_from_batteries(
+        batteries,
+        payload.measuring_points_per_cm,
     )
-    points = [PixelPointSchema(x=x, y=y) for x, y in sorted_points]
 
-    return PathCheckResponse(path=points)
+    return PathPopulateResponse(
+        path=[PopulatedPathPointSchema(**point) for point in populated]
+    )
 
 
 def _to_job(job: DomainJob) -> Job:
     return Job(
         id=job.id,
         options=job.options,
-        path=[WaypointSchema(x=w.x, y=w.y, z=w.z, r=w.r) for w in job.path],
+        path=[
+            WaypointSchema(
+                robot_x=w.x,
+                robot_y=w.y,
+                robot_z=w.z,
+                robot_r=w.r,
+                index=w.index,
+                battery_nr=w.battery_nr,
+                corner_index=w.corner_index,
+                measurement_index=w.measurement_index,
+            )
+            for w in job.path
+        ],
         dry_run=job.dry_run,
         measurements=[
             MeasurementSchema(
                 waypoint_index=m.waypoint_index,
                 waypoint=WaypointSchema(
-                    x=m.waypoint.x,
-                    y=m.waypoint.y,
-                    z=m.waypoint.z,
-                    r=m.waypoint.r,
+                    robot_x=m.waypoint.x,
+                    robot_y=m.waypoint.y,
+                    robot_z=m.waypoint.z,
+                    robot_r=m.waypoint.r,
+                    index=m.waypoint.index,
+                    battery_nr=m.waypoint.battery_nr,
+                    corner_index=m.waypoint.corner_index,
+                    measurement_index=m.waypoint.measurement_index,
                 ),
                 pixel_x=m.pixel_x,
                 pixel_y=m.pixel_y,
