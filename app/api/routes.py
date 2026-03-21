@@ -1,21 +1,37 @@
 from __future__ import annotations
 
+import asyncio
+import base64
+import queue
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
+from app.dependencies import get_orchestrator
+from app.domain.models import Job as DomainJob
 from app.schemas import (
+    CalibrationResponse,
+    ComponentHealth,
     CornerSchema,
     Health,
     Job,
     JobCreateRequest,
+    MarkerCornersSchema,
+    MeasurementSchema,
     PathItem,
     PathRequest,
     PathResponse,
+    PixelPointSchema,
     Profile,
+    RobotMoveRequest,
+    RobotMoveResponse,
+    RobotPoseResponse,
     Status,
+    WaypointSchema,
 )
 from app.services.orchestrator import OrchestratorService
-from app.dependencies import get_orchestrator
 
 router = APIRouter()
 
@@ -23,7 +39,13 @@ router = APIRouter()
 @router.get("/health", response_model=Health)
 def health(svc: OrchestratorService = Depends(get_orchestrator)) -> Health:
     data = svc.health()
-    return Health(**data)
+    return Health(
+        status=data["status"],
+        uptime_s=data["uptime_s"],
+        robot=ComponentHealth(**data["robot"]),
+        camera=ComponentHealth(**data["camera"]),
+        dms=ComponentHealth(**data["dms"]),
+    )
 
 
 @router.get("/status", response_model=Status)
@@ -53,18 +75,113 @@ def get_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)) -
     return _to_job(job)
 
 
+@router.get("/jobs/{job_id}/image")
+def get_job_image(
+    job_id: str,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> Response:
+    """Return the clean base JPEG for a job (no overlay annotations)."""
+    img = svc.get_job_image(job_id)
+    if not img:
+        raise HTTPException(status_code=404, detail="No image for this job")
+    return Response(content=img, media_type="image/jpeg")
+
+
 @router.post("/jobs", response_model=Job, status_code=status.HTTP_201_CREATED)
-def create_job(payload: JobCreateRequest, svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
-    job = svc.create_job(options=payload.options, path=payload.path)
+def create_job(
+    payload: JobCreateRequest,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> Job:
+    if not svc.is_calibrated:
+        raise HTTPException(
+            status_code=409,
+            detail="Not calibrated — call POST /paths first "
+            "(with robot arm at starting position)",
+        )
+
+    # Convert pixel waypoints → robot mm using stored calibration
+    waypoints = [
+        svc.pixel_to_robot(p.x, p.y, payload.work_z, payload.work_r)
+        for p in payload.path
+    ]
+
+    # Pixel coords for measurement points (one per measurement waypoint)
+    pixel_path: list[tuple[float, float]] = [(p.x, p.y) for p in payload.path]
+
+    # Starting position for return-to-start (captured during POST /paths)
+    starting_wp = svc.calibration_robot_start
+
+    # Decode optional snapshot image
+    image_bytes: bytes | None = None
+    if payload.image_base64:
+        try:
+            image_bytes = base64.b64decode(payload.image_base64)
+        except Exception:  # noqa: S110
+            pass  # — best-effort decode
+
+    job = svc.create_job(
+        path=waypoints,
+        dry_run=payload.dry_run,
+        options=payload.options,
+        image_bytes=image_bytes,
+        starting_point=starting_wp,
+        pixel_path=pixel_path,
+    )
+    svc.run_job(job.id)
     return _to_job(job)
 
 
-@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
-def delete_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)) -> Response:
+@router.delete(
+    "/jobs/{job_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
+def delete_job(
+    job_id: str,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> Response:
     ok = svc.delete_job(job_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Job not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/robot/stop", status_code=status.HTTP_200_OK)
+def stop_robot(
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> dict:
+    stopped = svc.stop_job()
+    return {"stopped": stopped}
+
+
+@router.post("/robot/move", response_model=RobotMoveResponse)
+def robot_move(
+    payload: RobotMoveRequest,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> RobotMoveResponse:
+    """Send the robot to a specific position (for calibration testing)."""
+    result = svc.move_robot(payload.x, payload.y, payload.z, payload.r)
+    return RobotMoveResponse(ok=result.ok, error=result.error)
+
+
+@router.get("/robot/pose", response_model=RobotPoseResponse)
+def robot_pose(
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> RobotPoseResponse:
+    """Read the current position of the robot arm."""
+    result = svc.get_robot_pose()
+    return RobotPoseResponse(
+        ok=result.ok,
+        x=result.x,
+        y=result.y,
+        z=result.z,
+        r=result.r,
+        j1=result.j1,
+        j2=result.j2,
+        j3=result.j3,
+        j4=result.j4,
+        error=result.error,
+    )
 
 
 @router.get("/profiles", response_model=list[Profile])
@@ -78,7 +195,9 @@ def default_profile(svc: OrchestratorService = Depends(get_orchestrator)) -> Pro
 
 
 @router.get("/streams/camera/feed")
-async def camera_feed(svc: OrchestratorService = Depends(get_orchestrator)):
+async def camera_feed(
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> StreamingResponse:
     """MJPEG live camera feed. Connect via <img src="..."> or fetch API."""
     return StreamingResponse(
         svc.camera_vision.stream_camera(),
@@ -87,7 +206,9 @@ async def camera_feed(svc: OrchestratorService = Depends(get_orchestrator)):
 
 
 @router.get("/streams/detection/feed")
-async def detection_feed(svc: OrchestratorService = Depends(get_orchestrator)):
+async def detection_feed(
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> StreamingResponse:
     """MJPEG detection-overlay feed. Shows ArUco markers and battery contour."""
     return StreamingResponse(
         svc.camera_vision.stream_detection(),
@@ -101,6 +222,19 @@ def create_path(
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> PathResponse:
     result = svc.detect_path()
+
+    # Build calibration summary for the frontend
+    cal: CalibrationResponse | None = None
+    if svc.is_calibrated:
+        rs = svc.calibration_robot_start
+        cs = svc.calibration_canvas_start
+        cal = CalibrationResponse(
+            calibrated=True,
+            robot_start=WaypointSchema(x=rs.x, y=rs.y, z=rs.z, r=rs.r) if rs else None,
+            canvas_start=PixelPointSchema(x=cs[0], y=cs[1]) if cs else None,
+            pixels_per_mm=svc.calibration_pixels_per_mm,
+        )
+
     return PathResponse(
         ok=result.ok,
         detections=[
@@ -115,18 +249,143 @@ def create_path(
             for d in result.detections
         ],
         image_base64=result.image_base64,
+        pixels_per_mm=result.pixels_per_mm,
+        marker_count=result.marker_count,
+        marker_corners=[
+            MarkerCornersSchema(
+                corners=[CornerSchema(x=c.x, y=c.y) for c in mc.corners]
+            )
+            for mc in result.marker_corners
+        ],
+        calibration=cal,
         error=result.error,
         options=payload.options,
     )
 
 
-def _to_job(job) -> Job:
+_SSE_DESCRIPTION = """\
+SSE stream of real-time job progress events.
+
+Connect with an `EventSource` (or any HTTP client that accepts
+`text/event-stream`).  The stream behaves as follows:
+
+1. **On connect** — a `job:snapshot` event is sent with the current state so
+   late-joining clients are synchronised immediately.
+2. **While the job runs** — events are pushed in real-time:
+   - `job:started` — job transitioned to *running*
+   - `job:waypoint_started` — about to process a waypoint (includes `waypointIndex`)
+   - `job:waypoint_completed` — measurement recorded (includes `waypointIndex` and `measurement`)
+3. **Terminal event** — one of `job:completed`, `job:failed`, or `job:stopped`.
+   The stream closes automatically after a terminal event.
+
+Each SSE message has an `event` field matching the event type and a JSON
+`data` field whose shape is described by the **JobEvent** schema.
+
+Multiple clients can subscribe to the same job simultaneously.
+"""
+
+
+@router.get(
+    "/jobs/{job_id}/events",
+    response_class=EventSourceResponse,
+    summary="Stream job progress (SSE)",
+    description=_SSE_DESCRIPTION,
+    responses={
+        200: {
+            "description": "SSE event stream.",
+            "content": {
+                "text/event-stream": {
+                    "schema": {"$ref": "#/components/schemas/JobEvent"},
+                },
+            },
+        },
+        404: {"description": "Job not found."},
+    },
+)
+async def job_events(
+    job_id: str,
+    svc: OrchestratorService = Depends(get_orchestrator),
+):
+    job = svc.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    q = svc.subscribe(job_id)
+
+    try:
+        # Snapshot so late-connecting clients get current state
+        yield ServerSentEvent(
+            data={
+                "type": "job:snapshot",
+                "jobId": job_id,
+                "state": job.state,
+                "lastPointProcessed": job.last_point_processed,
+                "totalPoints": len(job.path),
+                "error": job.error,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            event="job:snapshot",
+        )
+
+        if job.state in ("completed", "failed", "stopped"):
+            return
+
+        while True:
+            try:
+                event = q.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(1)
+                continue
+
+            event_type = event.get("type", "job:update")
+            payload = {
+                "type": event_type,
+                "jobId": event.get("job_id"),
+                "state": event.get("state"),
+                "lastPointProcessed": event.get("last_point_processed", 0),
+                "totalPoints": event.get("total_points", 0),
+                "error": event.get("error"),
+                "timestamp": event.get("timestamp"),
+            }
+            if event.get("measurement"):
+                payload["measurement"] = event["measurement"]
+            if "waypoint_index" in event:
+                payload["waypointIndex"] = event["waypoint_index"]
+
+            yield ServerSentEvent(data=payload, event=event_type)
+
+            if event.get("state") in ("completed", "failed", "stopped"):
+                return
+    finally:
+        svc.unsubscribe(job_id, q)
+
+
+def _to_job(job: DomainJob) -> Job:
     return Job(
         id=job.id,
         options=job.options,
-        path=job.path,
-        log=job.log,
-        measurements=job.measurements,
-        path_image=job.path_image,
-        status={"lastPointProcessed": job.last_point_processed, "error": job.error},
+        path=[WaypointSchema(x=w.x, y=w.y, z=w.z, r=w.r) for w in job.path],
+        dry_run=job.dry_run,
+        measurements=[
+            MeasurementSchema(
+                waypoint_index=m.waypoint_index,
+                waypoint=WaypointSchema(
+                    x=m.waypoint.x,
+                    y=m.waypoint.y,
+                    z=m.waypoint.z,
+                    r=m.waypoint.r,
+                ),
+                pixel_x=m.pixel_x,
+                pixel_y=m.pixel_y,
+                scan_result=m.scan_result,
+                simulated=m.simulated,
+                timestamp=m.timestamp,
+            )
+            for m in job.measurements
+        ],
+        status={
+            "state": job.state,
+            "lastPointProcessed": job.last_point_processed,
+            "error": job.error,
+        },
     )

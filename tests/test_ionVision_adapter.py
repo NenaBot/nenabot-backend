@@ -11,11 +11,11 @@ from app.adapters.ionVision import IVAdapter, WebSocketAdapter
 BASE_URL = "http://localhost:8080"
 WS_BASE_URL = "ws://localhost:8080"
 
+
 @pytest.fixture
 def iv_adapter() -> IVAdapter:
     """Create an IonVision adapter for unit tests."""
-    return IVAdapter(base_url=BASE_URL,
-                     ws_base_url=WS_BASE_URL)
+    return IVAdapter(base_url=BASE_URL, ws_base_url=WS_BASE_URL)
 
 
 @respx.mock
@@ -24,11 +24,26 @@ def test_get_current_scan_success(iv_adapter: IVAdapter) -> None:
     respx.get("http://localhost:8080/currentScan").mock(
         return_value=httpx.Response(200, json={"progress": 50}),
     )
-    
+
     result = iv_adapter.get_current_scan()
-    
+
     assert result.ok is True
     assert "progress" in result.payload
+    assert result.payload["scanId"] == "123"
+
+
+@respx.mock
+def test_get_current_scan_error(iv_adapter: IVAdapter) -> None:
+    """Test failed GET /currentScan request."""
+    respx.get("http://localhost:8080/currentScan").mock(
+        return_value=httpx.Response(500, json={"error": "Internal error"})
+    )
+
+    result = iv_adapter.get_current_scan()
+
+    assert result.ok is False
+    assert "500" in result.error
+
 
 @respx.mock
 def test_start_new_scan(iv_adapter: IVAdapter) -> None:
@@ -37,9 +52,9 @@ def test_start_new_scan(iv_adapter: IVAdapter) -> None:
         return_value=httpx.Response(201, 
                                     json={"message": "The new scan is now starting."}),
     )
-    
+
     result = iv_adapter.start_new_scan()
-    
+
     assert result.ok is True
     assert "message" in result.payload
 
@@ -63,9 +78,9 @@ def test_replace_scan_comments(iv_adapter: IVAdapter) -> None:
         return_value=httpx.Response(200, 
                                     json={"message": "Comments updated successfully."}),
     )
-    
+
     result = iv_adapter.replace_scan_comments(comments)
-    
+
     assert result.ok is True
     assert "message" in result.payload
 

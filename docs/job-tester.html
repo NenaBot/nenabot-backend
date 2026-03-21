@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nenabot — Job Tester</title>
+    <style>
+        :root {
+            --bg: #1e1e2e;
+            --card: #282840;
+            --border: #3a3a5c;
+            --fg: #cdd6f4;
+            --dim: #888;
+            --accent: #89b4fa;
+            --green: #a6e3a1;
+            --red: #f38ba8;
+            --orange: #fab387;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            padding: 12px 20px;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        header h1 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        #apiUrl {
+            background: var(--bg);
+            color: var(--fg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 13px;
+            width: 260px;
+        }
+
+        main {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 12px;
+            flex: 1;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-hdr {
+            padding: 8px 12px;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-body {
+            padding: 10px 12px;
+            flex: 1;
+            overflow: auto;
+        }
+
+        .stream-img {
+            width: 100%;
+            display: block;
+            border-radius: 4px;
+            background: #000;
+            min-height: 160px;
+        }
+
+        button {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        button:hover {
+            filter: brightness(1.15);
+        }
+
+        button.danger {
+            background: var(--red);
+        }
+
+        button.secondary {
+            background: var(--border);
+            color: var(--fg);
+        }
+
+        button.tool-active {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        label {
+            font-size: 12px;
+            color: var(--dim);
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        input[type="number"] {
+            background: var(--bg);
+            color: var(--fg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 13px;
+            width: 80px;
+        }
+
+        .field-row {
+            display: flex;
+            gap: 12px;
+            align-items: end;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .status-pill {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .state-created {
+            background: var(--border);
+            color: var(--fg);
+        }
+
+        .state-running {
+            background: var(--orange);
+            color: #000;
+        }
+
+        .state-completed {
+            background: var(--green);
+            color: #000;
+        }
+
+        .state-failed {
+            background: var(--red);
+            color: #000;
+        }
+
+        .state-stopped {
+            background: var(--dim);
+            color: #fff;
+        }
+
+        #log {
+            background: var(--bg);
+            padding: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 4px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            color: var(--dim);
+            font-weight: 600;
+        }
+
+        .full-span {
+            grid-column: 1 / -1;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            border-radius: 4px;
+            background: #000;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .toolbar .sep {
+            width: 1px;
+            height: 20px;
+            background: var(--border);
+            margin: 0 4px;
+        }
+
+        #confirmBanner {
+            display: none;
+            background: #352a1e;
+            border: 1px solid var(--orange);
+            border-radius: 6px;
+            padding: 10px 14px;
+            margin-top: 10px;
+        }
+
+        #confirmBanner .cb-title {
+            font-weight: 600;
+            color: var(--orange);
+            margin-bottom: 6px;
+        }
+
+        #confirmBanner .cb-detail {
+            font-size: 12px;
+            color: var(--dim);
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>Nenabot — Job Tester</h1>
+        <input id="apiUrl" type="text" value="http://localhost:8000" placeholder="API base URL" />
+    </header>
+
+    <main>
+        <!-- Camera Feed -->
+        <div class="card">
+            <div class="card-hdr">Camera Feed</div>
+            <div class="card-body">
+                <img id="cameraFeed" class="stream-img" alt="camera feed" />
+                <div class="btn-row">
+                    <button onclick="toggleCamera()">Start</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detection Overlay -->
+        <div class="card">
+            <div class="card-hdr">Detection Overlay</div>
+            <div class="card-body">
+                <img id="detectionFeed" class="stream-img" alt="detection overlay" />
+                <div class="btn-row">
+                    <button onclick="toggleDetection()">Start</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Path Planner (full span) -->
+        <div class="card full-span">
+            <div class="card-hdr">
+                <span>Path Planner</span>
+                <div class="toolbar">
+                    <button onclick="detectPath()">Detect</button>
+                    <div class="sep"></div>
+                    <button id="toolMove" class="secondary tool-active" onclick="setTool('move')">Move</button>
+                    <button id="toolAdd" class="secondary" onclick="setTool('add')">Add</button>
+                    <button id="toolDelete" class="secondary" onclick="setTool('delete')">Delete</button>
+                    <div class="sep"></div>
+                    <button class="secondary" onclick="clearAllWaypoints()">Clear Path</button>
+                    <div class="sep"></div>
+                    <button class="secondary" onclick="testMoveToWP()">Test Move</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="snapCanvas" width="1280" height="720"></canvas>
+                <div id="pathInfo" style="margin-top:6px; font-size:12px; color:var(--dim);"></div>
+            </div>
+        </div>
+
+        <!-- Job Controls -->
+        <div class="card">
+            <div class="card-hdr">Job Controls</div>
+            <div class="card-body">
+                <div class="field-row">
+                    <div><label>Work Z</label><input id="workZ" type="number" value="0" step="0.1" /></div>
+                    <div><label>Work R</label><input id="workR" type="number" value="0" step="0.1" /></div>
+                </div>
+                <div class="btn-row">
+                    <button onclick="requestStart(false)">Start Job</button>
+                    <button class="secondary" onclick="requestStart(true)">Dry Run</button>
+                    <button class="danger" onclick="stopJob()">Stop</button>
+                </div>
+
+                <div id="confirmBanner">
+                    <div class="cb-title">Confirm before launch</div>
+                    <div class="cb-detail" id="confirmDetail"></div>
+                    <div class="btn-row">
+                        <button id="confirmBtn" onclick="confirmJob()">Confirm &amp; Start</button>
+                        <button class="secondary" onclick="cancelConfirm()">Cancel</button>
+                    </div>
+                </div>
+
+                <div style="margin-top:12px;">
+                    <div id="jobStatus"></div>
+                    <div id="jobProgress" style="margin-top:4px; font-size:12px; color:var(--dim);"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Calibration Status (read-only, from POST /paths) -->
+        <div class="card">
+            <div class="card-hdr">
+                <span>Calibration Status</span>
+                <button class="secondary" onclick="readPose()">Read Pose (debug)</button>
+            </div>
+            <div class="card-body">
+                <p style="font-size:11px;color:var(--dim);margin-bottom:8px;">Calibration is captured automatically
+                    when you click Detect. The robot arm must be at the starting position.</p>
+                <div id="calibInfo" style="font-size:12px; color:var(--dim);">Not calibrated — click Detect with robot
+                    at start position.</div>
+                <div id="poseInfo" style="margin-top:6px; font-size:12px; color:var(--dim);"></div>
+            </div>
+        </div>
+
+        <!-- Measurements Table -->
+        <div class="card full-span">
+            <div class="card-hdr">Measurements</div>
+            <div class="card-body">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Pixel X</th>
+                            <th>Pixel Y</th>
+                            <th>Robot X</th>
+                            <th>Robot Y</th>
+                            <th>Z</th>
+                            <th>R</th>
+                            <th>Simulated</th>
+                            <th>Scan Result</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="measurementsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Log -->
+        <div class="card full-span">
+            <div class="card-hdr">
+                <span>Log</span>
+                <button class="secondary" onclick="document.getElementById('log').textContent=''">Clear</button>
+            </div>
+            <div class="card-body">
+                <div id="log"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        const api = () => $('apiUrl').value.replace(/\/+$/, '') + '/api';
+
+        let cameraOn = false, detectionOn = false;
+        let currentJobId = null, eventSource = null, pollTimer = null;
+
+        // Path state
+        let detectedPath = [];       // [{x, y}, ...] in pixel coords
+        let lastSnapshotImg = null;  // Image object of last detection snapshot
+        let lastSnapshotBase64 = null; // raw base64 JPEG from POST /paths (clean, no overlays)
+        let lastDetections = [];     // raw detection objects from last POST /paths
+        let lastPixelsPerMm = null;  // scale factor (for display only)
+        let lastMarkerCorners = [];  // ArUco marker corner data
+
+        // Calibration state — read-only, populated from POST /paths response
+        let calibration = null;      // {calibrated, robotStart, canvasStart, pixelsPerMm} or null
+
+        // Canvas interaction
+        let activeTool = 'move';     // 'move' | 'add' | 'delete'
+        let draggingIdx = -1;        // index into detectedPath while dragging
+        let isDragging = false;
+
+        // Confirmation state
+        let pendingDryRun = false;
+
+        function log(msg) {
+            const el = $('log');
+            el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        /* ---- Tool selection ---- */
+        function setTool(tool) {
+            activeTool = tool;
+            for (const t of ['move', 'add', 'delete']) {
+                const btn = $('tool' + t.charAt(0).toUpperCase() + t.slice(1));
+                btn.classList.toggle('tool-active', t === tool);
+            }
+            const cv = $('snapCanvas');
+            if (tool === 'add') cv.style.cursor = 'crosshair';
+            else if (tool === 'delete') cv.style.cursor = 'not-allowed';
+            else cv.style.cursor = 'grab';
+        }
+
+        /* ---- Canvas coordinate helpers ---- */
+        function canvasCoords(e) {
+            const cv = $('snapCanvas');
+            const rect = cv.getBoundingClientRect();
+            const scaleX = cv.width / rect.width;
+            const scaleY = cv.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY,
+            };
+        }
+
+        function findNearestWaypoint(cx, cy, threshold) {
+            let bestDist = Infinity, bestIdx = -1;
+            for (let i = 0; i < detectedPath.length; i++) {
+                const dx = detectedPath[i].x - cx;
+                const dy = detectedPath[i].y - cy;
+                const d = Math.sqrt(dx * dx + dy * dy);
+                if (d < bestDist) { bestDist = d; bestIdx = i; }
+            }
+            return bestDist < threshold ? bestIdx : null;
+        }
+
+        /* ---- Canvas mouse events ---- */
+        (function setupCanvasEvents() {
+            const cv = $('snapCanvas');
+
+            cv.addEventListener('mousedown', e => {
+                const { x, y } = canvasCoords(e);
+                const hitRadius = 14;
+
+                if (activeTool === 'add') {
+                    const workZ = parseFloat($('workZ').value) || 0;
+                    const workR = parseFloat($('workR').value) || 0;
+                    let insertAt = detectedPath.length;
+                    if (detectedPath.length >= 2) {
+                        let bestDist = Infinity;
+                        for (let i = 0; i < detectedPath.length; i++) {
+                            const dx = detectedPath[i].x - x;
+                            const dy = detectedPath[i].y - y;
+                            const d = Math.sqrt(dx * dx + dy * dy);
+                            if (d < bestDist) { bestDist = d; insertAt = i + 1; }
+                        }
+                    }
+                    detectedPath.splice(insertAt, 0, { x, y });
+                    log(`Added waypoint #${insertAt + 1} at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+                    redrawCanvas();
+                    return;
+                }
+
+                if (activeTool === 'delete') {
+                    const idx = findNearestWaypoint(x, y, hitRadius);
+                    if (idx !== null && idx >= 0) {
+                        detectedPath.splice(idx, 1);
+                        log(`Deleted waypoint #${idx + 1}`);
+                        redrawCanvas();
+                    }
+                    return;
+                }
+
+                // 'move' tool
+                const idx = findNearestWaypoint(x, y, hitRadius);
+                if (idx !== null) {
+                    draggingIdx = idx;
+                    isDragging = true;
+                    cv.style.cursor = 'grabbing';
+                }
+            });
+
+            cv.addEventListener('mousemove', e => {
+                if (!isDragging) return;
+                const { x, y } = canvasCoords(e);
+                if (draggingIdx >= 0 && draggingIdx < detectedPath.length) {
+                    detectedPath[draggingIdx].x = x;
+                    detectedPath[draggingIdx].y = y;
+                }
+                redrawCanvas();
+            });
+
+            cv.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    draggingIdx = -1;
+                    if (activeTool === 'move') $('snapCanvas').style.cursor = 'grab';
+                }
+            });
+
+            cv.addEventListener('mouseleave', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    draggingIdx = -1;
+                    if (activeTool === 'move') $('snapCanvas').style.cursor = 'grab';
+                }
+            });
+        })();
+
+        /* ---- Streams ---- */
+        async function toggleCamera() {
+            const img = $('cameraFeed');
+            cameraOn = !cameraOn;
+            if (cameraOn) {
+                img.src = `${api()}/streams/camera/feed`;
+                img.onerror = () => { log('Camera feed error — check server / camera'); cameraOn = false; };
+                log('Camera stream started');
+            } else {
+                img.src = '';
+                img.onerror = null;
+                log('Camera stream stopped');
+            }
+        }
+
+        async function toggleDetection() {
+            const img = $('detectionFeed');
+            detectionOn = !detectionOn;
+            if (detectionOn) {
+                img.src = `${api()}/streams/detection/feed`;
+                img.onerror = () => { log('Detection feed error — check server / camera'); detectionOn = false; };
+                log('Detection stream started');
+            } else {
+                img.src = '';
+                img.onerror = null;
+                log('Detection stream stopped');
+            }
+        }
+
+        /* ---- Path detection ---- */
+        async function detectPath() {
+            log('Detecting path (robot arm must be at start position)…');
+            try {
+                const res = await fetch(`${api()}/paths`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ options: {} }),
+                });
+                const data = await res.json();
+                log(`Path result: ok=${data.ok}, ${data.detections?.length ?? 0} detections, ` +
+                    `pixelsPerMm=${data.pixelsPerMm ?? '?'}, markers=${data.markerCount ?? 0}`);
+
+                lastDetections = data.detections || [];
+                lastPixelsPerMm = data.pixelsPerMm || null;
+                lastMarkerCorners = data.markerCorners || [];
+
+                // Store calibration from backend
+                calibration = data.calibration || null;
+                updateCalibrationInfo();
+
+                if (data.image_base64) {
+                    lastSnapshotBase64 = data.image_base64;
+                    const img = new Image();
+                    img.onload = () => {
+                        lastSnapshotImg = img;
+                        buildPathFromCorners();
+                        redrawCanvas();
+                    };
+                    img.src = 'data:image/jpeg;base64,' + data.image_base64;
+                } else {
+                    buildPathFromCorners();
+                    redrawCanvas();
+                }
+
+            } catch (e) {
+                log('Path detection error: ' + e.message);
+            }
+        }
+
+        function updateCalibrationInfo() {
+            const el = $('calibInfo');
+            if (calibration && calibration.calibrated) {
+                const rs = calibration.robotStart;
+                const cs = calibration.canvasStart;
+                const ppm = calibration.pixelsPerMm;
+                el.textContent = `✓ Calibrated — Robot start: (${rs.x.toFixed(1)}, ${rs.y.toFixed(1)}, ${rs.z.toFixed(1)}) mm` +
+                    ` | Canvas start: (${cs.x.toFixed(0)}, ${cs.y.toFixed(0)}) px` +
+                    ` | ppm: ${ppm?.toFixed(2) ?? '?'}`;
+                el.style.color = 'var(--green)';
+            } else {
+                el.textContent = 'Not calibrated — click Detect with robot at start position.';
+                el.style.color = 'var(--dim)';
+            }
+        }
+
+        /* Build waypoint path from detected object corners (4 per object) */
+        function buildPathFromCorners() {
+            detectedPath = [];
+            for (const det of lastDetections) {
+                if (det.corners && det.corners.length >= 4) {
+                    for (const c of det.corners) {
+                        detectedPath.push({ x: c.x, y: c.y });
+                    }
+                } else {
+                    detectedPath.push({ x: det.center_x, y: det.center_y });
+                }
+            }
+            log(`Built path: ${detectedPath.length} waypoints from ${lastDetections.length} object(s)`);
+            updatePathInfo();
+        }
+
+        function updatePathInfo() {
+            let text = '';
+            if (calibration?.calibrated) {
+                const cs = calibration.canvasStart;
+                const rs = calibration.robotStart;
+                text += `Start: (${cs.x.toFixed(0)}, ${cs.y.toFixed(0)})px → (${rs.x.toFixed(1)}, ${rs.y.toFixed(1)})mm  |  `;
+            }
+            text += detectedPath.length
+                ? `${detectedPath.length} waypoint(s): ${detectedPath.map((w, i) => `#${i + 1}(${w.x.toFixed(0)},${w.y.toFixed(0)})`).join(' → ')}`
+                : 'No path — click Detect or use Add tool';
+
+            const calibOk = calibration?.calibrated;
+            text += calibOk
+                ? '  ✓ calibrated'
+                : '  ⚠ uncalibrated (run Detect with robot at start pos)';
+            $('pathInfo').textContent = text;
+        }
+
+        function clearAllWaypoints() {
+            detectedPath = [];
+            log('Path cleared');
+            redrawCanvas();
+        }
+
+        /* ---- Canvas rendering ---- */
+        function redrawCanvas() {
+            const cv = $('snapCanvas');
+            const ctx = cv.getContext('2d');
+
+            if (lastSnapshotImg) {
+                cv.width = lastSnapshotImg.width;
+                cv.height = lastSnapshotImg.height;
+                ctx.drawImage(lastSnapshotImg, 0, 0);
+            } else {
+                ctx.clearRect(0, 0, cv.width, cv.height);
+            }
+
+            // Detection boxes (cyan)
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2;
+            for (const det of lastDetections) {
+                if (det.corners?.length >= 4) {
+                    ctx.beginPath();
+                    ctx.moveTo(det.corners[0].x, det.corners[0].y);
+                    for (let i = 1; i < det.corners.length; i++)
+                        ctx.lineTo(det.corners[i].x, det.corners[i].y);
+                    ctx.closePath();
+                    ctx.stroke();
+                }
+                ctx.strokeStyle = '#00ffff55';
+                ctx.lineWidth = 1;
+                const cx = det.center_x, cy = det.center_y;
+                ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 2;
+            }
+
+            // ArUco marker corners (magenta dashed)
+            for (const mc of lastMarkerCorners) {
+                if (mc.corners?.length >= 4) {
+                    ctx.strokeStyle = '#ff55ff';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(mc.corners[0].x, mc.corners[0].y);
+                    for (let i = 1; i < mc.corners.length; i++)
+                        ctx.lineTo(mc.corners[i].x, mc.corners[i].y);
+                    ctx.closePath();
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            }
+
+            // Waypoint path line (yellow dashed)
+            if (detectedPath.length > 1) {
+                ctx.strokeStyle = '#facc15';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                ctx.moveTo(detectedPath[0].x, detectedPath[0].y);
+                for (let i = 1; i < detectedPath.length; i++) {
+                    ctx.lineTo(detectedPath[i].x, detectedPath[i].y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Waypoint dots + labels
+            for (let i = 0; i < detectedPath.length; i++) {
+                const w = detectedPath[i];
+                ctx.fillStyle = '#facc15';
+                ctx.beginPath();
+                ctx.arc(w.x, w.y, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Label: index number
+                let label = `#${i + 1}`;
+                ctx.fillStyle = '#facc15';
+                ctx.font = 'bold 11px system-ui';
+                ctx.fillText(label, w.x + 9, w.y - 5);
+            }
+
+            // Canvas start marker (orange diamond) — from backend calibration
+            const canvasStartPos = calibration?.canvasStart;
+            if (canvasStartPos) {
+                const sx = canvasStartPos.x, sy = canvasStartPos.y;
+                const sz = 10;
+                ctx.fillStyle = '#ff8c00';
+                ctx.beginPath();
+                ctx.moveTo(sx, sy - sz);
+                ctx.lineTo(sx + sz, sy);
+                ctx.lineTo(sx, sy + sz);
+                ctx.lineTo(sx - sz, sy);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fillStyle = '#ff8c00';
+                ctx.font = 'bold 12px system-ui';
+                ctx.fillText('START', sx + 14, sy + 4);
+
+                if (detectedPath.length > 0) {
+                    ctx.strokeStyle = '#ffffff88';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([8, 5]);
+                    ctx.beginPath();
+                    ctx.moveTo(sx, sy);
+                    ctx.lineTo(detectedPath[0].x, detectedPath[0].y);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            }
+
+            updatePathInfo();
+        }
+
+        /* ---- Robot Pose (debug only) ---- */
+
+        async function readPose() {
+            log('Reading robot arm position (debug)…');
+            try {
+                const res = await fetch(`${api()}/robot/pose`);
+                const data = await res.json();
+                if (data.ok) {
+                    $('poseInfo').textContent = `Robot position: (${data.x.toFixed(1)}, ${data.y.toFixed(1)}, ${data.z.toFixed(1)}, ${data.r.toFixed(1)}) mm`;
+                    $('poseInfo').style.color = 'var(--green)';
+                    log(`Robot pose (mm): x=${data.x.toFixed(1)} y=${data.y.toFixed(1)} z=${data.z.toFixed(1)} r=${data.r.toFixed(1)}`);
+                    log(`  Joints: j1=${data.j1.toFixed(1)} j2=${data.j2.toFixed(1)} j3=${data.j3.toFixed(1)} j4=${data.j4.toFixed(1)}`);
+                } else {
+                    $('poseInfo').textContent = `Error: ${data.error || 'unknown'}`;
+                    $('poseInfo').style.color = 'var(--red)';
+                    log(`Robot pose error: ${data.error}`);
+                }
+            } catch (e) {
+                $('poseInfo').textContent = `Error: ${e.message}`;
+                $('poseInfo').style.color = 'var(--red)';
+                log('Read pose error: ' + e.message);
+            }
+        }
+
+        async function testMoveToWP() {
+            if (!calibration?.calibrated) {
+                log('⚠ Cannot test move — not calibrated (run Detect first).');
+                return;
+            }
+            if (!detectedPath.length) {
+                log('⚠ No waypoints — add or detect waypoints first.');
+                return;
+            }
+            // Send just the first pixel waypoint as a 1-waypoint job-like move for testing.
+            // The backend will convert it. For a quick test, use robot/move with the backend-known start.
+            const rs = calibration.robotStart;
+            log(`Test Move: sending robot to start position → (${rs.x.toFixed(2)}, ${rs.y.toFixed(2)}, ${rs.z.toFixed(2)}) mm`);
+            try {
+                const res = await fetch(`${api()}/robot/move`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ x: rs.x, y: rs.y, z: rs.z, r: rs.r }),
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    log('  ✓ Move command sent. Check physical robot position.');
+                } else {
+                    log(`  ✗ Move failed: ${data.error}`);
+                }
+            } catch (e) {
+                log('  Test move error: ' + e.message);
+            }
+        }
+
+        /* ---- Job launch with confirmation ---- */
+        function requestStart(dryRun) {
+            if (!detectedPath.length) {
+                log('No path — run detection first or add waypoints manually.');
+                return;
+            }
+            if (!calibration?.calibrated) {
+                log('⚠ Cannot launch — not calibrated. Run Detect with robot arm at start position.');
+                return;
+            }
+
+            pendingDryRun = dryRun;
+
+            const rs = calibration.robotStart;
+            const banner = $('confirmBanner');
+            banner.style.display = 'block';
+            $('confirmBtn').textContent = dryRun ? 'Confirm & Dry Run' : 'Confirm & Start';
+            $('confirmDetail').textContent =
+                `${detectedPath.length} pixel waypoints (backend converts → robot mm)` +
+                ` | Robot start: (${rs.x.toFixed(1)}, ${rs.y.toFixed(1)}, ${rs.z.toFixed(1)}) mm` +
+                ` | ppm=${calibration.pixelsPerMm?.toFixed(2) ?? '?'}` +
+                ` | ${dryRun ? 'DRY RUN' : 'REAL MOVEMENT'}`;
+        }
+
+        function cancelConfirm() {
+            $('confirmBanner').style.display = 'none';
+            log('Job launch cancelled');
+        }
+
+        async function confirmJob() {
+            $('confirmBanner').style.display = 'none';
+            await startJob(pendingDryRun);
+        }
+
+        async function startJob(dryRun) {
+            const workZ = parseFloat($('workZ').value) || 0;
+            const workR = parseFloat($('workR').value) || 0;
+
+            // Send raw pixel waypoints — backend converts to robot mm
+            const path = detectedPath.map(w => ({ x: w.x, y: w.y }));
+
+            const body = { path, workZ, workR, dryRun };
+
+            // Send the clean camera snapshot (from POST /paths) as the base image
+            if (lastSnapshotBase64) {
+                body.imageBase64 = lastSnapshotBase64;
+            }
+
+            log(`Starting ${dryRun ? 'DRY RUN' : 'REAL'} job with ${path.length} pixel waypoints…`);
+            try {
+                const res = await fetch(`${api()}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    log(`Job creation error: ${err.detail || JSON.stringify(err)}`);
+                    return;
+                }
+                const job = await res.json();
+                currentJobId = job.id;
+                log(`Job created: ${job.id}  state=${job.status?.state}  waypoints=${job.path?.length}`);
+                renderJobStatus(job);
+                // Clear measurements table for fresh SSE updates
+                $('measurementsBody').innerHTML = '';
+                startSSE();
+            } catch (e) {
+                log('Job creation error: ' + e.message);
+            }
+        }
+
+        async function stopJob() {
+            try {
+                await fetch(`${api()}/robot/stop`, { method: 'POST' });
+                log('Stop requested');
+            } catch (e) {
+                log('Stop error: ' + e.message);
+            }
+        }
+
+        /* ---- SSE (primary) with polling fallback ---- */
+        function startSSE() {
+            stopSSE();
+            if (!currentJobId) return;
+            const url = `${api()}/jobs/${currentJobId}/events`;
+            log(`SSE connecting → ${url}`);
+            eventSource = new EventSource(url);
+
+            eventSource.addEventListener('job:snapshot', e => {
+                const data = JSON.parse(e.data);
+                log(`SSE snapshot: state=${data.state} pts=${data.lastPointProcessed}/${data.totalPoints}`);
+                updateStatusFromEvent(data);
+            });
+
+            eventSource.addEventListener('job:started', e => {
+                const data = JSON.parse(e.data);
+                log(`SSE: job started`);
+                updateStatusFromEvent(data);
+            });
+
+            eventSource.addEventListener('job:waypoint_started', e => {
+                const data = JSON.parse(e.data);
+                log(`SSE: waypoint ${(data.waypointIndex ?? 0) + 1} started`);
+                updateStatusFromEvent(data);
+            });
+
+            eventSource.addEventListener('job:waypoint_completed', e => {
+                const data = JSON.parse(e.data);
+                log(`SSE: waypoint ${(data.waypointIndex ?? 0) + 1} completed`);
+                updateStatusFromEvent(data);
+                if (data.measurement) appendMeasurement(data.measurement);
+            });
+
+            for (const terminal of ['job:completed', 'job:failed', 'job:stopped']) {
+                eventSource.addEventListener(terminal, e => {
+                    const data = JSON.parse(e.data);
+                    log(`SSE: ${data.state}` + (data.error ? ` — ${data.error}` : ''));
+                    updateStatusFromEvent(data);
+                    stopSSE();
+                });
+            }
+
+            eventSource.onerror = () => {
+                log('SSE connection lost — falling back to polling');
+                stopSSE();
+                startPolling();
+            };
+        }
+
+        function stopSSE() {
+            if (eventSource) { eventSource.close(); eventSource = null; }
+        }
+
+        function updateStatusFromEvent(data) {
+            const s = {
+                state: data.state,
+                lastPointProcessed: data.lastPointProcessed ?? 0,
+                error: data.error || null,
+            };
+            $('jobStatus').innerHTML =
+                `<span class="status-pill state-${s.state}">${s.state.toUpperCase()}</span>` +
+                ` &nbsp; Job: <code>${currentJobId?.slice(0, 8)}…</code>`;
+            $('jobProgress').textContent =
+                `Processed: ${s.lastPointProcessed} / ${data.totalPoints ?? '?'}` +
+                (s.error ? `  —  Error: ${s.error}` : '');
+        }
+
+        function appendMeasurement(m) {
+            const tbody = $('measurementsBody');
+            const w = m.waypoint || {};
+            const scanStr = m.scanResult ? JSON.stringify(m.scanResult).slice(0, 80) : '—';
+            const px = m.pixelX != null ? m.pixelX.toFixed(0) : '—';
+            const py = m.pixelY != null ? m.pixelY.toFixed(0) : '—';
+            tbody.innerHTML += `<tr>
+      <td>${m.waypointIndex}</td>
+      <td>${px}</td><td>${py}</td>
+      <td>${w.x?.toFixed(1)}</td><td>${w.y?.toFixed(1)}</td>
+      <td>${w.z?.toFixed(1)}</td><td>${w.r?.toFixed(1)}</td>
+      <td>${m.simulated ? 'Yes' : 'No'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${scanStr}</td>
+      <td>${m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '—'}</td>
+    </tr>`;
+        }
+
+        /* ---- Polling fallback ---- */
+        function startPolling() {
+            stopPolling();
+            pollTimer = setInterval(pollJob, 800);
+        }
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+
+        async function pollJob() {
+            if (!currentJobId) return;
+            try {
+                const res = await fetch(`${api()}/jobs/${currentJobId}`);
+                const job = await res.json();
+                renderJobStatus(job);
+                if (['completed', 'failed', 'stopped'].includes(job.status?.state)) {
+                    stopPolling();
+                    log(`Job finished: ${job.status.state}`);
+                }
+            } catch (e) {
+                log('Poll error: ' + e.message);
+            }
+        }
+
+        function renderJobStatus(job) {
+            const s = job.status || {};
+            $('jobStatus').innerHTML =
+                `<span class="status-pill state-${s.state || 'created'}">${(s.state || 'created').toUpperCase()}</span>` +
+                ` &nbsp; Job: <code>${job.id?.slice(0, 8)}…</code>`;
+            $('jobProgress').textContent =
+                `Processed: ${s.lastPointProcessed ?? 0} / ${job.path?.length ?? 0}` +
+                (s.error ? `  —  Error: ${s.error}` : '') +
+                (job.dryRun ? '  (dry run)' : '');
+
+            const tbody = $('measurementsBody');
+            tbody.innerHTML = '';
+            for (const m of (job.measurements || [])) {
+                const w = m.waypoint || {};
+                const scanStr = m.scanResult ? JSON.stringify(m.scanResult).slice(0, 80) : '—';
+                const px = m.pixelX != null ? m.pixelX.toFixed(0) : '—';
+                const py = m.pixelY != null ? m.pixelY.toFixed(0) : '—';
+                tbody.innerHTML += `<tr>
+      <td>${m.waypointIndex}</td>
+      <td>${px}</td><td>${py}</td>
+      <td>${w.x?.toFixed(1)}</td><td>${w.y?.toFixed(1)}</td>
+      <td>${w.z?.toFixed(1)}</td><td>${w.r?.toFixed(1)}</td>
+      <td>${m.simulated ? 'Yes' : 'No'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${scanStr}</td>
+      <td>${m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '—'}</td>
+    </tr>`;
+            }
+        }
+    </script>
+</body>
+
+</html>
