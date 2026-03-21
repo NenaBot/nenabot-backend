@@ -259,6 +259,66 @@ def test_sort_pixel_path_from_canvas_start_raises_when_uncalibrated(
         svc.sort_pixel_path_from_canvas_start([(1.0, 2.0)])
 
 
+def test_populate_pixel_path_from_batteries_generates_perimeter_points(
+    tmp_path: Path,
+) -> None:
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+    svc._cal_pixels_per_mm = 2.0
+
+    path = svc.populate_pixel_path_from_batteries(
+        batteries=[
+            [
+                (650.0, 390.0),
+                (690.0, 390.0),
+                (690.0, 430.0),
+                (650.0, 430.0),
+            ]
+        ],
+        measuring_points_per_cm=0.5,
+    )
+
+    assert len(path) == 4
+    assert path[0]["index"] == "0-0-0"
+    assert path[0]["batteryNr"] == 0
+    assert path[0]["cornerIndex"] == 0
+    assert path[0]["measurementIndex"] == 0
+    assert path[0]["pixelX"] == pytest.approx(650.0)
+    assert path[0]["pixelY"] == pytest.approx(390.0)
+
+
+def test_populate_pixel_path_from_batteries_orders_batteries_by_start_distance(
+    tmp_path: Path,
+) -> None:
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+    svc._cal_pixels_per_mm = 2.0
+
+    path = svc.populate_pixel_path_from_batteries(
+        batteries=[
+            [
+                (900.0, 500.0),
+                (940.0, 500.0),
+                (940.0, 540.0),
+                (900.0, 540.0),
+            ],
+            [
+                (650.0, 390.0),
+                (690.0, 390.0),
+                (690.0, 430.0),
+                (650.0, 430.0),
+            ],
+        ],
+        measuring_points_per_cm=0.5,
+    )
+
+    assert path
+    assert path[0]["batteryNr"] == 0
+    assert path[0]["pixelX"] == pytest.approx(650.0)
+    assert path[0]["pixelY"] == pytest.approx(390.0)
+    assert any(point["batteryNr"] == 1 for point in path)
+
+
 def test_detect_path_returns_sorted_detections(tmp_path: Path) -> None:
     """detect_path() should return detections sorted by nearest-neighbor from canvas start."""
     svc = _make_svc(tmp_path)

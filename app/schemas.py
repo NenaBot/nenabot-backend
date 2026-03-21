@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ---- Waypoint / Measurement ----
 
@@ -12,6 +12,16 @@ class WaypointSchema(BaseModel):
     y: float
     z: float = 0.0
     r: float = 0.0
+    robot_x: float | None = Field(None, alias="robotX")
+    robot_y: float | None = Field(None, alias="robotY")
+    robot_z: float | None = Field(None, alias="robotZ")
+    robot_r: float | None = Field(None, alias="robotR")
+    index: str | None = None
+    battery_nr: int | None = Field(None, alias="batteryNr")
+    corner_index: int | None = Field(None, alias="cornerIndex")
+    measurement_index: int | None = Field(None, alias="measurementIndex")
+
+    model_config = {"populate_by_name": True}
 
 
 class MeasurementSchema(BaseModel):
@@ -87,12 +97,32 @@ class PathRequest(BaseModel):
     options: dict[str, Any] | None = None
 
 
-class PathCheckRequest(BaseModel):
-    waypoints: list[PixelPointSchema] = Field(default_factory=list)
+class BatteryCornersSchema(BaseModel):
+    corners: list[CornerSchema] = Field(default_factory=list)
 
 
-class PathCheckResponse(BaseModel):
-    path: list[PixelPointSchema] = Field(default_factory=list)
+class PopulatedPathPointSchema(BaseModel):
+    index: str
+    battery_nr: int = Field(alias="batteryNr")
+    corner_index: int = Field(alias="cornerIndex")
+    measurement_index: int = Field(alias="measurementIndex")
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+
+    model_config = {"populate_by_name": True}
+
+
+class PathPopulateRequest(BaseModel):
+    batteries: list[BatteryCornersSchema] = Field(default_factory=list)
+    measuring_points_per_cm: float = Field(alias="measuringPointsPerCm", gt=0.0)
+
+    model_config = {"populate_by_name": True}
+
+
+class PathPopulateResponse(BaseModel):
+    path: list[PopulatedPathPointSchema] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
 
 
 class PathItem(BaseModel):
@@ -202,7 +232,34 @@ class JobEvent(BaseModel):
 
 
 class JobCreateRequest(BaseModel):
-    path: list[PixelPointSchema] = Field(default_factory=list)
+    class JobPathPointSchema(BaseModel):
+        x: float | None = None
+        y: float | None = None
+        canvas_x: float | None = Field(None, alias="canvasX")
+        canvas_y: float | None = Field(None, alias="canvasY")
+        pixel_x: float | None = Field(None, alias="pixelX")
+        pixel_y: float | None = Field(None, alias="pixelY")
+        index: str | None = None
+        battery_nr: int | None = Field(None, alias="batteryNr")
+        corner_index: int | None = Field(None, alias="cornerIndex")
+        measurement_index: int | None = Field(None, alias="measurementIndex")
+
+        @model_validator(mode="after")
+        def validate_coordinates(self) -> JobCreateRequest.JobPathPointSchema:
+            has_xy = self.x is not None and self.y is not None
+            has_canvas = self.canvas_x is not None and self.canvas_y is not None
+            has_pixel = self.pixel_x is not None and self.pixel_y is not None
+            if not has_xy and not has_canvas and not has_pixel:
+                msg = (
+                    "Each path point must include either (canvasX,canvasY), "
+                    "(pixelX,pixelY), or legacy (x,y)"
+                )
+                raise ValueError(msg)
+            return self
+
+        model_config = {"populate_by_name": True}
+
+    path: list[JobPathPointSchema] = Field(default_factory=list)
     work_z: float = Field(0.0, alias="workZ")
     work_r: float = Field(0.0, alias="workR")
     dry_run: bool = Field(False, alias="dryRun")

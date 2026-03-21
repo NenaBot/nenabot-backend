@@ -17,16 +17,15 @@ sequenceDiagram
     U->>FE: Click Detect and Calibrate
     FE->>BE: POST /api/path/detect { options: {} }
     BE-->>FE: detections + image_base64 + calibration
-    FE->>BE: POST /api/path/check {waypoints: [{x, y}, ...]}
-    BE-->>FE: waypoints (shortest path)
-    Note over FE: Save detectedPath, image_base64, calibration and marker metadata
+    FE->>BE: POST /api/path/populate { initial corners points and density of measurements }
+    BE-->>FE: path (index + batteryNr + cornerIndex + measurementIndex + pixelX + pixelY)
 
     U->>FE: Click Start Job
-    FE->>BE: POST /api/jobs { path, workZ, workR, dryRun, imageBase64 }
+    FE->>BE: POST /api/job { path, workZ, workR, dryRun, imageBase64 }
     Note over BE: fetch current possition of robot arm and path.length > 0 and check if the arm can go here (check arm)
 
 
-    FE->>BE: GET /api/jobs/{job_id}/events (SSE)
+    FE->>BE: GET /api/job/{job_id}/events (SSE)
     BE-->>FE: job:snapshot
     BE-->>FE: job:started
 
@@ -37,11 +36,11 @@ sequenceDiagram
     end
 
     U->>FE: Open Results Page
-    FE->>BE: GET /api/jobs
+    FE->>BE: GET /api/job
     BE-->>FE: jobs list
-    FE->>BE: GET /api/jobs/{job_id}
+    FE->>BE: GET /api/job/{job_id}
     BE-->>FE: status + measurements (pixelX, pixelY)
-    FE->>BE: GET /api/jobs/{job_id}/image
+    FE->>BE: GET /api/job/{job_id}/image
     BE-->>FE: image/jpeg
     FE->>FE: Render image base layer and overlay measurement circles
 ```

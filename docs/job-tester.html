@@ -311,12 +311,18 @@
                     <div class="sep"></div>
                     <button class="secondary" onclick="clearAllWaypoints()">Clear Path</button>
                     <div class="sep"></div>
-                    <button class="secondary" onclick="checkPath()">Check Path</button>
+                    <button class="secondary" onclick="populatePath()">Populate Path</button>
                     <button class="secondary" onclick="testMoveToWP()">Test Move</button>
                 </div>
             </div>
             <div class="card-body">
                 <canvas id="snapCanvas" width="1280" height="720"></canvas>
+                <div class="field-row" style="margin-top:8px;">
+                    <div>
+                        <label>Measuring points per cm</label>
+                        <input id="measuringPointsPerCm" type="number" value="0.5" min="0.01" step="0.1" />
+                    </div>
+                </div>
                 <div id="pathInfo" style="margin-top:6px; font-size:12px; color:var(--dim);"></div>
             </div>
         </div>
@@ -628,7 +634,7 @@
             }
         }
 
-        /* Build waypoint path from detected object corners (4 per object) */
+        /* Build a draft waypoint path from detected object corners (4 per object). */
         function buildPathFromCorners() {
             detectedPath = [];
             for (const det of lastDetections) {
@@ -640,7 +646,7 @@
                     detectedPath.push({ x: det.center_x, y: det.center_y });
                 }
             }
-            log(`Built path: ${detectedPath.length} waypoints from ${lastDetections.length} object(s)`);
+            log(`Built draft path: ${detectedPath.length} corner waypoints from ${lastDetections.length} object(s)`);
             updatePathInfo();
         }
 
@@ -662,44 +668,59 @@
             $('pathInfo').textContent = text;
         }
 
-        /* ---- Path checking (nearest-neighbor sorting) ---- */
-        async function checkPath() {
-            if (!detectedPath.length) {
-                log('⚠ No waypoints — detect or add waypoints first.');
+        /* ---- Path population (perimeter + density) ---- */
+        async function populatePath() {
+            if (!lastDetections.length) {
+                log('⚠ No detections — run Detect first.');
                 return;
             }
             if (!calibration?.calibrated) {
-                log('⚠ Cannot check path — not calibrated. Run Detect with robot arm at start position.');
+                log('⚠ Cannot populate path — not calibrated. Run Detect with robot arm at start position.');
                 return;
             }
 
-            log('Checking path (sorting from canvas start)…');
+            const density = parseFloat($('measuringPointsPerCm').value);
+            if (!Number.isFinite(density) || density <= 0) {
+                log('⚠ Invalid density. Set measuring points per cm > 0.');
+                return;
+            }
+
+            const batteries = lastDetections
+                .filter(det => Array.isArray(det.corners) && det.corners.length >= 2)
+                .map(det => ({ corners: det.corners.map(c => ({ x: c.x, y: c.y })) }));
+
+            if (!batteries.length) {
+                log('⚠ No battery corner sets available for population.');
+                return;
+            }
+
+            log(`Populating path from ${batteries.length} battery contour(s) @ ${density} points/cm…`);
             try {
-                const res = await fetch(`${api()}/path`, {
+                const res = await fetch(`${api()}/path/populate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ waypoints: detectedPath.map(w => ({ x: w.x, y: w.y })) }),
+                    body: JSON.stringify({ batteries, measuringPointsPerCm: density }),
                 });
 
                 if (!res.ok) {
                     const err = await res.json();
-                    log(`Path check error: ${err.detail || JSON.stringify(err)}`);
+                    log(`Path populate error: ${err.detail || JSON.stringify(err)}`);
                     return;
                 }
 
                 const data = await res.json();
                 const sorted = data.path || [];
 
-                log(`✓ Path checked: ${sorted.length} waypoints sorted from canvas start`);
-                log(`Sorted order: ${sorted.map((p, i) => `#${i + 1}(${p.x.toFixed(0)},${p.y.toFixed(0)})`).join(' → ')}`);
+                log(`✓ Path populated: ${sorted.length} perimeter waypoints`);
+                log(`Preview: ${sorted.slice(0, 8).map((p, i) => `#${i + 1}[${p.index}](${p.pixelX.toFixed(0)},${p.pixelY.toFixed(0)})`).join(' → ')}`);
 
-                // Update detectedPath with sorted waypoints for visualization
-                detectedPath = sorted.map(p => ({ x: p.x, y: p.y }));
+                // Update detectedPath with populated waypoints for visualization
+                detectedPath = sorted.map(p => ({ x: p.pixelX, y: p.pixelY }));
                 updatePathInfo();
                 redrawCanvas();
 
             } catch (e) {
-                log('Path check error: ' + e.message);
+                log('Path populate error: ' + e.message);
             }
         }
 

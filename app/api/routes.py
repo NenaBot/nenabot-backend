@@ -11,6 +11,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.dependencies import get_orchestrator
 from app.domain.models import Job as DomainJob
+from app.domain.models import Waypoint
 from app.schemas import (
     CalibrationResponse,
     ComponentHealth,
@@ -20,11 +21,12 @@ from app.schemas import (
     JobCreateRequest,
     MarkerCornersSchema,
     MeasurementSchema,
-    PathCheckRequest,
-    PathCheckResponse,
     PathItem,
+    PathPopulateRequest,
+    PathPopulateResponse,
     PathRequest,
     PathResponse,
+    PopulatedPathPointSchema,
     PixelPointSchema,
     Profile,
     RobotMoveRequest,
@@ -102,13 +104,33 @@ def create_job(
         )
 
     # Convert pixel waypoints → robot mm using stored calibration
-    waypoints = [
-        svc.pixel_to_robot(p.x, p.y, payload.work_z, payload.work_r)
+    point_pairs = [
+        (
+            (
+                p.canvas_x
+                if p.canvas_x is not None
+                else (p.pixel_x if p.pixel_x is not None else p.x)
+            ),
+            (
+                p.canvas_y
+                if p.canvas_y is not None
+                else (p.pixel_y if p.pixel_y is not None else p.y)
+            ),
+        )
         for p in payload.path
     ]
 
+    waypoints: list[Waypoint] = []
+    for point, (px, py) in zip(payload.path, point_pairs):
+        wp = svc.pixel_to_robot(px, py, payload.work_z, payload.work_r)
+        wp.index = point.index
+        wp.battery_nr = point.battery_nr
+        wp.corner_index = point.corner_index
+        wp.measurement_index = point.measurement_index
+        waypoints.append(wp)
+
     # Pixel coords for measurement points (one per measurement waypoint)
-    pixel_path: list[tuple[float, float]] = [(p.x, p.y) for p in payload.path]
+    pixel_path: list[tuple[float, float]] = [(px, py) for px, py in point_pairs]
 
     # Starting position for return-to-start (captured during POST /path/detect)
     starting_wp = svc.calibration_robot_start
@@ -364,31 +386,53 @@ async def job_events(
         svc.unsubscribe(job_id, q)
 
 
-@router.post("/path", status_code=status.HTTP_200_OK)
-def check_path(
-    payload: PathCheckRequest,
+@router.post("/path/populate", status_code=status.HTTP_200_OK)
+def populate_path(
+    payload: PathPopulateRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
-) -> PathCheckResponse:
-    if not svc.calibration_canvas_start:
+) -> PathPopulateResponse:
+    if not svc.is_calibrated:
         raise HTTPException(
             status_code=409,
             detail="Not calibrated — call POST /path/detect first "
             "(with robot arm at starting position)",
         )
 
-    sorted_points = svc.sort_pixel_path_from_canvas_start(
-        [(p.x, p.y) for p in payload.waypoints]
+    batteries: list[list[tuple[float, float]]] = [
+        [(corner.x, corner.y) for corner in battery.corners]
+        for battery in payload.batteries
+    ]
+    populated = svc.populate_pixel_path_from_batteries(
+        batteries,
+        payload.measuring_points_per_cm,
     )
-    points = [PixelPointSchema(x=x, y=y) for x, y in sorted_points]
 
-    return PathCheckResponse(path=points)
+    return PathPopulateResponse(
+        path=[PopulatedPathPointSchema(**point) for point in populated]
+    )
 
 
 def _to_job(job: DomainJob) -> Job:
     return Job(
         id=job.id,
         options=job.options,
-        path=[WaypointSchema(x=w.x, y=w.y, z=w.z, r=w.r) for w in job.path],
+        path=[
+            WaypointSchema(
+                x=w.x,
+                y=w.y,
+                z=w.z,
+                r=w.r,
+                robot_x=w.x,
+                robot_y=w.y,
+                robot_z=w.z,
+                robot_r=w.r,
+                index=w.index,
+                battery_nr=w.battery_nr,
+                corner_index=w.corner_index,
+                measurement_index=w.measurement_index,
+            )
+            for w in job.path
+        ],
         dry_run=job.dry_run,
         measurements=[
             MeasurementSchema(
@@ -398,6 +442,14 @@ def _to_job(job: DomainJob) -> Job:
                     y=m.waypoint.y,
                     z=m.waypoint.z,
                     r=m.waypoint.r,
+                    robot_x=m.waypoint.x,
+                    robot_y=m.waypoint.y,
+                    robot_z=m.waypoint.z,
+                    robot_r=m.waypoint.r,
+                    index=m.waypoint.index,
+                    battery_nr=m.waypoint.battery_nr,
+                    corner_index=m.waypoint.corner_index,
+                    measurement_index=m.waypoint.measurement_index,
                 ),
                 pixel_x=m.pixel_x,
                 pixel_y=m.pixel_y,

@@ -288,32 +288,113 @@ def test_job_sse_events(client: TestClient) -> None:
     assert wp_completed[0].get("measurement") is not None
 
 
-def test_path_check_sorts_from_canvas_start(client: TestClient) -> None:
-    """POST /path should sort waypoints using stored canvas start as anchor."""
-    # Fixture calibration sets canvas start to (640, 400)
+def test_path_populate_generates_perimeter_points(client: TestClient) -> None:
+    """POST /path/populate should create perimeter measurement points with index fields."""
     payload = {
-        "waypoints": [
-            {"x": 700.0, "y": 400.0},
-            {"x": 642.0, "y": 401.0},
-            {"x": 650.0, "y": 400.0},
-        ]
+        "measuringPointsPerCm": 0.5,
+        "batteries": [
+            {
+                "corners": [
+                    {"x": 650.0, "y": 390.0},
+                    {"x": 690.0, "y": 390.0},
+                    {"x": 690.0, "y": 430.0},
+                    {"x": 650.0, "y": 430.0},
+                ]
+            }
+        ],
     }
 
-    response = client.post("/api/path", json=payload)
+    response = client.post("/api/path/populate", json=payload)
     assert response.status_code == 200
 
     body = response.json()
     points = body.get("path")
     assert points is not None
-    assert points == [
-        {"x": 642.0, "y": 401.0},
-        {"x": 650.0, "y": 400.0},
-        {"x": 700.0, "y": 400.0},
-    ]
+    assert len(points) == 4
+
+    assert points[0]["index"] == "0-0-0"
+    assert points[0]["batteryNr"] == 0
+    assert points[0]["cornerIndex"] == 0
+    assert points[0]["measurementIndex"] == 0
+    assert points[0]["pixelX"] == pytest.approx(650.0)
+    assert points[0]["pixelY"] == pytest.approx(390.0)
 
 
-def test_path_check_requires_calibration(tmp_path: Path) -> None:
-    """POST /path should return 409 when canvas start is not available."""
+def test_path_populate_orders_batteries_from_canvas_start(client: TestClient) -> None:
+    """POST /path/populate should output battery groups ordered by nearest battery to canvas start."""
+    payload = {
+        "measuringPointsPerCm": 0.5,
+        "batteries": [
+            {
+                "corners": [
+                    {"x": 900.0, "y": 500.0},
+                    {"x": 940.0, "y": 500.0},
+                    {"x": 940.0, "y": 540.0},
+                    {"x": 900.0, "y": 540.0},
+                ]
+            },
+            {
+                "corners": [
+                    {"x": 650.0, "y": 390.0},
+                    {"x": 690.0, "y": 390.0},
+                    {"x": 690.0, "y": 430.0},
+                    {"x": 650.0, "y": 430.0},
+                ]
+            },
+        ],
+    }
+
+    response = client.post("/api/path/populate", json=payload)
+    assert response.status_code == 200
+    points = response.json()["path"]
+    assert points
+
+    # Nearest battery to fixture canvas start (640, 400) should be output first.
+    assert points[0]["batteryNr"] == 0
+    assert points[0]["pixelX"] == pytest.approx(650.0)
+    assert points[0]["pixelY"] == pytest.approx(390.0)
+
+    # There should be points from a second battery group too.
+    assert any(p["batteryNr"] == 1 for p in points)
+
+
+def test_job_creation_accepts_populated_path_shape(client: TestClient) -> None:
+    """POST /job should accept path points produced by POST /path/populate."""
+    populate_res = client.post(
+        "/api/path/populate",
+        json={
+            "measuringPointsPerCm": 0.5,
+            "batteries": [
+                {
+                    "corners": [
+                        {"x": 650.0, "y": 390.0},
+                        {"x": 690.0, "y": 390.0},
+                        {"x": 690.0, "y": 430.0},
+                        {"x": 650.0, "y": 430.0},
+                    ]
+                }
+            ],
+        },
+    )
+    assert populate_res.status_code == 200
+    populated_path = populate_res.json()["path"]
+    assert populated_path
+
+    response = client.post(
+        "/api/job",
+        json={"path": populated_path, "dryRun": True, "workZ": 0, "workR": 0},
+    )
+    assert response.status_code == 201
+    job = response.json()
+    assert job["path"]
+    assert "index" in job["path"][0]
+    assert "batteryNr" in job["path"][0]
+    assert "cornerIndex" in job["path"][0]
+    assert "measurementIndex" in job["path"][0]
+
+
+def test_path_populate_requires_calibration(tmp_path: Path) -> None:
+    """POST /path/populate should return 409 when calibration is not available."""
     with patch(
         "app.adapters.camera_vision.CameraVisionAdapter.ping",
         return_value=CaptureResult(ok=False, error="no camera in test"),
@@ -332,8 +413,11 @@ def test_path_check_requires_calibration(tmp_path: Path) -> None:
 
         with TestClient(app) as uncalibrated_client:
             response = uncalibrated_client.post(
-                "/api/path",
-                json={"waypoints": [{"x": 1.0, "y": 2.0}]},
+                "/api/path/populate",
+                json={
+                    "measuringPointsPerCm": 1.0,
+                    "batteries": [{"corners": [{"x": 1.0, "y": 2.0}]}],
+                },
             )
             assert response.status_code == 409
             assert "calibrat" in response.json()["detail"].lower()
