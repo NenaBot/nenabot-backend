@@ -4,7 +4,13 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.adapters.camera_vision import CameraVisionAdapter, CaptureResult
+from app.adapters.camera_vision import (
+    CameraVisionAdapter,
+    CaptureResult,
+    Corner,
+    DetectionResults,
+    MarkerCorners,
+)
 from app.adapters.database import Database
 from app.adapters.ionVision import IVAdapter, IVResult
 from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
@@ -216,6 +222,54 @@ def test_is_calibrated_property(tmp_path: Path) -> None:
 
     svc._cal_pixels_per_mm = 2.0
     assert svc.is_calibrated is True
+
+
+def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
+    tmp_path: Path,
+) -> None:
+    """detect_path() should not keep calibration when the robot pose is all zeros."""
+    svc = _make_svc(tmp_path)
+    svc._cal_robot_start = Waypoint(x=100.0, y=200.0, z=0.0, r=0.0)
+    svc._cal_canvas_start = (640.0, 400.0)
+    svc._cal_pixels_per_mm = 2.0
+
+    image_path = tmp_path / "capture.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    marker = MarkerCorners(
+        corners=[
+            Corner(x=10.0, y=10.0),
+            Corner(x=20.0, y=10.0),
+            Corner(x=20.0, y=20.0),
+            Corner(x=10.0, y=20.0),
+        ]
+    )
+
+    with patch.object(
+        svc._camera_vision,
+        "capture",
+        return_value=CaptureResult(ok=True, image_path=str(image_path)),
+    ), patch.object(
+        svc._camera_vision,
+        "detect",
+        return_value=DetectionResults(
+            ok=False,
+            detections=[],
+            pixels_per_mm=2.0,
+            marker_count=1,
+            marker_corners=[marker],
+            error="No battery contour detected",
+        ),
+    ), patch.object(
+        svc._robot,
+        "get_pose",
+        return_value=PoseResult(ok=True, x=0.0, y=0.0, z=0.0, r=0.0),
+    ):
+        result = svc.detect_path()
+
+    assert result.ok is False
+    assert "origin" in (result.error or "").lower()
+    assert svc.calibration_robot_start is None
+    assert svc.is_calibrated is False
 
 
 # ---- ORC-TC-014: Job fails on robot move error ----

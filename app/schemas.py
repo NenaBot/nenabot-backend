@@ -101,7 +101,7 @@ class MarkerCornersSchema(BaseModel):
 
 
 class PathResponse(BaseModel):
-    ok: bool
+    request_succeeded: bool = Field(alias="requestSucceeded")
     detections: list[PathItem] = Field(default_factory=list)
     image_base64: str | None = Field(None, description="JPEG image as base64 string")
     pixels_per_mm: float | None = Field(None, alias="pixelsPerMm")
