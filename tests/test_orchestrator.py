@@ -512,7 +512,9 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         svc._dms,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
-    ), patch("time.sleep"):
+    ), patch(
+        "time.sleep"
+    ):
         svc.run_job(job.id)
         svc._job_thread.join(timeout=10)
 
