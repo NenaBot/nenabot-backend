@@ -332,7 +332,10 @@
                 });
                 const data = await r.json();
                 const count = data.detections?.length ?? 0;
-                log(`POST /paths → ok=${data.ok}, detections=${count}`, data.ok ? "ok" : "err");
+                log(
+                    `POST /paths → requestSucceeded=${data.requestSucceeded}, detections=${count}`,
+                    data.requestSucceeded ? "ok" : "err"
+                );
                 data.detections?.forEach((d, i) => {
                     log(`  #${i + 1}: ${d.corners.length} corners, ${d.width_mm.toFixed(1)}×${d.height_mm.toFixed(1)} mm`);
                 });
@@ -387,7 +390,7 @@
                     };
 
                     badge.className = "badge badge-live";
-                    badge.textContent = data.ok ? `${count} found` : "FAIL";
+                    badge.textContent = data.requestSucceeded ? `${count} found` : "FAIL";
                     info.textContent = `${count} detection${count !== 1 ? "s" : ""}`;
                 } else {
                     img.style.display = "none";

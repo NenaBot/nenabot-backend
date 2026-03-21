@@ -512,6 +512,13 @@ class OrchestratorService:
         offset_px = (offset_mm * ppm) if ppm else 50.0
         return (cx, cy + offset_px)
 
+    @staticmethod
+    def _pose_is_origin(pose: PoseResult, tolerance: float = 1e-6) -> bool:
+        """Treat an all-zero Cartesian pose as an invalid calibration start."""
+        return all(
+            abs(value) <= tolerance for value in (pose.x, pose.y, pose.z, pose.r)
+        )
+
     @property
     def is_calibrated(self) -> bool:
         return all(
@@ -612,7 +619,13 @@ class OrchestratorService:
         if not capture.ok or not capture.image_path:
             return DetectionResults(ok=False, error=capture.error or "Capture failed")
 
+        # Replace any previous calibration with values derived from this capture.
+        self._cal_robot_start = None
+        self._cal_canvas_start = None
+        self._cal_pixels_per_mm = None
+
         result = self._camera_vision.detect(capture.image_path)
+        messages = [result.error] if result.error else []
 
         try:
             raw = Path(capture.image_path).read_bytes()
@@ -622,7 +635,7 @@ class OrchestratorService:
 
         # --- Calibration: capture robot pose + canvas start ----
         pose = self._robot.get_pose()
-        if pose.ok:
+        if pose.ok and not self._pose_is_origin(pose):
             self._cal_robot_start = Waypoint(x=pose.x, y=pose.y, z=pose.z, r=pose.r)
             logger.info(
                 "Calibration: robot start → (%.1f, %.1f, %.1f, %.1f)",
@@ -631,7 +644,16 @@ class OrchestratorService:
                 pose.z,
                 pose.r,
             )
+        elif pose.ok:
+            msg = (
+                "Robot pose is still at origin (0, 0, 0, 0) — "
+                "move the arm to the start position and retry"
+            )
+            messages.append(msg)
+            logger.warning("Calibration: %s", msg)
         else:
+            msg = pose.error or "Could not read robot pose"
+            messages.append(f"Could not read robot pose: {msg}")
             logger.warning("Calibration: could not read robot pose — %s", pose.error)
 
         self._cal_pixels_per_mm = result.pixels_per_mm
@@ -645,20 +667,12 @@ class OrchestratorService:
                 self._cal_pixels_per_mm or 0,
             )
         else:
+            msg = "No ArUco markers detected"
+            messages.append(msg)
             logger.warning("Calibration: no ArUco markers — canvas start not set")
 
-        # sort the detected corners into a path ordered by nearest neighbor from the canvas start
-        if result.detections:
-            waypoints = [(d.center_x, d.center_y) for d in result.detections]
-            sorted_waypoints = self.sort_pixel_path_from_canvas_start(waypoints)
-
-            # Map sorted waypoints back to their original detection objects
-            # Create a lookup by center coords to find corresponding detection
-            detection_map = {(d.center_x, d.center_y): d for d in result.detections}
-
-            result.detections = [
-                detection_map[wp] for wp in sorted_waypoints if wp in detection_map
-            ]
+        # Keep detector output order unchanged so frontend receives initial values as-is.
+        result.error = "; ".join(dict.fromkeys(msg for msg in messages if msg)) or None
         return result
 
     @property
