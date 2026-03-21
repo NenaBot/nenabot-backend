@@ -236,7 +236,7 @@ def create_path(
         )
 
     return PathResponse(
-        ok=result.ok,
+        request_succeeded=result.ok or cal is not None,
         detections=[
             PathItem(
                 corners=[CornerSchema(x=c.x, y=c.y) for c in d.corners],
