@@ -32,12 +32,10 @@ All endpoints are prefixed with `/api`.
 ### Job Create Path Point
 
 `POST /api/job` accepts path points from either manual points or `/api/path/populate` output.
-Canvas coordinates are pixel coordinates from the image/canvas and are distinct from robot millimeter coordinates.
+Pixel coordinates from the image/canvas are distinct from robot millimeter coordinates.
 
 ```json
 {
-    "canvasX": 650.0,
-    "canvasY": 390.0,
     "pixelX": 650.0,
     "pixelY": 390.0,
     "index": "0-0-0",
@@ -47,11 +45,11 @@ Canvas coordinates are pixel coordinates from the image/canvas and are distinct 
 }
 ```
 
-Legacy input `x`/`y` is still accepted as canvas coordinates for backward compatibility.
+Canonical request fields are `pixelX` and `pixelY`.
 
 When index metadata is provided, it is persisted with the job waypoints and returned in `GET /api/job` and `GET /api/job/<ID>` responses.
 
-Job responses include both legacy robot fields (`x`,`y`,`z`,`r`) and explicit aliases (`robotX`,`robotY`,`robotZ`,`robotR`) so robot and canvas coordinates are clearly distinct.
+Job responses use explicit robot fields (`robotX`,`robotY`,`robotZ`,`robotR`) so robot and pixel coordinates are clearly distinct.
 
 ### Job Object
 
@@ -61,7 +59,7 @@ The job object encapsulates the configuration, output data, and current processi
 {
     "id": "string (uuid)",
     "options": "object | null",
-    "path": [{ "x": 0.0, "y": 0.0, "z": 0.0, "r": 0.0 }],
+    "path": [{ "robotX": 0.0, "robotY": 0.0, "robotZ": 0.0, "robotR": 0.0 }],
     "dryRun": false,
     "measurements": [],
     "status": {
@@ -94,15 +92,15 @@ The job object encapsulates the configuration, output data, and current processi
     "detections": [
         {
             "corners": [
-                { "x": 100.0, "y": 100.0 },
-                { "x": 200.0, "y": 100.0 },
-                { "x": 200.0, "y": 200.0 },
-                { "x": 100.0, "y": 200.0 }
+                { "pixelX": 100.0, "pixelY": 100.0 },
+                { "pixelX": 200.0, "pixelY": 100.0 },
+                { "pixelX": 200.0, "pixelY": 200.0 },
+                { "pixelX": 100.0, "pixelY": 200.0 }
             ],
             "width_mm": 85.5,
             "height_mm": 92.3,
-            "center_x": 150.0,
-            "center_y": 150.0,
+            "pixelCenterX": 150.0,
+            "pixelCenterY": 150.0,
             "confidence": 0.95
         }
     ],
@@ -113,17 +111,22 @@ The job object encapsulates the configuration, output data, and current processi
     "marker_corners": [
         {
             "corners": [
-                { "x": 50.0, "y": 50.0 },
-                { "x": 100.0, "y": 50.0 },
-                { "x": 100.0, "y": 100.0 },
-                { "x": 50.0, "y": 100.0 }
+                { "pixelX": 50.0, "pixelY": 50.0 },
+                { "pixelX": 100.0, "pixelY": 50.0 },
+                { "pixelX": 100.0, "pixelY": 100.0 },
+                { "pixelX": 50.0, "pixelY": 100.0 }
             ]
         }
     ],
     "calibration": {
         "calibrated": true,
-        "robot_start": { "x": 100.0, "y": 200.0, "z": 0.0, "r": 0.0 },
-        "canvas_start": { "x": 640.0, "y": 450.0 },
+        "robot_start": {
+            "robotX": 100.0,
+            "robotY": 200.0,
+            "robotZ": 0.0,
+            "robotR": 0.0
+        },
+        "canvas_start": { "pixelX": 640.0, "pixelY": 450.0 },
         "pixels_per_mm": 2.5
     },
     "error": null
@@ -133,6 +136,7 @@ The job object encapsulates the configuration, output data, and current processi
 **Key behavior:**
 
 - **Detections are sorted by direct distance from `canvas_start`** (closest battery first).
+- Pixel coordinates are represented as `pixelX`/`pixelY` in path-related payloads.
 - Canvas start = marker center + (50mm × pixels_per_mm) in Y direction.
 - The response includes calibration data required for path population and job creation.
 
@@ -148,10 +152,10 @@ The job object encapsulates the configuration, output data, and current processi
     "batteries": [
         {
             "corners": [
-                { "x": 650.0, "y": 390.0 },
-                { "x": 690.0, "y": 390.0 },
-                { "x": 690.0, "y": 430.0 },
-                { "x": 650.0, "y": 430.0 }
+                { "pixelX": 650.0, "pixelY": 390.0 },
+                { "pixelX": 690.0, "pixelY": 390.0 },
+                { "pixelX": 690.0, "pixelY": 430.0 },
+                { "pixelX": 650.0, "pixelY": 430.0 }
             ]
         }
     ]
@@ -177,6 +181,7 @@ The job object encapsulates the configuration, output data, and current processi
 
 **Key behavior:**
 
+- Canonical coordinate keys are `pixelX` and `pixelY`.
 - Generates points on each battery perimeter only (no interior fill).
 - Density is controlled by `measuringPointsPerCm`.
 - Each battery traversal starts at the corner nearest to `canvas_start`, then proceeds clockwise.

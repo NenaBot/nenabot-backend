@@ -103,34 +103,27 @@ def create_job(
             "(with robot arm at starting position)",
         )
 
-    # Convert pixel waypoints → robot mm using stored calibration
-    point_pairs = [
+    pixel_points = [
         (
-            (
-                p.canvas_x
-                if p.canvas_x is not None
-                else (p.pixel_x if p.pixel_x is not None else p.x)
-            ),
-            (
-                p.canvas_y
-                if p.canvas_y is not None
-                else (p.pixel_y if p.pixel_y is not None else p.y)
-            ),
+            p.pixel_x,
+            p.pixel_y,
         )
         for p in payload.path
     ]
 
-    waypoints: list[Waypoint] = []
-    for point, (px, py) in zip(payload.path, point_pairs):
-        wp = svc.pixel_to_robot(px, py, payload.work_z, payload.work_r)
+    robot_waypoints: list[Waypoint] = []
+    for point, (pixel_x, pixel_y) in zip(payload.path, pixel_points):
+        wp = svc.pixel_to_robot(pixel_x, pixel_y, payload.work_z, payload.work_r)
         wp.index = point.index
         wp.battery_nr = point.battery_nr
         wp.corner_index = point.corner_index
         wp.measurement_index = point.measurement_index
-        waypoints.append(wp)
+        robot_waypoints.append(wp)
 
     # Pixel coords for measurement points (one per measurement waypoint)
-    pixel_path: list[tuple[float, float]] = [(px, py) for px, py in point_pairs]
+    pixel_path: list[tuple[float, float]] = [
+        (pixel_x, pixel_y) for pixel_x, pixel_y in pixel_points
+    ]
 
     # Starting position for return-to-start (captured during POST /path/detect)
     starting_wp = svc.calibration_robot_start
@@ -144,7 +137,7 @@ def create_job(
             pass  # — best-effort decode
 
     job = svc.create_job(
-        path=waypoints,
+        path=robot_waypoints,
         dry_run=payload.dry_run,
         options=payload.options,
         image_bytes=image_bytes,
@@ -256,8 +249,14 @@ def detect_path(
         cs = svc.calibration_canvas_start
         cal = CalibrationResponse(
             calibrated=True,
-            robot_start=WaypointSchema(x=rs.x, y=rs.y, z=rs.z, r=rs.r) if rs else None,
-            canvas_start=PixelPointSchema(x=cs[0], y=cs[1]) if cs else None,
+            robot_start=(
+                WaypointSchema(robot_x=rs.x, robot_y=rs.y, robot_z=rs.z, robot_r=rs.r)
+                if rs
+                else None
+            ),
+            canvas_start=(
+                PixelPointSchema(pixel_x=cs[0], pixel_y=cs[1]) if cs else None
+            ),
             pixels_per_mm=svc.calibration_pixels_per_mm,
         )
 
@@ -265,7 +264,7 @@ def detect_path(
         ok=result.ok,
         detections=[
             PathItem(
-                corners=[CornerSchema(x=c.x, y=c.y) for c in d.corners],
+                corners=[CornerSchema(pixel_x=c.x, pixel_y=c.y) for c in d.corners],
                 width_mm=d.width_mm,
                 height_mm=d.height_mm,
                 center_x=d.center_x,
@@ -279,7 +278,7 @@ def detect_path(
         marker_count=result.marker_count,
         marker_corners=[
             MarkerCornersSchema(
-                corners=[CornerSchema(x=c.x, y=c.y) for c in mc.corners]
+                corners=[CornerSchema(pixel_x=c.x, pixel_y=c.y) for c in mc.corners]
             )
             for mc in result.marker_corners
         ],
@@ -399,7 +398,7 @@ def populate_path(
         )
 
     batteries: list[list[tuple[float, float]]] = [
-        [(corner.x, corner.y) for corner in battery.corners]
+        [(corner.pixel_x, corner.pixel_y) for corner in battery.corners]
         for battery in payload.batteries
     ]
     populated = svc.populate_pixel_path_from_batteries(
@@ -418,10 +417,6 @@ def _to_job(job: DomainJob) -> Job:
         options=job.options,
         path=[
             WaypointSchema(
-                x=w.x,
-                y=w.y,
-                z=w.z,
-                r=w.r,
                 robot_x=w.x,
                 robot_y=w.y,
                 robot_z=w.z,
@@ -438,10 +433,6 @@ def _to_job(job: DomainJob) -> Job:
             MeasurementSchema(
                 waypoint_index=m.waypoint_index,
                 waypoint=WaypointSchema(
-                    x=m.waypoint.x,
-                    y=m.waypoint.y,
-                    z=m.waypoint.z,
-                    r=m.waypoint.r,
                     robot_x=m.waypoint.x,
                     robot_y=m.waypoint.y,
                     robot_z=m.waypoint.z,

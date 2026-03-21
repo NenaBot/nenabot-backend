@@ -79,7 +79,10 @@ def test_health_and_status(client: TestClient) -> None:
 def test_jobs_lifecycle(client: TestClient) -> None:
     # Pixel coords — backend converts to robot mm using calibration
     # Calibration: robot_start=(100,200), canvas_start=(640,400), ppm=2
-    path = [{"x": 650.0, "y": 390.0}, {"x": 660.0, "y": 380.0}]
+    path = [
+        {"pixelX": 650.0, "pixelY": 390.0},
+        {"pixelX": 660.0, "pixelY": 380.0},
+    ]
     response = client.post(
         "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
@@ -120,9 +123,9 @@ def test_dry_run_job_measurements(client: TestClient) -> None:
     """Dry run should produce simulated measurements with correct waypoints."""
     # Pixel coords: the backend will convert these + prepend starting point
     path = [
-        {"x": 640, "y": 400},  # same as canvas start → robot start
-        {"x": 660, "y": 400},  # 20px right → robot y decreases by 10mm
-        {"x": 640, "y": 380},  # 20px up → robot x increases by 10mm
+        {"pixelX": 640, "pixelY": 400},  # same as canvas start → robot start
+        {"pixelX": 660, "pixelY": 400},  # 20px right → robot y decreases by 10mm
+        {"pixelX": 640, "pixelY": 380},  # 20px up → robot x increases by 10mm
     ]
     res = client.post(
         "/api/job", json={"path": path, "dryRun": True, "workZ": 5, "workR": 0}
@@ -148,7 +151,7 @@ def test_dry_run_job_measurements(client: TestClient) -> None:
 def test_stop_job(client: TestClient) -> None:
     """Stopping a running job should set state to stopped."""
     # Use many pixel waypoints so the job is still running when we stop it
-    path = [{"x": float(i), "y": float(i)} for i in range(50)]
+    path = [{"pixelX": float(i), "pixelY": float(i)} for i in range(50)]
     res = client.post(
         "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
@@ -190,7 +193,7 @@ def test_profiles_and_paths(client: TestClient) -> None:
 
 def test_job_image_endpoint(client: TestClient) -> None:
     """GET /jobs/{id}/image returns 404 when no image is stored."""
-    path = [{"x": 1, "y": 2}]
+    path = [{"pixelX": 1, "pixelY": 2}]
     res = client.post(
         "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
@@ -203,7 +206,7 @@ def test_job_image_endpoint(client: TestClient) -> None:
 
 def test_job_persists_across_reads(client: TestClient) -> None:
     """Jobs should survive re-reads from DB after completion."""
-    path = [{"x": 650, "y": 390}, {"x": 660, "y": 380}]
+    path = [{"pixelX": 650, "pixelY": 390}, {"pixelX": 660, "pixelY": 380}]
     res = client.post(
         "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
@@ -241,7 +244,7 @@ def test_job_creation_requires_calibration(tmp_path: Path) -> None:
         app.dependency_overrides[get_orchestrator] = lambda: test_orchestrator
 
         with TestClient(app) as uncalibrated_client:
-            path = [{"x": 1.0, "y": 2.0}]
+            path = [{"pixelX": 1.0, "pixelY": 2.0}]
             response = uncalibrated_client.post(
                 "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
             )
@@ -253,7 +256,7 @@ def test_job_creation_requires_calibration(tmp_path: Path) -> None:
 
 def test_job_sse_events(client: TestClient) -> None:
     """SSE endpoint should stream job progress events for a dry-run job."""
-    path = [{"x": 650, "y": 390}, {"x": 660, "y": 380}]
+    path = [{"pixelX": 650, "pixelY": 390}, {"pixelX": 660, "pixelY": 380}]
     res = client.post(
         "/api/job", json={"path": path, "dryRun": True, "workZ": 0, "workR": 0}
     )
@@ -295,10 +298,10 @@ def test_path_populate_generates_perimeter_points(client: TestClient) -> None:
         "batteries": [
             {
                 "corners": [
-                    {"x": 650.0, "y": 390.0},
-                    {"x": 690.0, "y": 390.0},
-                    {"x": 690.0, "y": 430.0},
-                    {"x": 650.0, "y": 430.0},
+                    {"pixelX": 650.0, "pixelY": 390.0},
+                    {"pixelX": 690.0, "pixelY": 390.0},
+                    {"pixelX": 690.0, "pixelY": 430.0},
+                    {"pixelX": 650.0, "pixelY": 430.0},
                 ]
             }
         ],
@@ -327,18 +330,18 @@ def test_path_populate_orders_batteries_from_canvas_start(client: TestClient) ->
         "batteries": [
             {
                 "corners": [
-                    {"x": 900.0, "y": 500.0},
-                    {"x": 940.0, "y": 500.0},
-                    {"x": 940.0, "y": 540.0},
-                    {"x": 900.0, "y": 540.0},
+                    {"pixelX": 900.0, "pixelY": 500.0},
+                    {"pixelX": 940.0, "pixelY": 500.0},
+                    {"pixelX": 940.0, "pixelY": 540.0},
+                    {"pixelX": 900.0, "pixelY": 540.0},
                 ]
             },
             {
                 "corners": [
-                    {"x": 650.0, "y": 390.0},
-                    {"x": 690.0, "y": 390.0},
-                    {"x": 690.0, "y": 430.0},
-                    {"x": 650.0, "y": 430.0},
+                    {"pixelX": 650.0, "pixelY": 390.0},
+                    {"pixelX": 690.0, "pixelY": 390.0},
+                    {"pixelX": 690.0, "pixelY": 430.0},
+                    {"pixelX": 650.0, "pixelY": 430.0},
                 ]
             },
         ],
@@ -367,10 +370,10 @@ def test_job_creation_accepts_populated_path_shape(client: TestClient) -> None:
             "batteries": [
                 {
                     "corners": [
-                        {"x": 650.0, "y": 390.0},
-                        {"x": 690.0, "y": 390.0},
-                        {"x": 690.0, "y": 430.0},
-                        {"x": 650.0, "y": 430.0},
+                        {"pixelX": 650.0, "pixelY": 390.0},
+                        {"pixelX": 690.0, "pixelY": 390.0},
+                        {"pixelX": 690.0, "pixelY": 430.0},
+                        {"pixelX": 650.0, "pixelY": 430.0},
                     ]
                 }
             ],
@@ -416,7 +419,7 @@ def test_path_populate_requires_calibration(tmp_path: Path) -> None:
                 "/api/path/populate",
                 json={
                     "measuringPointsPerCm": 1.0,
-                    "batteries": [{"corners": [{"x": 1.0, "y": 2.0}]}],
+                    "batteries": [{"corners": [{"pixelX": 1.0, "pixelY": 2.0}]}],
                 },
             )
             assert response.status_code == 409

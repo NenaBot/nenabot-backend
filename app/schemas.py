@@ -8,14 +8,10 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class WaypointSchema(BaseModel):
-    x: float
-    y: float
-    z: float = 0.0
-    r: float = 0.0
-    robot_x: float | None = Field(None, alias="robotX")
-    robot_y: float | None = Field(None, alias="robotY")
-    robot_z: float | None = Field(None, alias="robotZ")
-    robot_r: float | None = Field(None, alias="robotR")
+    robot_x: float = Field(alias="robotX")
+    robot_y: float = Field(alias="robotY")
+    robot_z: float = Field(0.0, alias="robotZ")
+    robot_r: float = Field(0.0, alias="robotR")
     index: str | None = None
     battery_nr: int | None = Field(None, alias="batteryNr")
     corner_index: int | None = Field(None, alias="cornerIndex")
@@ -89,8 +85,10 @@ class Profile(BaseModel):
 
 
 class CornerSchema(BaseModel):
-    x: float
-    y: float
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+
+    model_config = {"populate_by_name": True}
 
 
 class PathRequest(BaseModel):
@@ -129,9 +127,11 @@ class PathItem(BaseModel):
     corners: list[CornerSchema] = Field(default_factory=list)
     width_mm: float = 0.0
     height_mm: float = 0.0
-    center_x: float = 0.0
-    center_y: float = 0.0
+    center_x: float = Field(0.0, alias="pixelCenterX")
+    center_y: float = Field(0.0, alias="pixelCenterY")
     confidence: float = 0.0
+
+    model_config = {"populate_by_name": True}
 
 
 class MarkerCornersSchema(BaseModel):
@@ -192,8 +192,10 @@ class RobotMoveResponse(BaseModel):
 class PixelPointSchema(BaseModel):
     """A point in canvas/pixel coordinates."""
 
-    x: float
-    y: float
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+
+    model_config = {"populate_by_name": True}
 
 
 # ---- Calibration ----
@@ -233,10 +235,6 @@ class JobEvent(BaseModel):
 
 class JobCreateRequest(BaseModel):
     class JobPathPointSchema(BaseModel):
-        x: float | None = None
-        y: float | None = None
-        canvas_x: float | None = Field(None, alias="canvasX")
-        canvas_y: float | None = Field(None, alias="canvasY")
         pixel_x: float | None = Field(None, alias="pixelX")
         pixel_y: float | None = Field(None, alias="pixelY")
         index: str | None = None
@@ -246,14 +244,9 @@ class JobCreateRequest(BaseModel):
 
         @model_validator(mode="after")
         def validate_coordinates(self) -> JobCreateRequest.JobPathPointSchema:
-            has_xy = self.x is not None and self.y is not None
-            has_canvas = self.canvas_x is not None and self.canvas_y is not None
             has_pixel = self.pixel_x is not None and self.pixel_y is not None
-            if not has_xy and not has_canvas and not has_pixel:
-                msg = (
-                    "Each path point must include either (canvasX,canvasY), "
-                    "(pixelX,pixelY), or legacy (x,y)"
-                )
+            if not has_pixel:
+                msg = "Each path point must include (pixelX,pixelY)"
                 raise ValueError(msg)
             return self
 

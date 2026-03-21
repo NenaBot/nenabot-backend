@@ -359,7 +359,9 @@
                                 ctx.lineWidth = 3;
                                 ctx.beginPath();
                                 d.corners.forEach((c, i) => {
-                                    i === 0 ? ctx.moveTo(c.x, c.y) : ctx.lineTo(c.x, c.y);
+                                    i === 0
+                                        ? ctx.moveTo(c.pixelX, c.pixelY)
+                                        : ctx.lineTo(c.pixelX, c.pixelY);
                                 });
                                 ctx.closePath();
                                 ctx.stroke();
@@ -368,7 +370,7 @@
                                 ctx.fillStyle = color;
                                 d.corners.forEach((c) => {
                                     ctx.beginPath();
-                                    ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
+                                    ctx.arc(c.pixelX, c.pixelY, 5, 0, Math.PI * 2);
                                     ctx.fill();
                                 });
 
@@ -378,8 +380,8 @@
                                 ctx.strokeStyle = "#000";
                                 ctx.lineWidth = 3;
                                 const label = `#${idx + 1} ${d.width_mm.toFixed(0)}×${d.height_mm.toFixed(0)}mm`;
-                                const lx = d.center_x - 40;
-                                const ly = d.center_y - 10;
+                                const lx = d.pixelCenterX - 40;
+                                const ly = d.pixelCenterY - 10;
                                 ctx.strokeText(label, lx, ly);
                                 ctx.fillText(label, lx, ly);
                             }
