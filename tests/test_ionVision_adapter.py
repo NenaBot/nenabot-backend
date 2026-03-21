@@ -258,7 +258,7 @@ async def test_disconnect_success_path(iv_adapter: IVAdapter) -> None:
     iv_adapter._ws.disconnect.assert_awaited_once_with()
 
 
-def test_on_event_delegates_to_websocket_on_with_same_args(iv_adapter: IVAdapter) -> None:
+def test_on_event_delegates_to_websocket_on_with_same_args(iv_adapter: IVAdapter) -> None:   # noqa: E501
     """Test that on_event forwards event key and callback reference to ws.on."""
     event_type = "message.error"
     handler = Mock()
@@ -270,7 +270,7 @@ def test_on_event_delegates_to_websocket_on_with_same_args(iv_adapter: IVAdapter
 
 
 def test_websocket_on_registers_handler_under_event_key() -> None:
-    """Test that on() stores the exact callback reference under the provided event key."""
+    """Test that on() stores the exact callback reference under the provided event key."""  # noqa: E501
     ws_adapter = WebSocketAdapter("ws://localhost:8080")
     event_type = "scan.resultsProcessed"
 
@@ -284,7 +284,7 @@ def test_websocket_on_registers_handler_under_event_key() -> None:
     assert ws_adapter._handlers[event_type][0] is handler
 
 
-def test_off_event_delegates_to_websocket_off_with_same_args(iv_adapter: IVAdapter) -> None:
+def test_off_event_delegates_to_websocket_off_with_same_args(iv_adapter: IVAdapter) -> None:  # noqa: E501
     """Test that off_event forwards event key and callback reference to ws.off."""
     event_type = "scan.resultsProcessed"
     handler = Mock()
@@ -296,7 +296,7 @@ def test_off_event_delegates_to_websocket_off_with_same_args(iv_adapter: IVAdapt
 
 
 def test_websocket_off_removes_registered_handler_and_stops_callbacks() -> None:
-    """Test that off() removes a registered handler so it no longer receives callbacks."""
+    """Test that off() removes a registered handler so it no longer receives callbacks."""  # noqa: E501
     ws_adapter = WebSocketAdapter("ws://localhost:8080")
     event_type = "scan.resultsProcessed"
     handler = Mock()
