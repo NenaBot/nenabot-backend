@@ -17,18 +17,21 @@ def iv_adapter() -> IVAdapter:
     """Create an IonVision adapter for unit tests."""
     return IVAdapter(base_url=BASE_URL, ws_base_url=WS_BASE_URL)
 
+
 @respx.mock
 def test_start_new_scan(iv_adapter: IVAdapter) -> None:
     """Test POST /currentScan request."""
     respx.post("http://localhost:8080/currentScan").mock(
-        return_value=httpx.Response(201, 
-                                    json={"message": "The new scan is now starting."}),
+        return_value=httpx.Response(
+            201, json={"message": "The new scan is now starting."}
+        ),
     )
-    
+
     result = iv_adapter.start_new_scan()
-    
+
     assert result.ok is True
     assert "message" in result.payload
+
 
 @respx.mock
 def test_get_current_scan_success(iv_adapter: IVAdapter) -> None:
@@ -38,9 +41,10 @@ def test_get_current_scan_success(iv_adapter: IVAdapter) -> None:
     )
 
     result = iv_adapter.get_current_scan()
-    
+
     assert result.ok is True
     assert "progress" in result.payload
+
 
 @respx.mock
 def test_get_scan_comments(iv_adapter: IVAdapter) -> None:
@@ -48,19 +52,21 @@ def test_get_scan_comments(iv_adapter: IVAdapter) -> None:
     respx.get("http://localhost:8080/currentScan/comments").mock(
         return_value=httpx.Response(200, json={}),
     )
-    
+
     result = iv_adapter.get_scan_comments()
-    
+
     assert result.ok is True
     assert result.payload == {}
+
 
 @respx.mock
 def test_replace_scan_comments(iv_adapter: IVAdapter) -> None:
     """Test PUT /currentScan/comments request."""
     comments = {"notes": "test scan"}
     respx.put("http://localhost:8080/currentScan/comments").mock(
-        return_value=httpx.Response(200, 
-                                    json={"message": "Comments updated successfully."}),
+        return_value=httpx.Response(
+            200, json={"message": "Comments updated successfully."}
+        ),
     )
 
     result = iv_adapter.replace_scan_comments(comments)
@@ -68,30 +74,34 @@ def test_replace_scan_comments(iv_adapter: IVAdapter) -> None:
     assert result.ok is True
     assert "message" in result.payload
 
+
 @respx.mock
 def test_get_latest_dataobject(iv_adapter: IVAdapter) -> None:
     """Test GET /results/latest request."""
     respx.get("http://localhost:8080/results/latest").mock(
         return_value=httpx.Response(200, json={}),
     )
-    
+
     result = iv_adapter.get_latest_dataobject()
-    
+
     assert result.ok is True
     assert result.payload == {}
+
 
 @respx.mock
 def test_replace_scan_commets_with_empty_dict(iv_adapter: IVAdapter) -> None:
     """Test PUT /currentScan/comments with empty dict."""
     respx.put("http://localhost:8080/currentScan/comments").mock(
-        return_value=httpx.Response(200, 
-                                    json={"message": "Comments updated successfully."}),
+        return_value=httpx.Response(
+            200, json={"message": "Comments updated successfully."}
+        ),
     )
-    
+
     result = iv_adapter.replace_scan_comments({})
-    
+
     assert result.ok is True
     assert "message" in result.payload
+
 
 # IVAdapter _request tests
 @respx.mock
@@ -107,6 +117,7 @@ def test__request_returns_ivresult_on_2xx(iv_adapter: IVAdapter) -> None:
     assert result.ok is True
     assert result.payload == payload
     assert result.error is None
+
 
 @respx.mock
 def test__request_returns_ivresult_on_non2xx(iv_adapter: IVAdapter) -> None:
@@ -135,6 +146,7 @@ def test__request_returns_ivresult_on_network_error(iv_adapter: IVAdapter) -> No
     assert result.payload is None
     assert "connection failed" in result.error
 
+
 @respx.mock
 def test__request_json_decode_error(iv_adapter: IVAdapter) -> None:
     """Test that _request returns IVResult(ok=False, payload=None, error=str) on JSON decode errors."""  # noqa: E501
@@ -152,14 +164,18 @@ def test__request_json_decode_error(iv_adapter: IVAdapter) -> None:
     assert result.payload is None
     assert "Expecting value" in result.error
 
+
 @respx.mock
 def test__request_base_url_with_trailing_slashes() -> None:
     """Test that _request doesn't fail on double trailing slashes."""
-    iv_test_adapter = IVAdapter(base_url="http://localhost:8080/", ws_base_url="ws://localhost:8080")
+    iv_test_adapter = IVAdapter(
+        base_url="http://localhost:8080/", ws_base_url="ws://localhost:8080"
+    )
 
     respx.get("http://localhost:8080/health").mock(
         return_value=httpx.Response(
-            200, json={"message": "ok"},
+            200,
+            json={"message": "ok"},
         ),
     )
 
@@ -168,11 +184,14 @@ def test__request_base_url_with_trailing_slashes() -> None:
     assert result.ok is True
     assert result.payload == {"message": "ok"}
     assert result.error is None
-    
+
+
 # WebSocket test cases
 @pytest.mark.asyncio
-async def test_websocket_connect_and_disconnect_called_once(iv_adapter: IVAdapter) -> None:  # noqa: E501
-    """Test that initialize_websocket and disconnect_websocket call the underlying WebSocketAdapter methods exactly once without parameters.""" #noqa: E501
+async def test_websocket_connect_and_disconnect_called_once(
+    iv_adapter: IVAdapter,
+) -> None:  # noqa: E501
+    """Test that initialize_websocket and disconnect_websocket call the underlying WebSocketAdapter methods exactly once without parameters."""  # noqa: E501
     # Arrange: replace WebSocketAdapter methods with awaitable mocks
     iv_adapter._ws.connect = AsyncMock()
     iv_adapter._ws.disconnect = AsyncMock()
@@ -187,7 +206,9 @@ async def test_websocket_connect_and_disconnect_called_once(iv_adapter: IVAdapte
 
 
 @pytest.mark.asyncio
-async def test_initialize_websocket_propagates_connect_error(iv_adapter: IVAdapter) -> None:  # noqa: E501
+async def test_initialize_websocket_propagates_connect_error(
+    iv_adapter: IVAdapter,
+) -> None:  # noqa: E501
     """Test that initialize_websocket re-raises the same connect exception."""
     connect_error = RuntimeError("connect failed")
     iv_adapter._ws.connect = AsyncMock(side_effect=connect_error)
@@ -200,7 +221,9 @@ async def test_initialize_websocket_propagates_connect_error(iv_adapter: IVAdapt
 
 
 @pytest.mark.asyncio
-async def test_disconnect_websocket_propagates_disconnect_error(iv_adapter: IVAdapter) -> None:  # noqa: E501
+async def test_disconnect_websocket_propagates_disconnect_error(
+    iv_adapter: IVAdapter,
+) -> None:  # noqa: E501
     """Test that disconnect_websocket re-raises the same disconnect exception."""
     disconnect_error = RuntimeError("disconnect failed")
     iv_adapter._ws.disconnect = AsyncMock(side_effect=disconnect_error)
@@ -214,20 +237,23 @@ async def test_disconnect_websocket_propagates_disconnect_error(iv_adapter: IVAd
 
 @pytest.mark.asyncio
 async def test_websocket_connect_failure_resets_state(
-    monkeypatch: pytest.MonkeyPatch, iv_adapter: IVAdapter) -> None:
+    monkeypatch: pytest.MonkeyPatch, iv_adapter: IVAdapter
+) -> None:
     """Test that failed websocket connect raises and leaves no partial connected state."""  # noqa: E501
     connect_error = RuntimeError("connect failed")
     mock_connect = AsyncMock(side_effect=connect_error)
     monkeypatch.setattr("app.adapters.ionVision.websockets.connect", mock_connect)
 
-    with pytest.raises(Exception, 
-                       match="Failed to connect to WebSocket: connect failed"):
+    with pytest.raises(
+        Exception, match="Failed to connect to WebSocket: connect failed"
+    ):
         await iv_adapter.initialize_websocket()
 
     assert iv_adapter._ws._running is False
     assert iv_adapter._ws._listen_task is None
     assert iv_adapter._ws._ws is None
     mock_connect.assert_awaited_once_with("ws://localhost:8080")
+
 
 def test_ws_base_url_trimmed_on_initialization() -> None:
     """Test that ws_base_url trailing slashes are removed when creating _ws."""
@@ -236,9 +262,10 @@ def test_ws_base_url_trimmed_on_initialization() -> None:
         base_url="http://localhost:8080",
         ws_base_url="ws://localhost:8080/",
     )
-    
+
     # Verify the internal _ws was initialized with the trimmed URL
     assert iv_adapter._ws._base_url == "ws://localhost:8080"
+
 
 @pytest.mark.asyncio
 async def test_connect_success_path(iv_adapter: IVAdapter) -> None:
@@ -247,6 +274,7 @@ async def test_connect_success_path(iv_adapter: IVAdapter) -> None:
 
     await iv_adapter.initialize_websocket()
     iv_adapter._ws.connect.assert_awaited_once_with()
+
 
 @pytest.mark.asyncio
 async def test_disconnect_success_path(iv_adapter: IVAdapter) -> None:
@@ -257,7 +285,9 @@ async def test_disconnect_success_path(iv_adapter: IVAdapter) -> None:
     iv_adapter._ws.disconnect.assert_awaited_once_with()
 
 
-def test_on_event_delegates_to_websocket_on_with_same_args(iv_adapter: IVAdapter) -> None:   # noqa: E501
+def test_on_event_delegates_to_websocket_on_with_same_args(
+    iv_adapter: IVAdapter,
+) -> None:  # noqa: E501
     """Test that on_event forwards event key and callback reference to ws.on."""
     event_type = "message.error"
     handler = Mock()
@@ -283,7 +313,9 @@ def test_websocket_on_registers_handler_under_event_key() -> None:
     assert ws_adapter._handlers[event_type][0] is handler
 
 
-def test_off_event_delegates_to_websocket_off_with_same_args(iv_adapter: IVAdapter) -> None:  # noqa: E501
+def test_off_event_delegates_to_websocket_off_with_same_args(
+    iv_adapter: IVAdapter,
+) -> None:  # noqa: E501
     """Test that off_event forwards event key and callback reference to ws.off."""
     event_type = "scan.resultsProcessed"
     handler = Mock()
