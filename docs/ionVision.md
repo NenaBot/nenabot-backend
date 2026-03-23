@@ -47,6 +47,7 @@ Close WebSocket connection and stop listening for events.
 Parameters:
 - event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
 - handler: Async or sync callable that receives the event data dict
+
 Description:
 Register a handler for a WebSocket event.
 
@@ -54,6 +55,7 @@ Register a handler for a WebSocket event.
 Parameters:
 - event_type: The type of event to stop listening for (e.g., "message.error", "scan.finished")
 - handler: Async or sync callable that receives the event data dict
+
 Description:
 Unregister a handler for a WebSocket event.
 
