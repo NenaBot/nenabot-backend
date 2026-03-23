@@ -13,43 +13,44 @@ get_current_scan(), get_latest_dataobject()
 Lifecycle management and event registration for real-time device notifications
 
 ## Core HTTP Methods
-**get_scan_comments()**
+**get_scan_comments()** <br> 
 Get the comments object associated with the ongoing or next scan.
 The comments object is automatically reset once a scan finishes 
 and the previous comments object is saved to the result file 
 of the just finished scan.
 
-**replace_scan_comments(comments:dict)**
+**replace_scan_comments(comments:dict)** <br> 
 Parameters:
 - `comments` (dict): Key-value pairs representing scan comments/metadata to store
-Description:
+
+Description: <br> 
 Add comments to the ongoing or next scan. Replaces the previous comments object.
 The /currentScan/comments object can first be fetched for editing using GET.
 
-**get_current_scan()**
+**get_current_scan()** <br> 
 Check if a scan is ongoing and get information about it.
 
-**get_latest_dataobject()**
+**get_latest_dataobject()** <br> 
 Get the data object of the latest scan result once it has been processed.
 Please note that it can take some time for the device to process the scan 
 result data after a scan has already been finished. 
 
 ## Core WebSocket Methods
-**initialize_websocket()**
+**initialize_websocket()** <br> 
 Initialize WebSocket connection for event streaming.
 Must be called after instantiation to open the WebSocket.
 
-**disconnect_websocket()**
+**disconnect_websocket()** <br> 
 Close WebSocket connection and stop listening for events.
 
-**on_event(event_type: str, handler: Callable[[Dict[str, Any]], Any])**
+**on_event(event_type: str, handler: Callable[[Dict[str, Any]], Any])** <br> 
 Parameters:
 - event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
 - handler: Async or sync callable that receives the event data dict
 Description:
 Register a handler for a WebSocket event.
 
-**off_event(event_type: str, handler: Callable[[Dict[str, Any]], Any])**
+**off_event(event_type: str, handler: Callable[[Dict[str, Any]], Any])** <br> 
 Parameters:
 - event_type: The type of event to stop listening for (e.g., "message.error", "scan.finished")
 - handler: Async or sync callable that receives the event data dict
