@@ -89,7 +89,7 @@ def test_get_latest_dataobject(iv_adapter: IVAdapter) -> None:
 
 
 @respx.mock
-def test_replace_scan_commets_with_empty_dict(iv_adapter: IVAdapter) -> None:
+def test_replace_scan_comments_with_empty_dict(iv_adapter: IVAdapter) -> None:
     """Test PUT /currentScan/comments with empty dict."""
     respx.put("http://localhost:8080/currentScan/comments").mock(
         return_value=httpx.Response(
