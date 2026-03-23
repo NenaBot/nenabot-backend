@@ -60,7 +60,7 @@ Unregister a handler for a WebSocket event.
 - Delegates WebSocket management to WebSocketAdapter class
 - Returns IVResult objects (with ok, payload, error fields) for HTTP calls
 
-## Sequence Diagram
+## Sequence Diagram: Successful IonVision-Backend Communication Flow
 
 ```mermaid
 sequenceDiagram
@@ -68,4 +68,13 @@ sequenceDiagram
     participant BE as Backend API
     participant IV as IonVision
     BE->>IV: GET/currentScan/comments 
+    IV-->BE: Comments object
+    BE->>IV: PUT/currentScan/comments 
+    IV-->BE: Scan comments replaced
+    BE->>IV: POST/currentScan
+    IV-->BE: The new scan is now starting
+
+    IV->>BE: scan.resultsProcessed
+    BE->>IV: GET/results/latest
+    IV-->BE: The data object of latest scan result
 ```
