@@ -1,5 +1,5 @@
 # IonVision adapter Documentation
-Main adapter interface for IonVision device communication via HTTP and WebSocket APIs.  # noqa: E999
+Main adapter interface for IonVision device communication via HTTP and WebSocket APIs.
 **IonVision HTTP API Documentation**: https://olfactomics.github.io/IonVision-API-docs/
 **IonVision WebSocket API Documentation**: https://github.com/Olfactomics/IonVision-API-docs/blob/main/IonVision-WS-API.md
 
