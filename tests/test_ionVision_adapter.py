@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from app.adapters.ionVision import IVAdapter, WebSocketAdapter
+from app.adapters.ionVision import IVAdapter, IVResult, WebSocketAdapter
 
 BASE_URL = "http://localhost:8080"
 WS_BASE_URL = "ws://localhost:8080"
@@ -101,6 +101,56 @@ def test_replace_scan_comments_with_empty_dict(iv_adapter: IVAdapter) -> None:
 
     assert result.ok is True
     assert "message" in result.payload
+
+
+def test_get_results_omits_empty_params(iv_adapter: IVAdapter) -> None:
+    """Test that get_results does not forward empty query parameters."""
+    iv_adapter._request = Mock(return_value=IVResult(ok=True, payload={"items": []}))
+
+    iv_adapter.get_results(
+        max_results=50,
+        page=1,
+        search="",
+        start_date="  ",
+        sort_by=None,
+        only_metadata=None,
+        ids="",
+    )
+
+    iv_adapter._request.assert_called_once_with(
+        "GET",
+        "results",
+        params={
+            "maxResults": 50,
+            "page": 1,
+        },
+    )
+
+
+def test_get_results_keeps_false_and_zero_values(iv_adapter: IVAdapter) -> None:
+    """Test that get_results keeps meaningful falsy values (False/0)."""
+    iv_adapter._request = Mock(return_value=IVResult(ok=True, payload={"items": []}))
+
+    iv_adapter.get_results(
+        max_results=0,
+        page=0,
+        search=None,
+        start_date=None,
+        sort_by="timestamp",
+        only_metadata=False,
+        ids=None,
+    )
+
+    iv_adapter._request.assert_called_once_with(
+        "GET",
+        "results",
+        params={
+            "maxResults": 0,
+            "page": 0,
+            "sortBy": "timestamp",
+            "onlyMetadata": False,
+        },
+    )
 
 
 # IVAdapter _request tests
