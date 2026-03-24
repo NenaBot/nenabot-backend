@@ -63,6 +63,69 @@ class IVAdapter:
         except Exception as exc:
             return IVResult(False, error=str(exc))
 
+    @staticmethod
+    def _normalize_optional_string(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        stripped = value.strip()
+        return stripped or None
+
+    @staticmethod
+    def _normalize_search_string(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return value.strip()
+
+    @staticmethod
+    def _validate_optional_int(
+        name: str,
+        value: Optional[int],
+        *,
+        minimum: Optional[int] = None,
+    ) -> None:
+        if value is None:
+            return
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be an integer")
+        if minimum is not None and value < minimum:
+            raise ValueError(f"{name} must be greater than or equal to {minimum}")
+
+    @staticmethod
+    def _validate_optional_bool(name: str, value: Optional[bool]) -> None:
+        if value is None:
+            return
+        if not isinstance(value, bool):
+            raise ValueError(f"{name} must be a boolean")
+
+    def _build_results_params(
+        self,
+        *,
+        max_results: Optional[int],
+        page: Optional[int],
+        search: Optional[str],
+        start_date: Optional[str],
+        end_date: Optional[str],
+        sort_by: Optional[str],
+        only_metadata: Optional[bool],
+        ids: Optional[str],
+    ) -> dict[str, Any]:
+        self._validate_optional_int("max_results", max_results, minimum=0)
+        self._validate_optional_int("page", page, minimum=1)
+        self._validate_optional_bool("only_metadata", only_metadata)
+
+        raw_params = {
+            "max_results": max_results,
+            "page": page,
+            "search": self._normalize_search_string(search),
+            "start_date": self._normalize_optional_string(start_date),
+            "end_date": self._normalize_optional_string(end_date),
+            "sort_by": self._normalize_optional_string(sort_by),
+            "only_metadata": only_metadata,
+            "ids": self._normalize_optional_string(ids),
+        }
+        return {key: value for key, value in raw_params.items() if value is not None}
+
     # health check
     def ping(self) -> IVResult:
         """Lightweight reachability check against the IonVision API."""
@@ -107,25 +170,25 @@ class IVAdapter:
         page: Optional[int] = None,
         search: Optional[str] = None,
         start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         sort_by: Optional[str] = None,
         only_metadata: Optional[bool] = None,
         ids: Optional[str] = None,
     ) -> IVResult:
         """Search the scan results that are stored on the device."""
-        raw_params = {
-            "maxResults": max_results,
-            "page": page,
-            "search": search,
-            "startDate": start_date,
-            "sortBy": sort_by,
-            "onlyMetadata": only_metadata,
-            "ids": ids,
-        }
-        params = {
-            key: value
-            for key, value in raw_params.items()
-            if value is not None and (not isinstance(value, str) or value.strip() != "")
-        }
+        try:
+            params = self._build_results_params(
+                max_results=max_results,
+                page=page,
+                search=search,
+                start_date=start_date,
+                end_date=end_date,
+                sort_by=sort_by,
+                only_metadata=only_metadata,
+                ids=ids,
+            )
+        except ValueError as exc:
+            return IVResult(False, error=str(exc))
 
         return self._request(
             "GET",
@@ -192,7 +255,8 @@ class IVAdapter:
         Args:
         ----
             event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
-            handler: Async or sync callable that receives the event data dict
+            handler: Async or sync callable that receives the full IonVision
+                message envelope with ``type``, ``time`` and ``body`` keys
         """
         self._ws.on(event_type, handler)
 
@@ -215,10 +279,10 @@ class WebSocketAdapter:
     """Event-driven WebSocket adapter for IonVision API.
 
     Maintains a persistent connection and dispatches events to registered handlers.
-
-    Supported event types:
-    - "scan.resultsProcessed": The results of the finished scan have been processed to device storage.
-    - "message.error": An error or warning message. Contains unique error code.
+    IonVision WebSocket messages are JSON objects with ``type``, ``time`` and
+    ``body`` keys. Any documented message type can be registered here, such as
+    ``controllers.status``, ``scan.progress`` or ``message.error``. Handlers
+    receive the full parsed message object.
     """
 
     def __init__(self, base_url: str) -> None:
@@ -259,18 +323,13 @@ class WebSocketAdapter:
             async for raw_message in self._ws:
                 try:
                     data = json.loads(raw_message)
-                    event_type = data.get("type")
+                    if not isinstance(data, dict):
+                        print(
+                            "Ignoring websocket message because it is not a JSON object."
+                        )
+                        continue
 
-                    # Call all registered handlers for this event type
-                    if event_type in self._handlers:
-                        for handler in self._handlers[event_type]:
-                            try:
-                                if inspect.iscoroutinefunction(handler):
-                                    await handler(data)
-                                else:
-                                    handler(data)
-                            except Exception as e:
-                                print(f"Handler error for {event_type}: {e}")
+                    await self._dispatch_event(data)
                 except json.JSONDecodeError as e:
                     print(f"Failed to parse message: {e}")
                 except Exception as e:
@@ -282,13 +341,28 @@ class WebSocketAdapter:
         finally:
             self._running = False
 
+    async def _dispatch_event(self, message: Dict[str, Any]) -> None:
+        """Dispatch one parsed IonVision websocket message to matching handlers."""
+        event_type = message.get("type")
+        if not isinstance(event_type, str) or not event_type:
+            return
+
+        for handler in list(self._handlers.get(event_type, [])):
+            try:
+                result = handler(message)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:
+                print(f"Handler error for {event_type}: {exc}")
+
     def on(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
         """Register a handler for an event type.
 
         Args:
         ----
             event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
-            handler: Async or sync callable that receives the event data dict
+            handler: Async or sync callable that receives the full IonVision
+                message envelope with ``type``, ``time`` and ``body`` keys
 
         Example:
         -------

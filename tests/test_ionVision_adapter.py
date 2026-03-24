@@ -1,6 +1,7 @@
 """Tests for the IonVision adapter."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, Mock
 
 import httpx
@@ -11,6 +12,24 @@ from app.adapters.ionVision import IVAdapter, IVResult, WebSocketAdapter
 
 BASE_URL = "http://localhost:8080"
 WS_BASE_URL = "ws://localhost:8080"
+
+
+class FakeAsyncWebSocket:
+    """Async iterator that yields pre-baked websocket frames."""
+
+    def __init__(self, messages: list[str]) -> None:
+        self._messages = messages
+        self._index = 0
+
+    def __aiter__(self) -> "FakeAsyncWebSocket":
+        return self
+
+    async def __anext__(self) -> str:
+        if self._index >= len(self._messages):
+            raise StopAsyncIteration
+        message = self._messages[self._index]
+        self._index += 1
+        return message
 
 
 @pytest.fixture
@@ -199,12 +218,12 @@ def test_get_results_passes_expected_query_params(iv_adapter: IVAdapter) -> None
 
     result = iv_adapter.get_results(
         max_results=3,
-        page=2,
-        search="ethanol",
-        start_date="2026-03-01",
-        sort_by="createdAt",
+        page=1,
+        search="",
+        start_date="2026-03-17T13:01:11.874Z",
+        end_date="2026-03-25T13:01:11.874Z",
+        sort_by="date_dsc",
         only_metadata=True,
-        ids="a,b",
     )
 
     assert result.ok is True
@@ -212,13 +231,13 @@ def test_get_results_passes_expected_query_params(iv_adapter: IVAdapter) -> None
     assert route.called is True
 
     params = route.calls.last.request.url.params
-    assert params["maxResults"] == "3"
-    assert params["page"] == "2"
-    assert params["search"] == "ethanol"
-    assert params["startDate"] == "2026-03-01"
-    assert params["sortBy"] == "createdAt"
-    assert params["onlyMetadata"].lower() == "true"
-    assert params["ids"] == "a,b"
+    assert params["max_results"] == "3"
+    assert params["page"] == "1"
+    assert params["search"] == ""
+    assert params["start_date"] == "2026-03-17T13:01:11.874Z"
+    assert params["end_date"] == "2026-03-25T13:01:11.874Z"
+    assert params["sort_by"] == "date_dsc"
+    assert params["only_metadata"].lower() == "true"
 
 
 @respx.mock
@@ -245,6 +264,7 @@ def test_get_results_omits_empty_params(iv_adapter: IVAdapter) -> None:
         page=1,
         search="",
         start_date="  ",
+        end_date="",
         sort_by=None,
         only_metadata=None,
         ids="",
@@ -254,8 +274,9 @@ def test_get_results_omits_empty_params(iv_adapter: IVAdapter) -> None:
         "GET",
         "results",
         params={
-            "maxResults": 50,
+            "max_results": 50,
             "page": 1,
+            "search": "",
         },
     )
 
@@ -266,9 +287,10 @@ def test_get_results_keeps_false_and_zero_values(iv_adapter: IVAdapter) -> None:
 
     iv_adapter.get_results(
         max_results=0,
-        page=0,
+        page=1,
         search=None,
         start_date=None,
+        end_date=None,
         sort_by="timestamp",
         only_metadata=False,
         ids=None,
@@ -278,12 +300,27 @@ def test_get_results_keeps_false_and_zero_values(iv_adapter: IVAdapter) -> None:
         "GET",
         "results",
         params={
-            "maxResults": 0,
-            "page": 0,
-            "sortBy": "timestamp",
-            "onlyMetadata": False,
+            "max_results": 0,
+            "page": 1,
+            "sort_by": "timestamp",
+            "only_metadata": False,
         },
     )
+
+
+@pytest.mark.parametrize("page", [-1, 0])
+def test_get_results_rejects_page_numbers_below_one(
+    iv_adapter: IVAdapter, page: int
+) -> None:
+    """Test that get_results validates page numbers before issuing a request."""
+    iv_adapter._request = Mock(return_value=IVResult(ok=True, payload={"items": []}))
+
+    result = iv_adapter.get_results(page=page)
+
+    assert result.ok is False
+    assert result.payload is None
+    assert result.error == "page must be greater than or equal to 1"
+    iv_adapter._request.assert_not_called()
 
 
 # IVAdapter _request tests
@@ -374,6 +411,7 @@ def test_websocket_connect_and_disconnect_called_once(
     iv_adapter: IVAdapter,
 ) -> None:  # noqa: E501
     """Test that initialize_websocket and disconnect_websocket call the underlying WebSocketAdapter methods exactly once without parameters."""  # noqa: E501
+
     async def _exercise() -> None:
         iv_adapter._ws.connect = AsyncMock()
         iv_adapter._ws.disconnect = AsyncMock()
@@ -390,6 +428,7 @@ def test_initialize_websocket_propagates_connect_error(
     iv_adapter: IVAdapter,
 ) -> None:  # noqa: E501
     """Test that initialize_websocket re-raises the same connect exception."""
+
     async def _exercise() -> RuntimeError:
         connect_error = RuntimeError("connect failed")
         iv_adapter._ws.connect = AsyncMock(side_effect=connect_error)
@@ -408,6 +447,7 @@ def test_disconnect_websocket_propagates_disconnect_error(
     iv_adapter: IVAdapter,
 ) -> None:  # noqa: E501
     """Test that disconnect_websocket re-raises the same disconnect exception."""
+
     async def _exercise() -> RuntimeError:
         disconnect_error = RuntimeError("disconnect failed")
         iv_adapter._ws.disconnect = AsyncMock(side_effect=disconnect_error)
@@ -426,6 +466,7 @@ def test_websocket_connect_failure_resets_state(
     monkeypatch: pytest.MonkeyPatch, iv_adapter: IVAdapter
 ) -> None:
     """Test that failed websocket connect raises and leaves no partial connected state."""  # noqa: E501
+
     async def _exercise() -> AsyncMock:
         connect_error = RuntimeError("connect failed")
         mock_connect = AsyncMock(side_effect=connect_error)
@@ -459,6 +500,7 @@ def test_ws_base_url_trimmed_on_initialization() -> None:
 
 def test_connect_success_path(iv_adapter: IVAdapter) -> None:
     """Test that initialize_websocket successfully calls connect on the WebSocketAdapter."""  # noqa: E501
+
     async def _exercise() -> None:
         iv_adapter._ws.connect = AsyncMock(return_value=None)
 
@@ -470,6 +512,7 @@ def test_connect_success_path(iv_adapter: IVAdapter) -> None:
 
 def test_disconnect_success_path(iv_adapter: IVAdapter) -> None:
     """Test that disconnect_websocket successfully calls disconnect on the WebSocketAdapter."""  # noqa: E501
+
     async def _exercise() -> None:
         iv_adapter._ws.disconnect = AsyncMock(return_value=None)
 
@@ -505,6 +548,66 @@ def test_websocket_on_registers_handler_under_event_key() -> None:
     assert event_type in ws_adapter._handlers
     assert len(ws_adapter._handlers[event_type]) == 1
     assert ws_adapter._handlers[event_type][0] is handler
+
+
+def test_websocket_listen_loop_dispatches_full_documented_message_to_sync_handler() -> (
+    None
+):
+    """Test that the listen loop forwards the full IonVision message envelope."""
+    ws_adapter = WebSocketAdapter("ws://localhost:8080")
+    payload = {
+        "type": "controllers.status",
+        "time": 1616057824108,
+        "body": {
+            "status": {"rtmReady": True},
+            "sample": {},
+            "sensor": {},
+            "ambient": {},
+        },
+    }
+    handler = Mock()
+    ws_adapter.on("controllers.status", handler)
+    ws_adapter._ws = FakeAsyncWebSocket([json.dumps(payload)])
+
+    asyncio.run(ws_adapter._listen_loop())
+
+    handler.assert_called_once_with(payload)
+
+
+def test_websocket_listen_loop_dispatches_full_documented_message_to_async_handler() -> (
+    None
+):
+    """Test that async handlers receive the same parsed websocket message."""
+    ws_adapter = WebSocketAdapter("ws://localhost:8080")
+    payload = {
+        "type": "scan.progress",
+        "time": 1616057824108,
+        "body": {"progress": 12},
+    }
+    handler = AsyncMock()
+    ws_adapter.on("scan.progress", handler)
+    ws_adapter._ws = FakeAsyncWebSocket([json.dumps(payload)])
+
+    asyncio.run(ws_adapter._listen_loop())
+
+    handler.assert_awaited_once_with(payload)
+
+
+def test_websocket_listen_loop_ignores_invalid_json_and_unknown_event() -> None:
+    """Test that malformed or unregistered websocket frames do not dispatch."""
+    ws_adapter = WebSocketAdapter("ws://localhost:8080")
+    handler = Mock()
+    ws_adapter.on("controllers.status", handler)
+    ws_adapter._ws = FakeAsyncWebSocket(
+        [
+            "not-json",
+            json.dumps({"type": "scan.finished", "time": 1, "body": {}}),
+        ]
+    )
+
+    asyncio.run(ws_adapter._listen_loop())
+
+    handler.assert_not_called()
 
 
 def test_off_event_delegates_to_websocket_off_with_same_args(
