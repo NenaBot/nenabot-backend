@@ -1,5 +1,6 @@
 """Tests for the IonVision adapter."""
 
+import asyncio
 from unittest.mock import AsyncMock, Mock
 
 import httpx
@@ -28,6 +29,21 @@ def test_start_new_scan(iv_adapter: IVAdapter) -> None:
     )
 
     result = iv_adapter.start_new_scan()
+
+    assert result.ok is True
+    assert "message" in result.payload
+
+
+@respx.mock
+def test_stop_current_scan(iv_adapter: IVAdapter) -> None:
+    """Test DELETE /currentScan request."""
+    respx.delete("http://localhost:8080/currentScan").mock(
+        return_value=httpx.Response(
+            200, json={"message": "The current scan has been stopped."}
+        ),
+    )
+
+    result = iv_adapter.stop_current_scan()
 
     assert result.ok is True
     assert "message" in result.payload
@@ -89,7 +105,124 @@ def test_get_latest_dataobject(iv_adapter: IVAdapter) -> None:
 
 
 @respx.mock
-def test_replace_scan_commets_with_empty_dict(iv_adapter: IVAdapter) -> None:
+def test_get_latest_gas_detection(iv_adapter: IVAdapter) -> None:
+    """Test GET /results/latest/gasDetection request."""
+    payload = {"gasName": "ethanol", "confidence": 0.92}
+    respx.get("http://localhost:8080/results/latest/gasDetection").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+
+    result = iv_adapter.get_latest_gas_detection()
+
+    assert result.ok is True
+    assert result.payload == payload
+
+
+@respx.mock
+def test_get_gas_detection_result_by_id(iv_adapter: IVAdapter) -> None:
+    """Test GET /results/id/{id}/gasDetection request."""
+    payload = {"gasName": "acetone", "confidence": 0.81}
+    respx.get("http://localhost:8080/results/id/result-123/gasDetection").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+
+    result = iv_adapter.get_gas_detection_result("result-123")
+
+    assert result.ok is True
+    assert result.payload == payload
+
+
+@respx.mock
+def test_get_scan_dataobject_by_id(iv_adapter: IVAdapter) -> None:
+    """Test GET /results/id/{id} request."""
+    payload = {"id": "result-123", "scanName": "Scan 1"}
+    respx.get("http://localhost:8080/results/id/result-123").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+
+    result = iv_adapter.get_scan_dataobject("result-123")
+
+    assert result.ok is True
+    assert result.payload == payload
+
+
+@respx.mock
+def test_get_scan_result_commentobject_by_id(iv_adapter: IVAdapter) -> None:
+    """Test GET /results/id/{id}/comments request."""
+    payload = {"operator": "qa"}
+    respx.get("http://localhost:8080/results/id/result-123/comments").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+
+    result = iv_adapter.get_scan_result_commentobject("result-123")
+
+    assert result.ok is True
+    assert result.payload == payload
+
+
+@respx.mock
+def test_put_scan_result_commentobject_by_id(iv_adapter: IVAdapter) -> None:
+    """Test PUT /results/id/{id}/comments request."""
+    comments = {"operator": "qa"}
+    respx.put("http://localhost:8080/results/id/result-123/comments").mock(
+        return_value=httpx.Response(
+            200, json={"message": "Stored result comments updated successfully."}
+        ),
+    )
+
+    result = iv_adapter.put_scan_result_commentobject("result-123", comments)
+
+    assert result.ok is True
+    assert "message" in result.payload
+
+
+@respx.mock
+def test_get_parameter_id(iv_adapter: IVAdapter) -> None:
+    """Test GET /currentParameter through get_parameter_ID()."""
+    payload = {"id": "preset-1"}
+    respx.get("http://localhost:8080/currentParameter").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+
+    result = iv_adapter.get_parameter_ID()
+
+    assert result.ok is True
+    assert result.payload == payload
+
+
+@respx.mock
+def test_get_results_passes_expected_query_params(iv_adapter: IVAdapter) -> None:
+    """Test GET /results request and query parameter mapping."""
+    route = respx.get("http://localhost:8080/results").mock(
+        return_value=httpx.Response(200, json={"results": []}),
+    )
+
+    result = iv_adapter.get_results(
+        max_results=3,
+        page=2,
+        search="ethanol",
+        start_date="2026-03-01",
+        sort_by="createdAt",
+        only_metadata=True,
+        ids="a,b",
+    )
+
+    assert result.ok is True
+    assert result.payload == {"results": []}
+    assert route.called is True
+
+    params = route.calls.last.request.url.params
+    assert params["maxResults"] == "3"
+    assert params["page"] == "2"
+    assert params["search"] == "ethanol"
+    assert params["startDate"] == "2026-03-01"
+    assert params["sortBy"] == "createdAt"
+    assert params["onlyMetadata"].lower() == "true"
+    assert params["ids"] == "a,b"
+
+
+@respx.mock
+def test_replace_scan_comments_with_empty_dict(iv_adapter: IVAdapter) -> None:
     """Test PUT /currentScan/comments with empty dict."""
     respx.put("http://localhost:8080/currentScan/comments").mock(
         return_value=httpx.Response(
@@ -187,71 +320,78 @@ def test__request_base_url_with_trailing_slashes() -> None:
 
 
 # WebSocket test cases
-@pytest.mark.asyncio
-async def test_websocket_connect_and_disconnect_called_once(
+def test_websocket_connect_and_disconnect_called_once(
     iv_adapter: IVAdapter,
 ) -> None:  # noqa: E501
     """Test that initialize_websocket and disconnect_websocket call the underlying WebSocketAdapter methods exactly once without parameters."""  # noqa: E501
-    # Arrange: replace WebSocketAdapter methods with awaitable mocks
-    iv_adapter._ws.connect = AsyncMock()
-    iv_adapter._ws.disconnect = AsyncMock()
+    async def _exercise() -> None:
+        iv_adapter._ws.connect = AsyncMock()
+        iv_adapter._ws.disconnect = AsyncMock()
 
-    # Act: single connect/disconnect flow
-    await iv_adapter.initialize_websocket()
-    await iv_adapter.disconnect_websocket()
+        await iv_adapter.initialize_websocket()
+        await iv_adapter.disconnect_websocket()
 
-    # Assert: each called exactly once and no args were forwarded
+    asyncio.run(_exercise())
     iv_adapter._ws.connect.assert_awaited_once_with()
     iv_adapter._ws.disconnect.assert_awaited_once_with()
 
 
-@pytest.mark.asyncio
-async def test_initialize_websocket_propagates_connect_error(
+def test_initialize_websocket_propagates_connect_error(
     iv_adapter: IVAdapter,
 ) -> None:  # noqa: E501
     """Test that initialize_websocket re-raises the same connect exception."""
-    connect_error = RuntimeError("connect failed")
-    iv_adapter._ws.connect = AsyncMock(side_effect=connect_error)
+    async def _exercise() -> RuntimeError:
+        connect_error = RuntimeError("connect failed")
+        iv_adapter._ws.connect = AsyncMock(side_effect=connect_error)
 
-    with pytest.raises(RuntimeError) as exc_info:
-        await iv_adapter.initialize_websocket()
+        with pytest.raises(RuntimeError) as exc_info:
+            await iv_adapter.initialize_websocket()
 
-    assert exc_info.value is connect_error
-    iv_adapter._ws.connect.assert_awaited_once_with()
+        iv_adapter._ws.connect.assert_awaited_once_with()
+        return exc_info.value
+
+    exc = asyncio.run(_exercise())
+    assert str(exc) == "connect failed"
 
 
-@pytest.mark.asyncio
-async def test_disconnect_websocket_propagates_disconnect_error(
+def test_disconnect_websocket_propagates_disconnect_error(
     iv_adapter: IVAdapter,
 ) -> None:  # noqa: E501
     """Test that disconnect_websocket re-raises the same disconnect exception."""
-    disconnect_error = RuntimeError("disconnect failed")
-    iv_adapter._ws.disconnect = AsyncMock(side_effect=disconnect_error)
+    async def _exercise() -> RuntimeError:
+        disconnect_error = RuntimeError("disconnect failed")
+        iv_adapter._ws.disconnect = AsyncMock(side_effect=disconnect_error)
 
-    with pytest.raises(RuntimeError) as exc_info:
-        await iv_adapter.disconnect_websocket()
+        with pytest.raises(RuntimeError) as exc_info:
+            await iv_adapter.disconnect_websocket()
 
-    assert exc_info.value is disconnect_error
-    iv_adapter._ws.disconnect.assert_awaited_once_with()
+        iv_adapter._ws.disconnect.assert_awaited_once_with()
+        return exc_info.value
+
+    exc = asyncio.run(_exercise())
+    assert str(exc) == "disconnect failed"
 
 
-@pytest.mark.asyncio
-async def test_websocket_connect_failure_resets_state(
+def test_websocket_connect_failure_resets_state(
     monkeypatch: pytest.MonkeyPatch, iv_adapter: IVAdapter
 ) -> None:
     """Test that failed websocket connect raises and leaves no partial connected state."""  # noqa: E501
-    connect_error = RuntimeError("connect failed")
-    mock_connect = AsyncMock(side_effect=connect_error)
-    monkeypatch.setattr("app.adapters.ionVision.websockets.connect", mock_connect)
+    async def _exercise() -> AsyncMock:
+        connect_error = RuntimeError("connect failed")
+        mock_connect = AsyncMock(side_effect=connect_error)
+        monkeypatch.setattr("app.adapters.ionVision.websockets.connect", mock_connect)
 
-    with pytest.raises(
-        Exception, match="Failed to connect to WebSocket: connect failed"
-    ):
-        await iv_adapter.initialize_websocket()
+        with pytest.raises(
+            Exception, match="Failed to connect to WebSocket: connect failed"
+        ):
+            await iv_adapter.initialize_websocket()
 
-    assert iv_adapter._ws._running is False
-    assert iv_adapter._ws._listen_task is None
-    assert iv_adapter._ws._ws is None
+        assert iv_adapter._ws._running is False
+        assert iv_adapter._ws._listen_task is None
+        assert iv_adapter._ws._ws is None
+        return mock_connect
+
+    mock_connect = asyncio.run(_exercise())
     mock_connect.assert_awaited_once_with("ws://localhost:8080")
 
 
@@ -267,21 +407,25 @@ def test_ws_base_url_trimmed_on_initialization() -> None:
     assert iv_adapter._ws._base_url == "ws://localhost:8080"
 
 
-@pytest.mark.asyncio
-async def test_connect_success_path(iv_adapter: IVAdapter) -> None:
+def test_connect_success_path(iv_adapter: IVAdapter) -> None:
     """Test that initialize_websocket successfully calls connect on the WebSocketAdapter."""  # noqa: E501
-    iv_adapter._ws.connect = AsyncMock(return_value=None)
+    async def _exercise() -> None:
+        iv_adapter._ws.connect = AsyncMock(return_value=None)
 
-    await iv_adapter.initialize_websocket()
+        await iv_adapter.initialize_websocket()
+
+    asyncio.run(_exercise())
     iv_adapter._ws.connect.assert_awaited_once_with()
 
 
-@pytest.mark.asyncio
-async def test_disconnect_success_path(iv_adapter: IVAdapter) -> None:
+def test_disconnect_success_path(iv_adapter: IVAdapter) -> None:
     """Test that disconnect_websocket successfully calls disconnect on the WebSocketAdapter."""  # noqa: E501
-    iv_adapter._ws.disconnect = AsyncMock(return_value=None)
+    async def _exercise() -> None:
+        iv_adapter._ws.disconnect = AsyncMock(return_value=None)
 
-    await iv_adapter.disconnect_websocket()
+        await iv_adapter.disconnect_websocket()
+
+    asyncio.run(_exercise())
     iv_adapter._ws.disconnect.assert_awaited_once_with()
 
 
