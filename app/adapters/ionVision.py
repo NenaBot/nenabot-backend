@@ -103,27 +103,34 @@ class IVAdapter:
     # results
     def get_results(
         self,
-        max_results: int,
-        page: int,
-        search: str,
-        start_date: str,
-        sort_by: str,
-        only_metadata: bool,
-        ids: str,
+        max_results: Optional[int] = None,
+        page: Optional[int] = None,
+        search: Optional[str] = None,
+        start_date: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        only_metadata: Optional[bool] = None,
+        ids: Optional[str] = None,
     ) -> IVResult:
         """Search the scan results that are stored on the device."""
+        raw_params = {
+            "maxResults": max_results,
+            "page": page,
+            "search": search,
+            "startDate": start_date,
+            "sortBy": sort_by,
+            "onlyMetadata": only_metadata,
+            "ids": ids,
+        }
+        params = {
+            key: value
+            for key, value in raw_params.items()
+            if value is not None and (not isinstance(value, str) or value.strip() != "")
+        }
+
         return self._request(
             "GET",
             "results",
-            params={
-                "maxResults": max_results,
-                "page": page,
-                "search": search,
-                "startDate": start_date,
-                "sortBy": sort_by,
-                "onlyMetadata": only_metadata,
-                "ids": ids,
-            },
+            params=params,
         )
 
     def get_latest_dataobject(self) -> IVResult:
@@ -186,7 +193,6 @@ class IVAdapter:
         ----
             event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
             handler: Async or sync callable that receives the event data dict
-
         """
         self._ws.on(event_type, handler)
 
