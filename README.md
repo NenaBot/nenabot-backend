@@ -47,6 +47,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 
 - [Architecture Overview](docs/architecture-overview.md)
 - [Database Documentation](docs/database.md)
+- [IonVision Integration Tests](docs/ionvision-integration-tests/README.md)
 
 ## Endpoints
 
@@ -72,7 +73,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 
 - **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. Supports both automated job execution and manual control via `/robot/move` and `/robot/pose` endpoints for calibration testing.
 - **Camera/Vision**: `app/adapters/camera_vision.py` handles ArUco marker detection, battery-contour detection, and MJPEG streaming via `/streams/camera/feed` and `/streams/detection/feed`.
-- **IonVision (DMS)**: `app/adapters/ionVision/ionVision.py` is an HTTP client to the external IonVision API. Configure the base URL in `app/dependencies.py`.
+- **IonVision (DMS)**: `app/adapters/ionVision.py` is an HTTP client to the external IonVision API. Configure the base URL with `IONVISION_BASE_URL` / `IONVISION_WS_BASE_URL` or in `app/dependencies.py`.
 - **Database**: SQLite (`data/nenabot.db`) stores all job state, waypoints, measurements, and snapshot images. See [Database Documentation](docs/database.md).
 
 ## UI pages
@@ -89,6 +90,9 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 ```bash
 pytest -q
 ```
+
+For the manual real-device IonVision integration suite, see
+[`docs/IonVision/ionvision-integration-tests/README.md`](docs/IonVision/ionvision-integration-tests/README.md).
 
 # GitHub Workflow & Contribution Guidelines
 
