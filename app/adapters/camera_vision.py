@@ -80,7 +80,7 @@ class DetectionCalibration:
     marker_size_mm: float = 48.0
 
 
-# Paste calibration output here (from: python docs/vision_calibration.py, key [s]).
+# Paste calibration output here (from: python "docs/machine vision/vision_calibration.py", key [s]).
 # Example:
 # DETECTION_CALIBRATION_OVERRIDES = {
 #     "canny_low": 60,

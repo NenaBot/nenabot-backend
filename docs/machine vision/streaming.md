@@ -29,11 +29,11 @@ open http://localhost:8000/streams/camera/feed
 
 ## Stream viewer (HTML test page)
 
-A standalone HTML file is included at `docs/stream-viewer.html`. Open it
+A standalone HTML file is included at `docs/machine vision/stream-viewer.html`. Open it
 directly in a browser to test both feeds without writing any code.
 
 ```bash
-open docs/stream-viewer.html
+open "docs/machine vision/stream-viewer.html"
 ```
 
 Features:

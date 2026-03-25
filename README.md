@@ -83,7 +83,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 | OpenAPI docs  | `/docs`                                | Auto-generated interactive API reference  |
 | Job Tester    | Open `docs/job-tester.html` locally    | Create and monitor jobs                   |
 | Job Results   | Open `docs/job-results.html` locally   | Browse jobs, view images and measurements |
-| Stream Viewer | Open `docs/stream-viewer.html` locally | Live camera / detection stream viewer     |
+| Stream Viewer | Open `docs/machine vision/stream-viewer.html` locally | Live camera / detection stream viewer     |
 
 ## Tests
 

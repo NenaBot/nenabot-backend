@@ -7,14 +7,14 @@ This project now includes an interactive calibration script to tune the battery 
 From the project root:
 
 ```bash
-python docs/vision_calibration.py
+python "docs/machine vision/vision_calibration.py"
 ```
 
 Optional arguments:
 
 ```bash
-python docs/vision_calibration.py --source camera --camera 0
-python docs/vision_calibration.py --source image --image data/images/sample.jpg
+python "docs/machine vision/vision_calibration.py" --source camera --camera 0
+python "docs/machine vision/vision_calibration.py" --source image --image data/images/sample.jpg
 ```
 
 ## What It Does
