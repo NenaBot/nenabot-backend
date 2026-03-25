@@ -47,7 +47,8 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 
 - [Architecture Overview](docs/architecture-overview.md)
 - [Database Documentation](docs/database.md)
-- [IonVision Integration Tests](docs/ionvision-integration-tests/README.md)
+- [Raspberry Pi Remote Access](docs/raspberry-pi-setup.md)
+- [IonVision Integration Tests](docs/IonVision/ionvision-integration-tests/README.md)
 
 ## Endpoints
 

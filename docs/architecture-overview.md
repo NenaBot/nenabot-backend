@@ -86,6 +86,7 @@ nenabot-main/
 |- docs/
 |  |- architecture-overview.md           # This file
 |  |- database.md                        # Database schema and persistence details
+|  |- raspberry-pi-setup.md              # Raspberry Pi remote access and Cloudflare Tunnel SSH guide
 |  |- streaming.md                       # Streaming architecture and usage guide
 |  |- stream-viewer.html                 # Manual HTML viewer for camera/detection feeds
 |  |- job-tester.html                    # Job creation / testing UI
