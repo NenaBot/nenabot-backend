@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
+
+import json
+import numpy as np
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -64,6 +69,7 @@ class CameraVisionAdapter:
     - MJPEG streaming (raw camera feed or detection-overlay feed)
     """
 
+    
     def __init__(
         self,
         device_index: int = 0,
@@ -82,7 +88,18 @@ class CameraVisionAdapter:
         self._camera_streaming = False
         self._detection_streaming = False
 
-    # ---- single-frame capture ----
+        # NEW: Load Calibration Data
+        import json
+        import numpy as np
+        self.mtx = None
+        self.dist = None
+        calib_path = Path("calibration.json")
+        if calib_path.exists():
+            with open(calib_path, 'r') as f:
+                data = json.load(f)
+                self.mtx = np.array(data['camera_matrix'])
+                self.dist = np.array(data['dist_coeff'])
+                print("Loaded 3D Calibration Matrix successfully!")
 
     def capture(self) -> CaptureResult:
         try:
@@ -91,20 +108,52 @@ class CameraVisionAdapter:
             return CaptureResult(False, error=f"OpenCV not available: {exc}")
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
-        cap = cv2.VideoCapture(self._device_index)
+        # Prefer DirectShow on Windows to avoid MSMF read stalls on some cameras.
+        if os.name == "nt" and hasattr(cv2, "CAP_DSHOW"):
+            cap = cv2.VideoCapture(self._device_index, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(self._device_index)
+
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
+        
+        # NEW: Force Auto-Focus OFF and lock to 43!
+        cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+        cap.set(cv2.CAP_PROP_FOCUS, 43)
+
         if not cap.isOpened():
             return CaptureResult(False, error="Unable to open camera")
 
-        # Discard initial frames so the sensor can adjust exposure/white-balance
-        for _ in range(10):
-            cap.read()
+        # Discard initial frames so the sensor can adjust exposure/white-balance.
+        # Keep this bounded so we fail fast instead of appearing frozen.
+        warmup_reads = 0
+        warmup_deadline = time.time() + 3.0
+        while warmup_reads < 10 and time.time() < warmup_deadline:
+            ok, _ = cap.read()
+            if ok:
+                warmup_reads += 1
+            else:
+                time.sleep(0.05)
 
-        ok, frame = cap.read()
+        ok, frame = False, None
+        read_deadline = time.time() + 3.0
+        while time.time() < read_deadline:
+            ok, frame = cap.read()
+            if ok and frame is not None:
+                break
+            time.sleep(0.05)
+
         cap.release()
         if not ok:
-            return CaptureResult(False, error="Failed to read frame")
+            return CaptureResult(
+                False,
+                error="Failed to read frame (camera read timed out). Check if another app is using the camera.",
+            )
+
+        # NEW: The "Ironing" Step (Undistortion)
+        if self.mtx is not None and self.dist is not None:
+            # Flatten the curved pixels using the matrix
+            frame = cv2.undistort(frame, self.mtx, self.dist, None, self.mtx)
 
         filename = f"capture_{datetime.utcnow().isoformat().replace(':', '-')}.jpg"
         path = self._output_dir / filename
