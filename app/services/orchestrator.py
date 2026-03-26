@@ -18,8 +18,6 @@ from app.domain.models import Job, Measurement, Waypoint
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
-
 
 class OrchestratorService:
     def __init__(
@@ -645,31 +643,31 @@ class OrchestratorService:
 
     # WEBSOCKET SERVICES
     # Handle real-time events from the DMS (Device Management System) via WebSocket
-    
+
     async def initialize_dms(self) -> None:
         """Initialize DMS WebSocket connection and register event handlers.
-        
+
         Establishes the WebSocket connection to the DMS and registers handlers
         for scan lifecycle events. Must be called before any scan operations
         to enable real-time event monitoring.
         """
         # Connect to the DMS WebSocket API
         await self._dms.initialize_websocket()
-        
+
         # Register handlers for scan completion and stop events
         self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
         self._dms.on_event("scan.stopped", self._handle_scan_stopped)
 
     async def _close_dms(self) -> None:
         """Clean up DMS WebSocket connection and unregister event handlers.
-        
+
         Gracefully closes the WebSocket connection and removes all registered
         event handlers. Should be called during orchestrator shutdown to
         prevent resource leaks.
         """
         # Disconnect from WebSocket
         await self._dms.disconnect_websocket()
-        
+
         # Unregister event handlers
         self._dms.off_event(
             "scan.resultsProcessed", self._handle_scan_results_processed
@@ -678,11 +676,11 @@ class OrchestratorService:
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         """Handle scan results processing completion event.
-        
+
         Called when the DMS finishes processing a scan result and stores it
         to device storage. This indicates the scan is fully complete and
         the result data is ready for retrieval.
-        
+
         Args:
         ----
             data: WebSocket message envelope containing event details
@@ -693,11 +691,11 @@ class OrchestratorService:
 
     async def _handle_scan_stopped(self, data: dict) -> None:
         """Handle scan stop event.
-        
+
         Called when an ongoing scan is stopped, either by user request
         or due to an error condition. The stop may occur before results
         are fully processed.
-        
+
         Args:
         ----
             data: WebSocket message envelope containing event details
@@ -708,15 +706,15 @@ class OrchestratorService:
 
     async def _handle_error(self, data: dict) -> None:
         """Handle DMS error event.
-        
+
         Called when the DMS encounters an error condition. This handler
         may not be actively used in the current project implementation,
         but is available for future error handling logic.
-        
+
         Note:
             A scan may be stopped without finishing. No result data will be
             saved in this case.
-        
+
         Args:
         ----
             data: WebSocket message envelope containing error details

@@ -27,10 +27,10 @@ class IVResult:
 
 class IVAdapter:
     """HTTP adapter for the IonVision API.
-    
+
     Provides methods to interact with the IonVision device via HTTP API,
     including scan management, results retrieval, and WebSocket event handling.
-    
+
     Args:
     ----
         base_url: Base URL of the IonVision HTTP API
@@ -38,7 +38,7 @@ class IVAdapter:
         timeout_s: HTTP request timeout in seconds (default: 5.0)
         client: Optional pre-configured httpx.Client instance (creates new one if not provided)
     """
-    
+
     def __init__(
         self,
         base_url: str,
@@ -53,16 +53,16 @@ class IVAdapter:
 
     def _request(self, method: str, endpoint: str, **kwargs) -> IVResult:
         """Make HTTP requests to the IonVision API.
-        
+
         Handles both custom client instances and automatic client creation.
         All exceptions are caught and returned as IVResult failures.
-        
+
         Args:
         ----
             method: HTTP method (GET, POST, PUT, DELETE, etc.)
             endpoint: API endpoint path (appended to base_url)
             **kwargs: Additional arguments passed to httpx.request()
-        
+
         Returns:
         -------
             IVResult: Success result with JSON payload, or failure result with error string
@@ -92,13 +92,13 @@ class IVAdapter:
     @staticmethod
     def _normalize_optional_string(value: Optional[str]) -> Optional[str]:
         """Normalize an optional string by stripping whitespace.
-        
+
         Converts empty strings to None after stripping.
-        
+
         Args:
         ----
             value: String to normalize, or None
-        
+
         Returns:
         -------
             Stripped string or None if empty
@@ -112,11 +112,11 @@ class IVAdapter:
     @staticmethod
     def _normalize_search_string(value: Optional[str]) -> Optional[str]:
         """Normalize a search string by stripping whitespace.
-        
+
         Args:
         ----
             value: Search string to normalize, or None
-        
+
         Returns:
         -------
             Stripped search string or None
@@ -133,16 +133,16 @@ class IVAdapter:
         minimum: Optional[int] = None,
     ) -> None:
         """Validate an optional integer parameter.
-        
+
         Ensures the value is a true integer (not bool), and optionally
         checks that it meets a minimum threshold.
-        
+
         Args:
         ----
             name: Parameter name (used in error messages)
             value: Integer to validate, or None
             minimum: Optional minimum allowed value (inclusive)
-        
+
         Raises:
         ------
             ValueError: If value is not an integer or below minimum threshold
@@ -157,12 +157,12 @@ class IVAdapter:
     @staticmethod
     def _validate_optional_bool(name: str, value: Optional[bool]) -> None:
         """Validate an optional boolean parameter.
-        
+
         Args:
         ----
             name: Parameter name (used in error messages)
             value: Boolean to validate, or None
-        
+
         Raises:
         ------
             ValueError: If value is not a boolean
@@ -185,10 +185,10 @@ class IVAdapter:
         ids: Optional[str],
     ) -> dict[str, Any]:
         """Build and validate query parameters for results endpoint.
-        
+
         Validates input parameters and normalizes strings.
         Filters out None values from the parameter dictionary.
-        
+
         Args:
         ----
             max_results: Maximum number of results to return (must be >= 0)
@@ -199,11 +199,11 @@ class IVAdapter:
             sort_by: Sort field name
             only_metadata: Return only metadata if True
             ids: Comma-separated result IDs
-        
+
         Returns:
         -------
             Dictionary of validated and normalized query parameters
-        
+
         Raises:
         ------
             ValueError: If any parameter fails validation
@@ -226,7 +226,7 @@ class IVAdapter:
 
     def ping(self) -> IVResult:
         """Lightweight reachability check against the IonVision API.
-        
+
         Returns:
         -------
             IVResult with current parameter information if successful
@@ -235,7 +235,7 @@ class IVAdapter:
 
     def get_current_scan(self) -> IVResult:
         """Check if a scan is ongoing and get information about it.
-        
+
         Returns:
         -------
             IVResult with current scan details if a scan is running, empty if none
@@ -244,9 +244,9 @@ class IVAdapter:
 
     def start_new_scan(self) -> IVResult:
         """Start a new scan using the current project and parameter preset.
-        
+
         A new scan can only be started if there is no scan currently ongoing.
-        
+
         Returns:
         -------
             IVResult with scan start confirmation
@@ -255,7 +255,7 @@ class IVAdapter:
 
     def stop_current_scan(self) -> IVResult:
         """Stop the currently ongoing scan.
-        
+
         Returns:
         -------
             IVResult with scan stop confirmation
@@ -264,10 +264,10 @@ class IVAdapter:
 
     def get_scan_comments(self) -> IVResult:
         """Get the comments object for the ongoing or next scan.
-        
+
         The comments object is automatically reset when a scan finishes,
         and the previous comments are saved to the scan result file.
-        
+
         Returns:
         -------
             IVResult with current comments object
@@ -276,11 +276,11 @@ class IVAdapter:
 
     def replace_scan_comments(self, comments: dict) -> IVResult:
         """Replace the comments object for the ongoing or next scan.
-        
+
         Args:
         ----
             comments: Dictionary containing the comment data
-        
+
         Returns:
         -------
             IVResult with update confirmation
@@ -299,7 +299,7 @@ class IVAdapter:
         ids: Optional[str] = None,
     ) -> IVResult:
         """Search scan results stored on the device.
-        
+
         Args:
         ----
             max_results: Maximum number of results to return
@@ -310,7 +310,7 @@ class IVAdapter:
             sort_by: Field to sort results by
             only_metadata: Return only metadata if True
             ids: Comma-separated result IDs to retrieve
-        
+
         Returns:
         -------
             IVResult with list of matching scan results
@@ -337,10 +337,10 @@ class IVAdapter:
 
     def get_latest_dataobject(self) -> IVResult:
         """Get the data object of the latest scan result once processing is complete.
-        
+
         Note: Processing may take time after a scan finishes. Check availability
         before calling this method to avoid null results.
-        
+
         Returns:
         -------
             IVResult with latest scan data object
@@ -349,7 +349,7 @@ class IVAdapter:
 
     def get_latest_gas_detection(self) -> IVResult:
         """Get built-in gas detection results for the latest scan result.
-        
+
         Returns:
         -------
             IVResult with gas detection data for latest scan
@@ -358,11 +358,11 @@ class IVAdapter:
 
     def get_gas_detection_result(self, id: str) -> IVResult:
         """Get built-in gas detection results for a specific scan result.
-        
+
         Args:
         ----
             id: Scan result ID
-        
+
         Returns:
         -------
             IVResult with gas detection data for specified scan
@@ -371,11 +371,11 @@ class IVAdapter:
 
     def get_scan_dataobject(self, id: str) -> IVResult:
         """Get the complete data object of a scan result.
-        
+
         Args:
         ----
             id: Scan result ID
-        
+
         Returns:
         -------
             IVResult with complete scan data object
@@ -384,11 +384,11 @@ class IVAdapter:
 
     def get_scan_result_commentobject(self, id: str) -> IVResult:
         """Get the comment object associated with a scan result.
-        
+
         Args:
         ----
             id: Scan result ID
-        
+
         Returns:
         -------
             IVResult with comment object for specified scan
@@ -399,12 +399,12 @@ class IVAdapter:
         self, id: str, comments: Dict[str, Any]
     ) -> IVResult:
         """Replace the comments object of a scan result.
-        
+
         Args:
         ----
             id: Scan result ID
             comments: Dictionary containing updated comment data
-        
+
         Returns:
         -------
             IVResult with update confirmation
@@ -413,7 +413,7 @@ class IVAdapter:
 
     def get_parameter_ID(self) -> IVResult:
         """Get the ID of the parameter preset used for new scans.
-        
+
         Returns:
         -------
             IVResult with current parameter preset ID
@@ -422,7 +422,7 @@ class IVAdapter:
 
     async def initialize_websocket(self) -> None:
         """Initialize WebSocket connection for event streaming.
-        
+
         Must be called after instantiation to open and enable event listening.
         """
         await self._ws.connect()
@@ -465,13 +465,13 @@ class WebSocketAdapter:
     ``body`` keys. Any documented message type can be registered here, such as
     ``controllers.status``, ``scan.progress``, or ``message.error``. Handlers
     receive the full parsed message object.
-    
+
     Supports both sync and async handler callbacks.
     """
 
     def __init__(self, base_url: str) -> None:
         """Initialize the WebSocket adapter.
-        
+
         Args:
         ----
             base_url: WebSocket endpoint URL
@@ -484,7 +484,7 @@ class WebSocketAdapter:
 
     async def connect(self) -> None:
         """Establish the WebSocket connection and start listening for events.
-        
+
         Raises:
         ------
             Exception: If connection fails
@@ -499,7 +499,7 @@ class WebSocketAdapter:
 
     async def disconnect(self) -> None:
         """Close the WebSocket connection and stop listening for events.
-        
+
         Cancels the listen loop task and closes the connection.
         """
         self._running = False
@@ -514,7 +514,7 @@ class WebSocketAdapter:
 
     async def _listen_loop(self) -> None:
         """Continuously listen for WebSocket messages and dispatch to registered handlers.
-        
+
         Parses incoming JSON messages and calls matching event handlers.
         Handles both sync and async handlers gracefully.
         """
@@ -545,10 +545,10 @@ class WebSocketAdapter:
 
     async def _dispatch_event(self, message: Dict[str, Any]) -> None:
         """Dispatch a parsed IonVision WebSocket message to matching handlers.
-        
+
         Calls all registered handlers for the message event type,
         supporting both sync and async callables.
-        
+
         Args:
         ----
             message: Parsed JSON message from WebSocket (contains 'type' key)
