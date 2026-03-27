@@ -4,4 +4,6 @@ orchestrator/.idea/*
 __pycache__
 .coverage
 /data/*
+.DS_Store
 *.egg-info/
+docs/IonVision/ionvision-integration-tests/.ionvision-hardware.json.example

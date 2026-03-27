@@ -10,7 +10,10 @@ The architecture is a single Python service with in-process adapters:
 - API layer: request/response handling (`app/api/routes.py`)
 - Service layer: orchestration logic (`app/services/orchestrator.py`)
 - Adapter layer: hardware/external integrations (`app/adapters/*`)
+- Persistence layer: SQLite database via `app/adapters/database.py` + `app/adapters/storage.py`
 - Schema/domain layer: data contracts (`app/schemas.py`, `app/domain/models.py`)
+
+The service can run directly or inside a Docker container (see [README](../README.md)).
 
 ## 2. What Uvicorn is used for
 
@@ -23,6 +26,8 @@ In this project, Uvicorn is responsible for:
 - Keeping long-lived streaming connections open for MJPEG endpoints:
     - `GET /streams/camera/feed`
     - `GET /streams/detection/feed`
+- Serving Server-Sent Events (SSE) for real-time job progress via `GET /jobs/{id}/events`
+- Handling robot control endpoints for calibration and manual positioning
 - Supporting development reload mode (`--reload`) so code changes restart the server automatically
 
 Typical local run command:
@@ -41,10 +46,16 @@ uvicorn app.main:app --reload
 
 Notes about current behavior:
 
-- Job tracking is in-memory (`_jobs`, `_job_order`) in `OrchestratorService`.
-- `StorageAdapter` persists result summaries as JSON under `data/results`.
+- All job state is persisted in a SQLite database (`data/nenabot.db`) via `Database` + `StorageAdapter`.
+- WAL journal mode enables concurrent reads (API thread) and writes (background job thread).
+- Captured images are stored as BLOBs in the `job_images` table.
 - `IVAdapter` (`app/adapters/ionVision/ionVision.py`) is an HTTP client to the external IonVision API.
 - `CameraVisionAdapter` handles image capture, contour detection, and live stream generation.
+- `RobotAdapter` (`app/adapters/robot.py`) wraps Dobot hardware control; supports both job automation and manual calibration moves.
+- Robot control endpoints:
+    - `POST /robot/move` — manual positioning for calibration
+    - `GET /robot/pose` — read current end-effector position and joint angles
+    - `POST /robot/stop` — halt active job and stop robot motion
 - Some API/internal fields still use legacy `dms` naming (for example `Health.dms`), while adapter naming is now IonVision/IV.
 
 ## 4. Folder structure (commented tree)
@@ -56,26 +67,34 @@ nenabot-main/
 |  |- dependencies.py                    # Dependency factory + singleton orchestrator provider
 |  |- schemas.py                         # Pydantic request/response models used by API
 |  |- api/
-|  |  |- routes.py                       # HTTP endpoints (health, jobs, profiles, paths, streams)
+|  |  |- routes.py                       # HTTP endpoints (health, jobs, profiles, paths, streams, robot control)
 |  |- services/
 |  |  |- orchestrator.py                 # Core use-case orchestration and in-memory job state
 |  |- adapters/
-|  |  |- camera_vision.py                # Camera capture, ArUco/contour detection, MJPEG streaming
+|    |- camera_vision.py                # Camera capture, ArUco/contour detection, MJPEG streaming
+|  |  |- database.py                     # Thin sqlite3 wrapper (WAL mode, foreign keys)
 |  |  |- ionVision/
 |  |  |  |- ionVision.py                 # IonVision HTTP adapter (IVAdapter)
 |  |  |- robot.py                        # Dobot robot control wrapper
-|  |  |- storage.py                      # File-based JSON persistence for results
+|  |  |- storage.py                      # SQLite-backed persistence (jobs, waypoints, measurements, images)
 |  |- domain/
-|  |  |- models.py                       # Internal dataclasses (Job, ResultSummary)
+|  |  |- models.py                       # Internal dataclasses (Job, Waypoint, Measurement)
 |- tests/
 |  |- test_api.py                        # API tests via FastAPI TestClient + dependency overrides
-|  |- test_orchestrator.py               # Service-level unit test
+|  |- test_orchestrator.py               # Service-level unit tests (DB-backed)
+|  |- test_database.py                   # Database + StorageAdapter unit tests
 |- docs/
+|  |- architecture-overview.md           # This file
+|  |- database.md                        # Database schema and persistence details
 |  |- streaming.md                       # Streaming architecture and usage guide
 |  |- stream-viewer.html                 # Manual HTML viewer for camera/detection feeds
+|  |- job-tester.html                    # Job creation / testing UI
+|  |- job-results.html                   # Job results browser with frontend-rendered measurement points
+|- Dockerfile                            # Docker image definition (python:3.10-slim)
+|- .dockerignore                         # Excludes __pycache__, .git, venv, etc.
 |- data/
+|  |- nenabot.db                         # SQLite database (auto-created)
 |  |- images/                            # Captured image output
-|  |- results/                           # Persisted result JSON files
 |- .github/workflows/                    # CI and notification workflows
 |- requirements.txt                      # Python dependencies (runtime + tooling)
 |- pyproject.toml                        # Ruff/Black configuration
@@ -103,15 +122,16 @@ graph TD
     Camera --> OpenCV[OpenCV + NumPy]
     Robot --> Dobot[DobotDllType]
     IV --> IVAPI[External IonVision HTTP API]
-    Storage --> Filesystem[data/results + data/images]
+    Storage --> SQLite[SQLite data/nenabot.db]
 
     Routes -->|stream endpoints| Camera
     Routes -->|POST /paths| Service
+    Routes -->|GET /jobs/id/image| Storage
 ```
 
 ## 6. Practical dependency notes
 
 - Dependency injection is constructor-based at the service layer and provided through FastAPI `Depends`.
-- `create_orchestrator()` composes concrete adapters once, and `get_orchestrator()` reuses that instance.
-- Tests override `get_orchestrator` to isolate state and storage.
+- `create_orchestrator(db_path=...)` composes concrete adapters once (including `Database` + `StorageAdapter`), and `get_orchestrator()` reuses that instance.
+- Tests override `get_orchestrator` to isolate state, using a per-test temporary SQLite database.
 - This keeps route logic thin and centralizes orchestration behavior in one service class.

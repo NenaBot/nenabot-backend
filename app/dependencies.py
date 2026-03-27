@@ -1,36 +1,80 @@
 from __future__ import annotations
 
-from typing import Optional
+import logging
+import os
+from urllib.parse import urlsplit, urlunsplit
 
 from app.adapters.camera_vision import CameraVisionAdapter
+from app.adapters.database import Database
 from app.adapters.ionVision import IVAdapter
 from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
 from app.services.orchestrator import OrchestratorService
 
+logger = logging.getLogger(__name__)
 
-def create_orchestrator(
-    storage_dir: str = "data",
-    dms_base_url: str = "http://localhost:8080",
-    dms_ws_base_url: str = "ws://localhost:8080"
-) -> OrchestratorService:
-    """Factory function to create an OrchestratorService with default dependencies."""
-    return OrchestratorService(
-        camera_vision=CameraVisionAdapter(),
-        robot=RobotAdapter(),
-        dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
-        storage=StorageAdapter(base_dir=storage_dir),
+
+def _first_env(*names: str) -> str | None:
+    """Return the first non-empty environment variable from the given names."""
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
+
+
+def _derive_ws_base_url(base_url: str) -> str:
+    """Derive a WebSocket base URL from the configured HTTP base URL."""
+    parsed = urlsplit(base_url)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunsplit(
+        (scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment)
     )
 
 
-_default_orchestrator: Optional[OrchestratorService] = None
+def create_orchestrator(
+    db_path: str = "data/nenabot.db",
+    dms_base_url: str | None = None,
+    dms_ws_base_url: str | None = None,
+) -> OrchestratorService:
+    """Create an OrchestratorService with default dependencies."""
+    dms_base_url = (
+        dms_base_url
+        or _first_env("IONVISION_BASE_URL", "NENABOT_DMS_BASE_URL")
+        or "http://localhost:8080"
+    ).rstrip("/")
+    dms_ws_base_url = (
+        dms_ws_base_url
+        or _first_env("IONVISION_WS_BASE_URL", "NENABOT_DMS_WS_BASE_URL")
+        or _derive_ws_base_url(dms_base_url)
+    ).rstrip("/")
+
+    db = Database(db_path=db_path)
+    db.init_db()
+
+    robot = RobotAdapter()
+    result = robot.connect_first_available()
+    if result.ok:
+        logger.info("Robot connected on startup")
+    else:
+        logger.warning("Robot not connected on startup: %s", result.error)
+
+    return OrchestratorService(
+        camera_vision=CameraVisionAdapter(),
+        robot=robot,
+        dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
+        storage=StorageAdapter(db=db),
+    )
+
+
+_default_orchestrator: OrchestratorService | None = None
 
 
 def get_orchestrator() -> OrchestratorService:
-    """
-    Dependency injection function for FastAPI.
-    Returns the global orchestrator instance, creating it if necessary.
-    Can be overridden in tests by using app.dependency_overrides.
+    """Return the global orchestrator instance (FastAPI dep).
+
+    Creates the instance on first call.
+    Can be overridden in tests via app.dependency_overrides.
     """
     global _default_orchestrator
     if _default_orchestrator is None:
