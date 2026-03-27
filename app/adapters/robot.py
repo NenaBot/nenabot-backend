@@ -1,15 +1,38 @@
 from __future__ import annotations
 
 import glob
+import os
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 
+def _get_dobot_dll_type():
+    """Load Dobot wrapper module directly from lib/dobot."""
+    from lib.dobot import DobotDllType
+
+    return DobotDllType
+
+
 @dataclass
 class RobotResult:
     ok: bool
+    error: Optional[str] = None
+
+
+@dataclass
+class PoseResult:
+    ok: bool
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    r: float = 0.0
+    j1: float = 0.0
+    j2: float = 0.0
+    j3: float = 0.0
+    j4: float = 0.0
     error: Optional[str] = None
 
 
@@ -36,6 +59,8 @@ class RobotAdapter:
     """
 
     HOME_POSITION = (250, 0, 0, 0)
+    COMMAND_TIMEOUT_S = 20.0
+    LEGACY_HOMING_ENV = "DOBOT_ENABLE_LEGACY_HOMING"
 
     def __init__(self, baud: int = 115200) -> None:
         self._baud = baud
@@ -94,16 +119,20 @@ class RobotAdapter:
     def connect(self, port: str) -> RobotResult:
         """Connect to a Dobot on a specific serial port."""
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
 
         self._api = DobotDllType.load()
         ret = DobotDllType.ConnectDobot(self._api, port, self._baud)[0]
         if ret == 0:
+            if hasattr(DobotDllType, "SetCmdTimeout"):
+                DobotDllType.SetCmdTimeout(self._api, int(self.COMMAND_TIMEOUT_S * 1000))
+            if hasattr(DobotDllType, "SetQueuedCmdClear"):
+                DobotDllType.SetQueuedCmdClear(self._api)
+            if hasattr(DobotDllType, "SetQueuedCmdStartExec"):
+                DobotDllType.SetQueuedCmdStartExec(self._api)
             self._connected_port = port
-            DobotDllType.SetQueuedCmdClear(self._api)
-            DobotDllType.SetQueuedCmdStartExec(self._api)
             print(f"Connected to Dobot on {port}")
             return RobotResult(True)
         return RobotResult(False, f"Failed to connect on {port}, error code: {ret}")
@@ -111,7 +140,7 @@ class RobotAdapter:
     def connect_first_available(self) -> RobotResult:
         """Auto-detect serial ports and connect to the first Dobot found."""
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
 
@@ -120,9 +149,13 @@ class RobotAdapter:
         for port in ports:
             ret = DobotDllType.ConnectDobot(self._api, port, self._baud)[0]
             if ret == 0:
+                if hasattr(DobotDllType, "SetCmdTimeout"):
+                    DobotDllType.SetCmdTimeout(self._api, int(self.COMMAND_TIMEOUT_S * 1000))
+                if hasattr(DobotDllType, "SetQueuedCmdClear"):
+                    DobotDllType.SetQueuedCmdClear(self._api)
+                if hasattr(DobotDllType, "SetQueuedCmdStartExec"):
+                    DobotDllType.SetQueuedCmdStartExec(self._api)
                 self._connected_port = port
-                DobotDllType.SetQueuedCmdClear(self._api)
-                DobotDllType.SetQueuedCmdStartExec(self._api)
                 print(f"Connected to Dobot on {port}")
                 return RobotResult(True)
 
@@ -135,19 +168,43 @@ class RobotAdapter:
 
     # ---- movement ----
 
+    def _run_with_timeout(self, fn, timeout_s: float) -> RobotResult:
+        done = threading.Event()
+        failure: list[Exception] = []
+
+        def _runner() -> None:
+            try:
+                fn()
+            except Exception as exc:
+                failure.append(exc)
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        if not done.wait(timeout=max(timeout_s, 0.1)):
+            return RobotResult(False, f"Command timed out after {timeout_s:.1f}s")
+        if failure:
+            return RobotResult(False, str(failure[0]))
+        return RobotResult(True)
+
     def move_to_coordinates(self, coords: Tuple[float, float, float, float], wait: bool = True) -> RobotResult:
         """Move robot to (x, y, z, r). If wait=True, blocks until the move finishes."""
         if self._api is None:
             return RobotResult(ok=False, error="No Dobot connection")
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
             x, y, z, r = coords
             print(f"Moving to: {coords}")
-            if wait:
-                DobotDllType.SetPTPCmdEx(self._api, 1, x, y, z, r, 1)
-            else:
-                DobotDllType.SetPTPCmd(self._api, 1, x, y, z, r, 1)
-            return RobotResult(ok=True)
+
+            def _do_move() -> None:
+                if hasattr(DobotDllType, "SetPTPCmdEx") and wait:
+                    DobotDllType.SetPTPCmdEx(self._api, 1, x, y, z, r, 1)
+                else:
+                    DobotDllType.SetPTPCmd(self._api, 1, x, y, z, r, 0 if wait else 1)
+
+            timeout_s = self.COMMAND_TIMEOUT_S if wait else 5.0
+            return self._run_with_timeout(_do_move, timeout_s)
         except Exception as e:
             return RobotResult(ok=False, error=str(e))
 
@@ -183,22 +240,42 @@ class RobotAdapter:
         if self._api is None:
             return None, RobotResult(ok=False, error="No Dobot connection")
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
 
             x, y, z, r, j1, j2, j3, j4 = DobotDllType.GetPose(self._api)
+            if all(abs(value) < 1e-6 for value in (x, y, z, r, j1, j2, j3, j4)):
+                return None, RobotResult(ok=False, error="GetPose returned all-zero values")
             return RobotPose(x=x, y=y, z=z, r=r, joint1=j1, joint2=j2, joint3=j3, joint4=j4), RobotResult(ok=True)
         except Exception as exc:
             return None, RobotResult(ok=False, error=str(exc))
 
-    def homing(self) -> RobotResult:
+    def homing(self, timeout_s: float = 30.0) -> RobotResult:
         """Run the Dobot's built-in homing routine (calibration and move to home position) (blocks until finished)."""
         if not self._api:
             return RobotResult(False, "Not connected")
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
-        DobotDllType.SetHOMECmdEx(self._api, 0, 1)
+
+        if hasattr(DobotDllType, "SetHOMECmdEx"):
+            # Preferred path on newer wrappers: safer and supports blocking behavior.
+            return self._run_with_timeout(
+                lambda: DobotDllType.SetHOMECmdEx(self._api, 0, 1),
+                timeout_s,
+            )
+
+        if hasattr(DobotDllType, "SetHOMECmd"):
+            enable_legacy_homing = os.getenv(self.LEGACY_HOMING_ENV, "0") == "1"
+            if enable_legacy_homing:
+                # Legacy SetHOMECmd has been observed to crash some Windows setups.
+                # Keep it available for environments where it is known to be stable.
+                DobotDllType.SetHOMECmd(self._api, 0, 0)
+                return RobotResult(True)
+
+            # Safe default: avoid hard process crashes and move to configured home position.
+            return self.home()
+
         return RobotResult(True)
 
     # Move to defined home position
@@ -207,18 +284,24 @@ class RobotAdapter:
         if not self._api:
             return RobotResult(False, "Not connected")
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
-        DobotDllType.SetPTPCmdEx(self._api, 1, *self.HOME_POSITION, 1)
-        return RobotResult(True)
+
+        def _do_home() -> None:
+            if hasattr(DobotDllType, "SetPTPCmdEx"):
+                DobotDllType.SetPTPCmdEx(self._api, 1, *self.HOME_POSITION, 1)
+            else:
+                DobotDllType.SetPTPCmd(self._api, 1, *self.HOME_POSITION, 0)
+
+        return self._run_with_timeout(_do_home, self.COMMAND_TIMEOUT_S)
 
     def pause(self) -> RobotResult:
         """Pause the command queue. Queued commands are preserved and can be resumed."""
         if not self._api:
             return RobotResult(False, "Not connected")
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
         DobotDllType.SetQueuedCmdStopExec(self._api)
@@ -229,7 +312,7 @@ class RobotAdapter:
         if not self._api:
             return RobotResult(False, "Not connected")
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
         DobotDllType.SetQueuedCmdStartExec(self._api)
@@ -240,7 +323,7 @@ class RobotAdapter:
         if not self._api:
             return RobotResult(False, "Not connected")
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
         DobotDllType.SetQueuedCmdStopExec(self._api)
@@ -253,9 +336,12 @@ class RobotAdapter:
         if not self._api:
             return RobotResult(False, "Not connected")
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
+
+        if not hasattr(DobotDllType, "GetQueuedCmdMotionFinish"):
+            return RobotResult(True)
 
         deadline = time.monotonic() + max(timeout_s, 0.0)
         while time.monotonic() <= deadline:
@@ -278,7 +364,7 @@ class RobotAdapter:
         if not self._api:
             return
         try:
-            from app.adapters import DobotDllType
+            DobotDllType = _get_dobot_dll_type()
             DobotDllType.DisconnectDobot(self._api)
             print("Disconnected Dobot")
         except Exception:
