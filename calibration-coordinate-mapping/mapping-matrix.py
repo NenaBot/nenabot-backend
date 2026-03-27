@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import json
 
-# 1. Load Intrinsic Data (from Step 3)
+# 1. Load Intrinsic Data 
 with open("camera_params.json", "r") as f:
     calib = json.load(f)
 mtx = np.array(calib["camera_matrix"])

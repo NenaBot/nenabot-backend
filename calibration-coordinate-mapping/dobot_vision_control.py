@@ -1,5 +1,4 @@
-# This code is used to test the accuracy of the camera calibration by allowing you to click on the video feed and see where the Dobot arm moves in response. It uses the same mapping from camera space to robot space that we previously calculated, so if the arm moves to the correct location when we click, it confirms that our calibration is accurate. We can adjust the X and Y offsets in the code to fine-tune the accuracy based on your specific setup and the thickness of any objects we are trying to interact with. The code also includes safety checks to prevent the arm from moving outside of its physical limits, and it forces a safe Z height to avoid crashing into the table.
-
+# This code is used to test the accuracy of the camera calibration by allowing you to click on the video feed and see where the Dobot arm moves in response. We can adjust the X and Y offsets in the code to fine-tune the accuracy based on your specific setup and the thickness of any objects we are trying to interact with. The code also includes safety checks to prevent the arm from moving outside of its physical limits, and it forces a safe Z height to avoid crashing into the table.
 
 
 import cv2

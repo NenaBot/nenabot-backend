@@ -5,7 +5,7 @@ import glob
 import json
 
 # 1. Setup Parameters
-CHESSBOARD_SIZE = (8, 6)  # Inner corners for your 9x7 grid
+CHESSBOARD_SIZE = (8, 6)  # Inner corners for 9x7 grid
 SQUARE_SIZE = 34        # Millimeters
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 IMAGE_DIR = os.path.join(SCRIPT_DIR, "calibration_images")
@@ -53,7 +53,7 @@ ret, mtx, dist, rvecs, tvecs, new_objpoints = cv2.calibrateCameraRO(
     flags=cv2.CALIB_FIX_K3 # K3 is often unnecessary for standard lenses
 )
 
-# 4. Save the Results to JSON (Requirement 8)
+# 4. Save the Results to JSON 
 calibration_data = {
     "reprojection_error": ret,
     "camera_matrix": mtx.tolist(),

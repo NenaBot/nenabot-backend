@@ -1,4 +1,5 @@
-# This code is designed to capture images of a chessboard pattern using a webcam for the purpose of camera calibration. It automatically detects the chessboard corners in the video feed and allows you to save images when the corners are successfully detected. The saved images will be used later for calibrating the camera to correct for lens distortion and to understand the camera's perspective (intrinsic-calibration.py). Make sure to print an A3-sized chessboard pattern with 9x7 squares (8x6 inner corners) and use it during the capture process for accurate calibration results.
+# This code is designed to capture images of a chessboard pattern using a webcam for the purpose of camera calibration. It automatically detects the chessboard corners in the video feed and allows you to save images when the corners are successfully detected. The saved images will be used later for calibrating the camera to correct for lens distortion and to understand the camera's perspective (intrinsic-calibration.py). 
+# Make sure to print an A3-sized chessboard pattern with 9x7 squares (8x6 inner corners) and use it during the capture process for accurate calibration results.
 
 import cv2
 import os
