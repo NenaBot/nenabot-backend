@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +11,8 @@ from typing import TYPE_CHECKING, AsyncGenerator
 
 if TYPE_CHECKING:
     import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -63,12 +68,12 @@ class DetectionResults:
 
 
 class CameraVisionAdapter:
-    """Merged camera + vision adapter.
+    """Camera + vision adapter with lens distortion correction.
 
-    Handles:
-    - Single-frame capture and save to disk
-    - ArUco marker-based detection with battery corner extraction
-    - MJPEG streaming (raw camera feed or detection-overlay feed)
+    Key design choices:
+    - Single shared VideoCapture (Linux only allows one open handle per device)
+    - Autofocus disabled, focus fixed at 35 for repeatable calibration
+    - Lens distortion corrected via precomputed remap tables
     """
 
     def __init__(
@@ -76,8 +81,9 @@ class CameraVisionAdapter:
         device_index: int = 0,
         output_dir: str = "data/images",
         marker_size_mm: float = 48.0,
-        frame_width: int = 1280,
-        frame_height: int = 720,
+        calibration_path: str = "CameraCalibration/camera-calibration.json",
+        frame_width: int = 1920,
+        frame_height: int = 1080,
     ) -> None:
         self._device_index = device_index
         self._output_dir = Path(output_dir)
@@ -85,47 +91,137 @@ class CameraVisionAdapter:
         self._frame_width = frame_width
         self._frame_height = frame_height
 
-        # Streaming state
-        self._camera_streaming = False
-        self._detection_streaming = False
+        # Single shared camera — never open more than one VideoCapture
+        self._cap = None
+        self._cap_lock = threading.Lock()
+        self._streaming = False
 
-    # ---- health check ----
+        # Calibration state (populated by _load_calibration)
+        self._camera_matrix = None
+        self._dist_coeffs = None
+        self._undistort_maps: tuple | None = None
+        self._load_calibration(calibration_path)
+
+    # ------------------------------------------------------------------ #
+    #  Calibration & undistortion                                         #
+    # ------------------------------------------------------------------ #
+
+    def _load_calibration(self, path: str) -> None:
+        """Load camera matrix and distortion coefficients from a JSON file."""
+        cal_path = Path(path)
+        if not cal_path.exists():
+            logger.warning("Calibration file not found: %s — running without undistortion", cal_path)
+            return
+        try:
+            import numpy as np
+
+            with open(cal_path) as f:
+                cal = json.load(f)
+            self._camera_matrix = np.array(cal["camera_matrix"], dtype=np.float64)
+            self._dist_coeffs = np.array(cal["dist_coeff"], dtype=np.float64)
+            res = cal.get("resolution")
+            if res:
+                self._frame_width, self._frame_height = int(res[0]), int(res[1])
+            logger.info("Loaded camera calibration from %s (%.4f reprojection error)",
+                        cal_path, cal.get("reprojection_error", -1))
+        except Exception as exc:
+            logger.warning("Failed to load calibration: %s", exc)
+
+    def _undistort(self, frame: np.ndarray) -> np.ndarray:
+        """Remove lens distortion using precomputed remap tables (fast)."""
+        if self._camera_matrix is None:
+            return frame
+        import cv2
+
+        # Build remap tables once, reuse on every frame
+        if self._undistort_maps is None:
+            h, w = frame.shape[:2]
+            new_mtx, _ = cv2.getOptimalNewCameraMatrix(
+                self._camera_matrix, self._dist_coeffs, (w, h), 0, (w, h),
+            )
+            map1, map2 = cv2.initUndistortRectifyMap(
+                self._camera_matrix, self._dist_coeffs, None, new_mtx,
+                (w, h), cv2.CV_16SC2,
+            )
+            self._undistort_maps = (map1, map2)
+
+        return cv2.remap(frame, self._undistort_maps[0], self._undistort_maps[1], cv2.INTER_LINEAR)
+
+    # ------------------------------------------------------------------ #
+    #  Shared camera management                                           #
+    # ------------------------------------------------------------------ #
+
+    def _open_camera(self) -> bool:
+        """Open the camera if not already open. Caller must hold _cap_lock."""
+        import cv2
+
+        if self._cap is not None and self._cap.isOpened():
+            return True
+
+        self._cap = cv2.VideoCapture(self._device_index)
+        if not self._cap.isOpened():
+            self._cap = None
+            return False
+
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
+        self._cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)  # disable autofocus
+        self._cap.set(cv2.CAP_PROP_FOCUS, 35)  # fixed focus matching calibration
+        return True
+
+    def _read_frame(self) -> tuple[bool, "np.ndarray | None"]:
+        """Read a single frame from the shared camera and undistort it."""
+        with self._cap_lock:
+            if not self._open_camera():
+                return False, None
+            ok, frame = self._cap.read()
+        if ok:
+            frame = self._undistort(frame)
+        return ok, frame
+
+    def release_camera(self) -> None:
+        """Release the camera device."""
+        with self._cap_lock:
+            if self._cap is not None:
+                self._cap.release()
+                self._cap = None
+            self._streaming = False
+
+    # ------------------------------------------------------------------ #
+    #  Health check                                                       #
+    # ------------------------------------------------------------------ #
 
     def ping(self) -> CaptureResult:
         """Lightweight check: can we open the camera device?"""
         try:
-            import cv2
+            import cv2  # noqa: F401
         except Exception as exc:  # pragma: no cover
             return CaptureResult(False, error=f"OpenCV not available: {exc}")
-
-        cap = cv2.VideoCapture(self._device_index)
-        if not cap.isOpened():
-            return CaptureResult(False, error="Unable to open camera")
-        cap.release()
+        with self._cap_lock:
+            if not self._open_camera():
+                return CaptureResult(False, error="Unable to open camera")
         return CaptureResult(True)
 
-    # ---- single-frame capture ----
+    # ------------------------------------------------------------------ #
+    #  Single-frame capture                                               #
+    # ------------------------------------------------------------------ #
 
     def capture(self) -> CaptureResult:
+        """Capture a single undistorted frame and save to disk."""
         try:
             import cv2
         except Exception as exc:  # pragma: no cover
             return CaptureResult(False, error=f"OpenCV not available: {exc}")
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
-        cap = cv2.VideoCapture(self._device_index)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
-        if not cap.isOpened():
-            return CaptureResult(False, error="Unable to open camera")
 
-        # Discard initial frames so the sensor can adjust exposure/white-balance
-        for _ in range(10):
-            cap.read()
+        # Warm-up: discard frames so sensor adjusts exposure/white-balance
+        if not self._streaming:
+            for _ in range(10):
+                self._read_frame()
 
-        ok, frame = cap.read()
-        cap.release()
-        if not ok:
+        ok, frame = self._read_frame()
+        if not ok or frame is None:
             return CaptureResult(False, error="Failed to read frame")
 
         filename = f"capture_{datetime.utcnow().isoformat().replace(':', '-')}.jpg"
@@ -133,7 +229,9 @@ class CameraVisionAdapter:
         cv2.imwrite(str(path), frame)
         return CaptureResult(True, image_path=str(path))
 
-    # ---- detection (battery corners) ----
+    # ------------------------------------------------------------------ #
+    #  Detection (battery corners via ArUco + contour)                    #
+    # ------------------------------------------------------------------ #
 
     def detect(self, image_path: str) -> DetectionResults:
         try:
@@ -236,7 +334,7 @@ class CameraVisionAdapter:
         )
 
     def detect_live(self, frame: np.ndarray) -> np.ndarray:
-        """Run detection on a cv2 frame, return annotated frame + result."""
+        """Run detection on a cv2 frame, return annotated frame."""
         import cv2
         import numpy as np
 
@@ -305,7 +403,14 @@ class CameraVisionAdapter:
 
         return annotated
 
-    # ---- MJPEG streaming generators ----
+    # ------------------------------------------------------------------ #
+    #  MJPEG streaming                                                    #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _mjpeg_frame(jpeg_bytes: bytes) -> bytes:
+        """Wrap JPEG bytes in an MJPEG boundary."""
+        return b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg_bytes + b"\r\n"
 
     def _error_frame(self, text: str) -> bytes:
         """Create a JPEG showing an error message (black background, red text)."""
@@ -313,7 +418,6 @@ class CameraVisionAdapter:
         import numpy as np
 
         frame = np.zeros((self._frame_height, self._frame_width, 3), dtype=np.uint8)
-        # Multi-line support
         lines = text.split("\n")
         y0 = self._frame_height // 2 - 20 * (len(lines) - 1) // 2
         for i, line in enumerate(lines):
@@ -330,102 +434,75 @@ class CameraVisionAdapter:
         return jpeg.tobytes()
 
     async def stream_camera(self) -> AsyncGenerator[bytes, None]:
-        """Yield raw MJPEG frames from the camera."""
+        """Yield raw undistorted MJPEG frames from the camera."""
         import cv2
 
-        if self._camera_streaming:
-            # Already streaming — send a single error frame and exit
-            error = self._error_frame("Camera stream already active")
-            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+        if self._streaming:
+            yield self._mjpeg_frame(self._error_frame("A stream is already active"))
             return
 
-        self._camera_streaming = True
-        cap = cv2.VideoCapture(self._device_index)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
-
-        if not cap.isOpened():
-            self._camera_streaming = False
-            error = self._error_frame(
-                "Camera not available\n(check device or opencv-python)",
-            )
-            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n")
-            cap.release()
-            return
+        self._streaming = True
+        with self._cap_lock:
+            if not self._open_camera():
+                self._streaming = False
+                yield self._mjpeg_frame(
+                    self._error_frame("Camera not available\n(check device or opencv-python)"),
+                )
+                return
 
         loop = asyncio.get_running_loop()
         try:
-            while self._camera_streaming:
-                ok, frame = await loop.run_in_executor(None, cap.read)
+            while self._streaming:
+                ok, frame = await loop.run_in_executor(None, self._read_frame)
                 if not ok:
                     await asyncio.sleep(0.05)
                     continue
                 _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
-                )
+                yield self._mjpeg_frame(jpeg.tobytes())
                 await asyncio.sleep(0.033)  # ~30 fps
         finally:
-            cap.release()
-            self._camera_streaming = False
+            self._streaming = False
 
     async def stream_detection(self) -> AsyncGenerator[bytes, None]:
-        """Yield MJPEG frames with detection overlay."""
+        """Yield undistorted MJPEG frames with detection overlay."""
         import cv2
 
-        if self._detection_streaming:
-            error = self._error_frame("Detection stream already active")
-            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+        if self._streaming:
+            yield self._mjpeg_frame(self._error_frame("A stream is already active"))
             return
 
-        self._detection_streaming = True
-        cap = cv2.VideoCapture(self._device_index)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
-
-        if not cap.isOpened():
-            self._detection_streaming = False
-            error = self._error_frame(
-                "Camera not available\n(check device or opencv-python)",
-            )
-            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n")
-            cap.release()
-            return
+        self._streaming = True
+        with self._cap_lock:
+            if not self._open_camera():
+                self._streaming = False
+                yield self._mjpeg_frame(
+                    self._error_frame("Camera not available\n(check device or opencv-python)"),
+                )
+                return
 
         loop = asyncio.get_running_loop()
         try:
-            while self._detection_streaming:
-                ok, frame = await loop.run_in_executor(None, cap.read)
+            while self._streaming:
+                ok, frame = await loop.run_in_executor(None, self._read_frame)
                 if not ok:
                     await asyncio.sleep(0.05)
                     continue
-                annotated = await loop.run_in_executor(
-                    None,
-                    self.detect_live,
-                    frame,
-                )
-                _, jpeg = cv2.imencode(
-                    ".jpg",
-                    annotated,
-                    [cv2.IMWRITE_JPEG_QUALITY, 70],
-                )
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
-                )
+                annotated = await loop.run_in_executor(None, self.detect_live, frame)
+                _, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                yield self._mjpeg_frame(jpeg.tobytes())
                 await asyncio.sleep(0.033)
         finally:
-            cap.release()
-            self._detection_streaming = False
+            self._streaming = False
 
     def stop_camera_stream(self) -> None:
-        self._camera_streaming = False
+        self._streaming = False
 
     def stop_detection_stream(self) -> None:
-        self._detection_streaming = False
+        self._streaming = False
 
-    # ---- overlay rendering ----
+    # ------------------------------------------------------------------ #
+    #  Overlay rendering                                                  #
+    # ------------------------------------------------------------------ #
 
     @staticmethod
     def render_overlay(
@@ -462,7 +539,6 @@ class CameraVisionAdapter:
             return jpeg_bytes  # can't decode → return original
 
         # --- detection bounding boxes (cyan) ---
-        # first detection/measurement center for connector line
         first_target: tuple | None = None
         for det in detections:
             corners = det.corners if hasattr(det, "corners") else []
@@ -496,13 +572,12 @@ class CameraVisionAdapter:
         # --- measurement points (green numbered circles) ---
         if measurements:
             for m in measurements:
-                # Use pixel coordinates if available, skip if missing
                 if m.pixel_x is not None and m.pixel_y is not None:
                     px = int(m.pixel_x)
                     py = int(m.pixel_y)
                 else:
-                    continue  # no pixel coords → can't place on image
-                color = (0, 220, 100)  # green
+                    continue
+                color = (0, 220, 100)
                 cv2.circle(frame, (px, py), 10, color, -1)
                 cv2.circle(frame, (px, py), 10, (255, 255, 255), 1)
                 idx_label = str(m.waypoint_index + 1)
@@ -517,7 +592,6 @@ class CameraVisionAdapter:
                 )
                 if first_target is None:
                     first_target = (px, py)
-                # scan summary label
                 if m.scan_result:
                     summary = _scan_summary(m.scan_result)
                     cv2.putText(
@@ -533,7 +607,6 @@ class CameraVisionAdapter:
         # --- starting point (orange diamond + "START" label) ---
         if starting_point:
             sx, sy = int(starting_point[0]), int(starting_point[1])
-            # Diamond shape (rotated square)
             size = 12
             diamond = np.array(
                 [
@@ -544,8 +617,8 @@ class CameraVisionAdapter:
                 ],
                 dtype=np.int32,
             )
-            cv2.fillPoly(frame, [diamond], (0, 140, 255))  # orange fill
-            cv2.polylines(frame, [diamond], True, (255, 255, 255), 2)  # white border
+            cv2.fillPoly(frame, [diamond], (0, 140, 255))
+            cv2.polylines(frame, [diamond], True, (255, 255, 255), 2)
             cv2.putText(
                 frame,
                 "START",
@@ -555,7 +628,6 @@ class CameraVisionAdapter:
                 (0, 140, 255),
                 2,
             )
-            # Dashed line from starting point → first target
             if first_target:
                 _draw_dashed_line(frame, (sx, sy), first_target, (255, 255, 255), 1, 10)
 
@@ -583,6 +655,7 @@ def _draw_dashed_line(
     gap: int = 10,
 ) -> None:
     """Draw a dashed line between two points on a cv2 image."""
+    import cv2
     import numpy as np
 
     x1, y1 = pt1
@@ -593,8 +666,6 @@ def _draw_dashed_line(
     dx = (x2 - x1) / dist
     dy = (y2 - y1) / dist
     num_segments = int(dist // gap)
-    import cv2
-
     for i in range(0, num_segments, 2):
         sx = int(x1 + dx * gap * i)
         sy = int(y1 + dy * gap * i)
