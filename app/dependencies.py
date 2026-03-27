@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from urllib.parse import urlsplit, urlunsplit
 
 from app.adapters.camera_vision import CameraVisionAdapter
 from app.adapters.database import Database
@@ -12,12 +14,41 @@ from app.services.orchestrator import OrchestratorService
 logger = logging.getLogger(__name__)
 
 
+def _first_env(*names: str) -> str | None:
+    """Return the first non-empty environment variable from the given names."""
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
+
+
+def _derive_ws_base_url(base_url: str) -> str:
+    """Derive a WebSocket base URL from the configured HTTP base URL."""
+    parsed = urlsplit(base_url)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunsplit(
+        (scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment)
+    )
+
+
 def create_orchestrator(
     db_path: str = "data/nenabot.db",
-    dms_base_url: str = "http://localhost:8080",
-    dms_ws_base_url: str = "ws://localhost:8080",
+    dms_base_url: str | None = None,
+    dms_ws_base_url: str | None = None,
 ) -> OrchestratorService:
     """Create an OrchestratorService with default dependencies."""
+    dms_base_url = (
+        dms_base_url
+        or _first_env("IONVISION_BASE_URL", "NENABOT_DMS_BASE_URL")
+        or "http://localhost:8080"
+    ).rstrip("/")
+    dms_ws_base_url = (
+        dms_ws_base_url
+        or _first_env("IONVISION_WS_BASE_URL", "NENABOT_DMS_WS_BASE_URL")
+        or _derive_ws_base_url(dms_base_url)
+    ).rstrip("/")
+
     db = Database(db_path=db_path)
     db.init_db()
 
