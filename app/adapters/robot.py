@@ -10,7 +10,15 @@ from typing import List, Optional, Tuple
 
 
 def _get_dobot_dll_type():
-    """Load Dobot wrapper module directly from lib/dobot."""
+    """Resolve Dobot wrapper, preferring test monkeypatches in app.adapters."""
+    try:
+        import app.adapters as adapters_module
+
+        if hasattr(adapters_module, "DobotDllType"):
+            return adapters_module.DobotDllType
+    except Exception:
+        pass
+
     from lib.dobot import DobotDllType
 
     return DobotDllType
