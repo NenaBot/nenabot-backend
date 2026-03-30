@@ -174,6 +174,12 @@ class RobotAdapter:
             )
         return RobotResult(False, "No Dobot device found")
 
+    def ping(self) -> RobotResult:
+        """Quick connectivity probe used by health checks."""
+        if self._api is None:
+            return RobotResult(False, "Not connected")
+        return RobotResult(True)
+
     # ---- movement ----
 
     def _run_with_timeout(self, fn, timeout_s: float) -> RobotResult:
