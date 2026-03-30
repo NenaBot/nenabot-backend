@@ -239,6 +239,10 @@ class RobotAdapter:
         except Exception as e:
             return RobotResult(ok=False, error=str(e))
 
+    def move(self, x: float, y: float, z: float, r: float, wait: bool = True) -> RobotResult:
+        """Compatibility wrapper used by orchestrator/tests."""
+        return self.move_to_coordinates((x, y, z, r), wait=wait)
+
     def execute_route(self, coordinates: List[Tuple[float, float, float, float]]) -> RobotResult:
         """
         Execute a sequence of moves and return home afterwards.
