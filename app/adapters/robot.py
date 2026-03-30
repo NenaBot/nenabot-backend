@@ -281,6 +281,45 @@ class RobotAdapter:
         except Exception as exc:
             return PoseResult(ok=False, error=str(exc))
 
+    def wait_for_position(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        r: float,
+        tolerance_mm: float = 1.0,
+        timeout_s: float = 30.0,
+        poll_interval_s: float = 0.05,
+    ) -> PoseResult:
+        """Wait until current Cartesian pose is within tolerance of target pose."""
+        if self._api is None:
+            return PoseResult(ok=False, error="No Dobot connection")
+
+        tolerance = max(tolerance_mm, 0.0)
+        deadline = time.monotonic() + max(timeout_s, 0.0)
+        last_error: str | None = None
+
+        while time.monotonic() <= deadline:
+            pose = self.get_pose()
+            if pose.ok:
+                if (
+                    abs(pose.x - x) <= tolerance
+                    and abs(pose.y - y) <= tolerance
+                    and abs(pose.z - z) <= tolerance
+                    and abs(pose.r - r) <= tolerance
+                ):
+                    return pose
+            else:
+                last_error = pose.error
+
+            if poll_interval_s > 0:
+                time.sleep(poll_interval_s)
+
+        timeout_error = "Timeout waiting for target pose"
+        if last_error:
+            timeout_error = f"{timeout_error}: {last_error}"
+        return PoseResult(ok=False, error=timeout_error)
+
     def homing(self, timeout_s: float = 30.0) -> RobotResult:
         """Run the Dobot's built-in homing routine (calibration and move to home position) (blocks until finished)."""
         if not self._api:
