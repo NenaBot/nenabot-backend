@@ -43,6 +43,23 @@ class PoseResult:
     j4: float = 0.0
     error: Optional[str] = None
 
+    def __iter__(self):
+        """Backward-compatible unpacking support: pose, result = get_pose()."""
+        pose = None
+        if self.ok:
+            pose = RobotPose(
+                x=self.x,
+                y=self.y,
+                z=self.z,
+                r=self.r,
+                joint1=self.j1,
+                joint2=self.j2,
+                joint3=self.j3,
+                joint4=self.j4,
+            )
+        yield pose
+        yield RobotResult(ok=self.ok, error=self.error)
+
 
 @dataclass
 class RobotPose:
@@ -246,22 +263,19 @@ class RobotAdapter:
         print(f"Returned to home position {self.HOME_POSITION}")
         return RobotResult(ok=True)
 
-    def get_pose(self) -> tuple[RobotPose | None, RobotResult]:
-        """Read the robot's current pose (x, y, z, r) and joint angles.
-
-        Returns (pose, result). If result.ok is False, pose is None.
-        """
+    def get_pose(self) -> PoseResult:
+        """Read the robot's current pose (x, y, z, r) and joint angles."""
         if self._api is None:
-            return None, RobotResult(ok=False, error="No Dobot connection")
+            return PoseResult(ok=False, error="No Dobot connection")
         try:
             DobotDllType = _get_dobot_dll_type()
 
             x, y, z, r, j1, j2, j3, j4 = DobotDllType.GetPose(self._api)
             if all(abs(value) < 1e-6 for value in (x, y, z, r, j1, j2, j3, j4)):
-                return None, RobotResult(ok=False, error="GetPose returned all-zero values")
-            return RobotPose(x=x, y=y, z=z, r=r, joint1=j1, joint2=j2, joint3=j3, joint4=j4), RobotResult(ok=True)
+                return PoseResult(ok=False, error="GetPose returned all-zero values")
+            return PoseResult(ok=True, x=x, y=y, z=z, r=r, j1=j1, j2=j2, j3=j3, j4=j4)
         except Exception as exc:
-            return None, RobotResult(ok=False, error=str(exc))
+            return PoseResult(ok=False, error=str(exc))
 
     def homing(self, timeout_s: float = 30.0) -> RobotResult:
         """Run the Dobot's built-in homing routine (calibration and move to home position) (blocks until finished)."""
