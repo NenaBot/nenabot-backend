@@ -96,8 +96,15 @@ CI runs only unit tests. Hardware/integration tests are excluded via `-m "not ha
 ### Robot arm hardware tests
 
 ```bash
-RUN_HARDWARE_TESTS=1 pytest -s -v tests/test_robot_hardware.py
+RUN_ROBOT_HARDWARE_TESTS=1 pytest -s -v tests/test_robot_hardware.py
 ```
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `RUN_ROBOT_HARDWARE_TESTS` | — | Set to `1` to enable the suite |
+| `DOBOT_ENABLE_LEGACY_HOMING` | `0` | Set to `1` to use legacy `SetHOMECmd` (only if `SetHOMECmdEx` is unavailable) |
+
+For full details see [`docs/robot.md`](docs/robot.md).
 
 ### IonVision hardware tests
 
