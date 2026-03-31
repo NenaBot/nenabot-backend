@@ -94,7 +94,8 @@ class CameraVisionAdapter:
         # Single shared camera — never open more than one VideoCapture
         self._cap = None
         self._cap_lock = threading.Lock()
-        self._streaming = False
+        self._camera_streaming = False
+        self._detection_streaming = False
 
         # Calibration state (populated by _load_calibration)
         self._camera_matrix = None
@@ -185,7 +186,8 @@ class CameraVisionAdapter:
             if self._cap is not None:
                 self._cap.release()
                 self._cap = None
-            self._streaming = False
+            self._camera_streaming = False
+            self._detection_streaming = False
 
     # ------------------------------------------------------------------ #
     #  Health check                                                       #
@@ -434,17 +436,17 @@ class CameraVisionAdapter:
         return jpeg.tobytes()
 
     async def stream_camera(self) -> AsyncGenerator[bytes, None]:
-        """Yield raw undistorted MJPEG frames from the camera."""
+        """Yield raw undistorted MJPEG frames from the shared camera."""
         import cv2
 
-        if self._streaming:
-            yield self._mjpeg_frame(self._error_frame("A stream is already active"))
+        if self._camera_streaming:
+            yield self._mjpeg_frame(self._error_frame("Camera stream already active"))
             return
 
-        self._streaming = True
+        self._camera_streaming = True
         with self._cap_lock:
             if not self._open_camera():
-                self._streaming = False
+                self._camera_streaming = False
                 yield self._mjpeg_frame(
                     self._error_frame("Camera not available\n(check device or opencv-python)"),
                 )
@@ -452,7 +454,7 @@ class CameraVisionAdapter:
 
         loop = asyncio.get_running_loop()
         try:
-            while self._streaming:
+            while self._camera_streaming:
                 ok, frame = await loop.run_in_executor(None, self._read_frame)
                 if not ok:
                     await asyncio.sleep(0.05)
@@ -461,20 +463,20 @@ class CameraVisionAdapter:
                 yield self._mjpeg_frame(jpeg.tobytes())
                 await asyncio.sleep(0.033)  # ~30 fps
         finally:
-            self._streaming = False
+            self._camera_streaming = False
 
     async def stream_detection(self) -> AsyncGenerator[bytes, None]:
-        """Yield undistorted MJPEG frames with detection overlay."""
+        """Yield undistorted MJPEG frames with detection overlay from the shared camera."""
         import cv2
 
-        if self._streaming:
-            yield self._mjpeg_frame(self._error_frame("A stream is already active"))
+        if self._detection_streaming:
+            yield self._mjpeg_frame(self._error_frame("Detection stream already active"))
             return
 
-        self._streaming = True
+        self._detection_streaming = True
         with self._cap_lock:
             if not self._open_camera():
-                self._streaming = False
+                self._detection_streaming = False
                 yield self._mjpeg_frame(
                     self._error_frame("Camera not available\n(check device or opencv-python)"),
                 )
@@ -482,7 +484,7 @@ class CameraVisionAdapter:
 
         loop = asyncio.get_running_loop()
         try:
-            while self._streaming:
+            while self._detection_streaming:
                 ok, frame = await loop.run_in_executor(None, self._read_frame)
                 if not ok:
                     await asyncio.sleep(0.05)
@@ -492,13 +494,13 @@ class CameraVisionAdapter:
                 yield self._mjpeg_frame(jpeg.tobytes())
                 await asyncio.sleep(0.033)
         finally:
-            self._streaming = False
+            self._detection_streaming = False
 
     def stop_camera_stream(self) -> None:
-        self._streaming = False
+        self._camera_streaming = False
 
     def stop_detection_stream(self) -> None:
-        self._streaming = False
+        self._detection_streaming = False
 
     # ------------------------------------------------------------------ #
     #  Overlay rendering                                                  #
