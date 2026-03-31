@@ -234,7 +234,7 @@ class CameraVisionAdapter:
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
         # Warm-up: discard frames so sensor adjusts exposure/white-balance
-        if not self._streaming:
+        if not self._camera_streaming:
             for _ in range(10):
                 self._read_frame()
 
