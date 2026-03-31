@@ -103,7 +103,7 @@ Route handler
 
 When a job is created with an attached camera frame (`image_base64` in the POST body), the clean snapshot is stored as a BLOB in `job_images`. No server-side annotations are drawn on the image — measurement points are rendered by the frontend using pixel coordinates from the measurement data.
 
-The image can be retrieved via `GET /jobs/{id}/image` (returns raw JPEG).
+The image can be retrieved via `GET /api/job/{id}/image` (returns raw JPEG).
 
 ## Backup and migration
 

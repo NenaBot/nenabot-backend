@@ -8,9 +8,9 @@ sequenceDiagram
     Note over FE,BE: Base URL: http://localhost:8000, API prefix: /api
 
     opt Optional live preview streams
-        FE->>BE: GET /api/streams/camera/feed
+        FE->>BE: GET /api/stream/camera/feed
         BE-->>FE: Camera stream
-        FE->>BE: GET /api/streams/detection/feed
+        FE->>BE: GET /api/stream/detection/feed
         BE-->>FE: Detection stream
     end
 

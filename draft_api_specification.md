@@ -195,4 +195,4 @@ The job object encapsulates the configuration, output data, and current processi
 Real-time job progress is delivered via Server-Sent Events on this endpoint.
 
 The event types, payload schemas, and full documentation are included in the
-OpenAPI specification and visible in the interactive Swagger UI at `/api/docs`.
+OpenAPI specification and visible in the interactive Swagger UI at `/docs`.
