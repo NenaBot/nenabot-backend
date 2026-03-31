@@ -3,7 +3,6 @@ from __future__ import annotations
 import glob
 import os
 import sys
-import threading
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -83,7 +82,6 @@ class RobotAdapter:
     explicitly to ``connect()`` before sending movement commands.
     """
 
-    HOME_POSITION = (250, 0, 0, 0)
     COMMAND_TIMEOUT_S = 20.0
     LEGACY_HOMING_ENV = "DOBOT_ENABLE_LEGACY_HOMING"
 
@@ -203,26 +201,6 @@ class RobotAdapter:
 
     # ---- movement ----
 
-    def _run_with_timeout(self, fn, timeout_s: float) -> RobotResult:
-        done = threading.Event()
-        failure: list[Exception] = []
-
-        def _runner() -> None:
-            try:
-                fn()
-            except Exception as exc:
-                failure.append(exc)
-            finally:
-                done.set()
-
-        thread = threading.Thread(target=_runner, daemon=True)
-        thread.start()
-        if not done.wait(timeout=max(timeout_s, 0.1)):
-            return RobotResult(False, f"Command timed out after {timeout_s:.1f}s")
-        if failure:
-            return RobotResult(False, str(failure[0]))
-        return RobotResult(True)
-
     def move_to_coordinates(
         self, coords: Tuple[float, float, float, float], wait: bool = True
     ) -> RobotResult:
@@ -233,15 +211,11 @@ class RobotAdapter:
             DobotDllType = _get_dobot_dll_type()
             x, y, z, r = coords
             print(f"Moving to: {coords}")
-
-            def _do_move() -> None:
-                if hasattr(DobotDllType, "SetPTPCmdEx") and wait:
-                    DobotDllType.SetPTPCmdEx(self._api, 1, x, y, z, r, 1)
-                else:
-                    DobotDllType.SetPTPCmd(self._api, 1, x, y, z, r, 0 if wait else 1)
-
-            timeout_s = self.COMMAND_TIMEOUT_S if wait else 5.0
-            return self._run_with_timeout(_do_move, timeout_s)
+            if hasattr(DobotDllType, "SetPTPCmdEx") and wait:
+                DobotDllType.SetPTPCmdEx(self._api, 1, x, y, z, r, 1)
+            else:
+                DobotDllType.SetPTPCmd(self._api, 1, x, y, z, r, 0 if wait else 1)
+            return RobotResult(ok=True)
         except Exception as e:
             return RobotResult(ok=False, error=str(e))
 
@@ -274,7 +248,7 @@ class RobotAdapter:
         if not home_result.ok:
             print(f"Error returning home: {home_result.error}")
             return home_result
-        print(f"Returned to home position {self.HOME_POSITION}")
+        print("Returned home")
         return RobotResult(ok=True)
 
     def get_pose(self) -> PoseResult:
@@ -330,8 +304,8 @@ class RobotAdapter:
             timeout_error = f"{timeout_error}: {last_error}"
         return PoseResult(ok=False, error=timeout_error)
 
-    def homing(self, timeout_s: float = 30.0) -> RobotResult:
-        """Run the Dobot's built-in homing routine (calibration and move to home position) (blocks until finished)."""
+    def home(self) -> RobotResult:
+        """Run the Dobot's built-in homing routine (blocks until finished)."""
         if not self._api:
             return RobotResult(False, "Not connected")
         try:
@@ -340,42 +314,21 @@ class RobotAdapter:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
 
         if hasattr(DobotDllType, "SetHOMECmdEx"):
-            # Preferred path on newer wrappers: safer and supports blocking behavior.
-            return self._run_with_timeout(
-                lambda: DobotDllType.SetHOMECmdEx(self._api, 0, 1),
-                timeout_s,
-            )
+            DobotDllType.SetHOMECmdEx(self._api, 0, 1)
+            return RobotResult(True)
 
         if hasattr(DobotDllType, "SetHOMECmd"):
-            enable_legacy_homing = os.getenv(self.LEGACY_HOMING_ENV, "0") == "1"
-            if enable_legacy_homing:
+            if os.getenv(self.LEGACY_HOMING_ENV, "0") == "1":
                 # Legacy SetHOMECmd has been observed to crash some Windows setups.
-                # Keep it available for environments where it is known to be stable.
+                # Only use when explicitly opted in via env var.
                 DobotDllType.SetHOMECmd(self._api, 0, 0)
-                return RobotResult(True)
-
-            # Safe default: avoid hard process crashes and move to configured home position.
-            return self.home()
+            return RobotResult(True)
 
         return RobotResult(True)
 
-    # Move to defined home position
-    def home(self) -> RobotResult:
-        """Move to HOME_POSITION using PTP (blocks until finished)."""
-        if not self._api:
-            return RobotResult(False, "Not connected")
-        try:
-            DobotDllType = _get_dobot_dll_type()
-        except Exception as exc:
-            return RobotResult(False, f"Dobot DLL not available: {exc}")
-
-        def _do_home() -> None:
-            if hasattr(DobotDllType, "SetPTPCmdEx"):
-                DobotDllType.SetPTPCmdEx(self._api, 1, *self.HOME_POSITION, 1)
-            else:
-                DobotDllType.SetPTPCmd(self._api, 1, *self.HOME_POSITION, 0)
-
-        return self._run_with_timeout(_do_home, self.COMMAND_TIMEOUT_S)
+    def homing(self) -> RobotResult:
+        """Alias for home(). Runs the Dobot's built-in homing routine."""
+        return self.home()
 
     def pause(self) -> RobotResult:
         """Pause the command queue. Queued commands are preserved and can be resumed."""
