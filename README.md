@@ -47,7 +47,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 
 - [Architecture Overview](docs/architecture-overview.md)
 - [Database Documentation](docs/database.md)
-- [IonVision Integration Tests](docs/ionvision-integration-tests/README.md)
+- [IonVision Integration Tests](docs/ionVision.md)
 
 ## Endpoints
 
@@ -91,8 +91,34 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 pytest -q
 ```
 
-For the manual real-device IonVision integration suite, see
-[`docs/IonVision/ionvision-integration-tests/README.md`](docs/IonVision/ionvision-integration-tests/README.md).
+CI runs only unit tests. Hardware/integration tests are excluded via `-m "not hardware and not integration"` and must be run manually when connected to the devices.
+
+### Robot arm hardware tests
+
+```bash
+RUN_HARDWARE_TESTS=1 pytest -s -v tests/test_robot_hardware.py
+```
+
+### IonVision hardware tests
+
+Defaults to `http://192.168.1.109/api` / `ws://192.168.1.109/socket`. Override with env vars:
+
+```bash
+IONVISION_RUN_HARDWARE_TESTS=1 pytest -s -v tests/test_ionvision_hardware.py
+```
+
+Key env vars (all optional — hardcoded defaults are used if not set):
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `IONVISION_BASE_URL` | `http://192.168.1.109/api` | IonVision HTTP base URL |
+| `IONVISION_WS_BASE_URL` | `ws://192.168.1.109/socket` | WebSocket URL (derived from base URL if omitted) |
+| `IONVISION_REQUEST_TIMEOUT_S` | `10.0` | Per-request timeout |
+| `IONVISION_ENABLE_MUTATION_TESTS` | `true` | Allow scan start/stop and comment writes |
+| `IONVISION_RUN_WS_TEST` | `true` | Enable WebSocket tests |
+| `IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S` | `120.0` | How long to wait for `scan.resultsProcessed` |
+
+For full details see [`docs/ionVision.md`](docs/ionVision.md).
 
 # GitHub Workflow & Contribution Guidelines
 
