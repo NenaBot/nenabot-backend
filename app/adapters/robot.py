@@ -313,7 +313,10 @@ class RobotAdapter:
             return RobotResult(True)
 
         if hasattr(DobotDllType, "SetHOMECmd"):
-            if sys.platform.startswith("win") and os.getenv(self.LEGACY_HOMING_ENV, "0") != "1":
+            if (
+                sys.platform.startswith("win")
+                and os.getenv(self.LEGACY_HOMING_ENV, "0") != "1"
+            ):
                 # SetHOMECmd has been observed to crash some Windows setups.
                 # Skip it on Windows unless explicitly opted in.
                 logger.warning(
@@ -358,7 +361,12 @@ class RobotAdapter:
                     if stable_since is None:
                         stable_since = time.monotonic()
                     elif time.monotonic() - stable_since >= stable_s:
-                        logger.info("Arm motion stopped at (%.1f, %.1f, %.1f)", pose.x, pose.y, pose.z)
+                        logger.info(
+                            "Arm motion stopped at (%.1f, %.1f, %.1f)",
+                            pose.x,
+                            pose.y,
+                            pose.z,
+                        )
                         return RobotResult(True)
 
             last_x, last_y, last_z = pose.x, pose.y, pose.z
