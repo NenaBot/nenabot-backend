@@ -111,7 +111,10 @@ class CameraVisionAdapter:
         """Load camera matrix and distortion coefficients from a JSON file."""
         cal_path = Path(path)
         if not cal_path.exists():
-            logger.warning("Calibration file not found: %s — running without undistortion", cal_path)
+            logger.warning(
+                "Calibration file not found: %s — running without undistortion",
+                cal_path,
+            )
             return
         try:
             import numpy as np
@@ -123,8 +126,11 @@ class CameraVisionAdapter:
             res = cal.get("resolution")
             if res:
                 self._frame_width, self._frame_height = int(res[0]), int(res[1])
-            logger.info("Loaded camera calibration from %s (%.4f reprojection error)",
-                        cal_path, cal.get("reprojection_error", -1))
+            logger.info(
+                "Loaded camera calibration from %s (%.4f reprojection error)",
+                cal_path,
+                cal.get("reprojection_error", -1),
+            )
         except Exception as exc:
             logger.warning("Failed to load calibration: %s", exc)
 
@@ -138,15 +144,25 @@ class CameraVisionAdapter:
         if self._undistort_maps is None:
             h, w = frame.shape[:2]
             new_mtx, _ = cv2.getOptimalNewCameraMatrix(
-                self._camera_matrix, self._dist_coeffs, (w, h), 0, (w, h),
+                self._camera_matrix,
+                self._dist_coeffs,
+                (w, h),
+                0,
+                (w, h),
             )
             map1, map2 = cv2.initUndistortRectifyMap(
-                self._camera_matrix, self._dist_coeffs, None, new_mtx,
-                (w, h), cv2.CV_16SC2,
+                self._camera_matrix,
+                self._dist_coeffs,
+                None,
+                new_mtx,
+                (w, h),
+                cv2.CV_16SC2,
             )
             self._undistort_maps = (map1, map2)
 
-        return cv2.remap(frame, self._undistort_maps[0], self._undistort_maps[1], cv2.INTER_LINEAR)
+        return cv2.remap(
+            frame, self._undistort_maps[0], self._undistort_maps[1], cv2.INTER_LINEAR
+        )
 
     # ------------------------------------------------------------------ #
     #  Shared camera management                                           #
@@ -448,7 +464,9 @@ class CameraVisionAdapter:
             if not self._open_camera():
                 self._camera_streaming = False
                 yield self._mjpeg_frame(
-                    self._error_frame("Camera not available\n(check device or opencv-python)"),
+                    self._error_frame(
+                        "Camera not available\n(check device or opencv-python)"
+                    ),
                 )
                 return
 
@@ -470,7 +488,9 @@ class CameraVisionAdapter:
         import cv2
 
         if self._detection_streaming:
-            yield self._mjpeg_frame(self._error_frame("Detection stream already active"))
+            yield self._mjpeg_frame(
+                self._error_frame("Detection stream already active")
+            )
             return
 
         self._detection_streaming = True
@@ -478,7 +498,9 @@ class CameraVisionAdapter:
             if not self._open_camera():
                 self._detection_streaming = False
                 yield self._mjpeg_frame(
-                    self._error_frame("Camera not available\n(check device or opencv-python)"),
+                    self._error_frame(
+                        "Camera not available\n(check device or opencv-python)"
+                    ),
                 )
                 return
 
@@ -490,7 +512,9 @@ class CameraVisionAdapter:
                     await asyncio.sleep(0.05)
                     continue
                 annotated = await loop.run_in_executor(None, self.detect_live, frame)
-                _, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                _, jpeg = cv2.imencode(
+                    ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70]
+                )
                 yield self._mjpeg_frame(jpeg.tobytes())
                 await asyncio.sleep(0.033)
         finally:
