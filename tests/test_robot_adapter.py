@@ -55,7 +55,7 @@ class FakeDobotDllType:
 
 def _install_fake_dobot(monkeypatch: pytest.MonkeyPatch) -> FakeDobotDllType:
     fake = FakeDobotDllType()
-    monkeypatch.setattr("app.adapters.DobotDllType", fake, raising=False)
+    monkeypatch.setattr("app.adapters.robot._get_dobot_dll_type", lambda: fake)
     return fake
 
 
