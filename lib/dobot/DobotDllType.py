@@ -594,16 +594,40 @@ def load():
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     if platform.system() == "Windows":
-        print("您用的dll是64位，为了顺利运行，请保证您的python环境也是64位")
-        print("python环境是：", platform.architecture())
         dll_path = os.path.join(base_dir, "DobotDll.dll")
+        if not os.path.exists(dll_path):
+            raise FileNotFoundError("DobotDll.dll not found in lib/dobot/.")
         return CDLL(dll_path, RTLD_GLOBAL)
     elif platform.system() == "Darwin":
         dylib_path = os.path.join(base_dir, "libDobotDll.dylib")
+        brew_framework_path = "/opt/homebrew/opt/qt@5/lib"
+        framework_candidates = [base_dir]
+        if platform.machine() == "arm64" and os.path.isdir(brew_framework_path):
+            framework_candidates.insert(0, brew_framework_path)
+        existing_framework_path = os.environ.get("DYLD_FRAMEWORK_PATH", "")
+        existing_framework_entries = [p for p in existing_framework_path.split(":") if p]
+        new_entries = [p for p in framework_candidates if p not in existing_framework_entries]
+        os.environ["DYLD_FRAMEWORK_PATH"] = ":".join(new_entries + existing_framework_entries)
+        existing_library_path = os.environ.get("DYLD_LIBRARY_PATH", "")
+        if base_dir not in existing_library_path.split(":"):
+            os.environ["DYLD_LIBRARY_PATH"] = ":".join(
+                [p for p in [base_dir, existing_library_path] if p]
+            )
+        if not os.path.exists(dylib_path):
+            raise FileNotFoundError("libDobotDll.dylib not found in lib/dobot/.")
         return CDLL(dylib_path, RTLD_GLOBAL)
     elif platform.system() == "Linux":
-        so_path = os.path.join(base_dir, "libDobotDll.so")
-        return cdll.loadLibrary(so_path)
+        arch_map = {"x86_64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}
+        arch = arch_map.get(platform.machine(), platform.machine())
+        so_path = os.path.join(base_dir, f"libDobotDll_{arch}.so")
+        if not os.path.exists(so_path):
+            so_path = os.path.join(base_dir, "libDobotDll.so")
+        if not os.path.exists(so_path):
+            raise FileNotFoundError(
+                f"libDobotDll_{arch}.so (or libDobotDll.so) not found in lib/dobot/."
+            )
+        return CDLL(so_path, RTLD_GLOBAL)
+    raise RuntimeError(f"Unsupported platform: {platform.system()}")
 
 
 def dSleep(ms):
