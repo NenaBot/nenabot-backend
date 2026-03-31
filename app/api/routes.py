@@ -164,6 +164,24 @@ def robot_move(
     return RobotMoveResponse(ok=result.ok, error=result.error)
 
 
+@router.post("/robot/hone")
+def robot_hone(
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> RobotMoveResponse:
+    """Run the Dobot's built-in homing routine."""
+    result = svc.homing_robot()
+    return RobotMoveResponse(ok=result.ok, error=result.error)
+
+
+@router.post("/robot/home")
+def robot_home(
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> RobotMoveResponse:
+    """Send the robot to its home position."""
+    result = svc.home_robot()
+    return RobotMoveResponse(ok=result.ok, error=result.error)
+
+
 @router.get("/robot/pose", response_model=RobotPoseResponse)
 def robot_pose(
     svc: OrchestratorService = Depends(get_orchestrator),

@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import sys
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+logger = logging.getLogger(__name__)
+
 
 def _get_dobot_dll_type():
-    from lib.dobot import DobotDllType
+    from lib.dobot import Multi
 
-    return DobotDllType
+    return Multi
 
 
 @dataclass
@@ -74,6 +77,7 @@ class RobotAdapter:
     """
 
     COMMAND_TIMEOUT_S = 20.0
+    HOMING_TIMEOUT_S = 60.0
     LEGACY_HOMING_ENV = "DOBOT_ENABLE_LEGACY_HOMING"
 
     def __init__(self, baud: int = 115200) -> None:
@@ -309,13 +313,57 @@ class RobotAdapter:
             return RobotResult(True)
 
         if hasattr(DobotDllType, "SetHOMECmd"):
-            if os.getenv(self.LEGACY_HOMING_ENV, "0") == "1":
-                # Legacy SetHOMECmd has been observed to crash some Windows setups.
-                # Only use when explicitly opted in via env var.
-                DobotDllType.SetHOMECmd(self._api, 0, 0)
-            return RobotResult(True)
+            if sys.platform.startswith("win") and os.getenv(self.LEGACY_HOMING_ENV, "0") != "1":
+                # SetHOMECmd has been observed to crash some Windows setups.
+                # Skip it on Windows unless explicitly opted in.
+                logger.warning(
+                    "Skipping SetHOMECmd on Windows — set DOBOT_ENABLE_LEGACY_HOMING=1 to enable."
+                )
+                return RobotResult(True)
+            DobotDllType.SetHOMECmd(self._api, 0, 0)  # isQueued=0, fires immediately
+            logger.info("Homing command sent, waiting for arm to finish...")
+            return self._wait_for_motion_stop(timeout_s=self.HOMING_TIMEOUT_S)
 
         return RobotResult(True)
+
+    def _wait_for_motion_stop(
+        self,
+        timeout_s: float = 60.0,
+        stable_s: float = 1.5,
+        poll_interval_s: float = 0.3,
+        tolerance_mm: float = 0.5,
+    ) -> RobotResult:
+        """Poll GetPose until the arm position stops changing for stable_s seconds."""
+        deadline = time.monotonic() + timeout_s
+        last_x = last_y = last_z = None
+        stable_since: float | None = None
+
+        while time.monotonic() <= deadline:
+            time.sleep(poll_interval_s)
+            pose = self.get_pose()
+            if not pose.ok:
+                stable_since = None
+                last_x = last_y = last_z = None
+                continue
+
+            if last_x is not None:
+                moved = (
+                    abs(pose.x - last_x) > tolerance_mm
+                    or abs(pose.y - last_y) > tolerance_mm
+                    or abs(pose.z - last_z) > tolerance_mm
+                )
+                if moved:
+                    stable_since = None
+                else:
+                    if stable_since is None:
+                        stable_since = time.monotonic()
+                    elif time.monotonic() - stable_since >= stable_s:
+                        logger.info("Arm motion stopped at (%.1f, %.1f, %.1f)", pose.x, pose.y, pose.z)
+                        return RobotResult(True)
+
+            last_x, last_y, last_z = pose.x, pose.y, pose.z
+
+        return RobotResult(False, "Timeout waiting for arm motion to stop")
 
     def homing(self) -> RobotResult:
         """Alias for home(). Runs the Dobot's built-in homing routine."""

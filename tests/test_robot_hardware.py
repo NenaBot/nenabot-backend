@@ -8,7 +8,7 @@ import pytest
 from app.adapters.robot import RobotAdapter
 
 
-RUN_HARDWARE_TESTS = os.getenv("RUN_HARDWARE_TESTS", "0") == "1"
+RUN_HARDWARE_TESTS = os.getenv("RUN_ROBOT_HARDWARE_TESTS", "0") == "1"
 
 
 def _rect_route() -> list[tuple[float, float, float, float]]:
@@ -23,7 +23,7 @@ def _rect_route() -> list[tuple[float, float, float, float]]:
 @pytest.fixture
 def connected_robot() -> Iterator[RobotAdapter]:
     if not RUN_HARDWARE_TESTS:
-        pytest.skip("Set RUN_HARDWARE_TESTS=1 to run live Dobot tests")
+        pytest.skip("Set RUN_ROBOT_HARDWARE_TESTS=1 to run live Dobot tests")
 
     adapter = RobotAdapter()
     connect_result = adapter.connect_first_available()
