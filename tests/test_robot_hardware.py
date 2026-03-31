@@ -45,7 +45,9 @@ def ensure_homing(adapter: RobotAdapter) -> None:
     assert homing_result.ok, f"Homing failed: {homing_result.error}"
 
 
-def queue_route(adapter: RobotAdapter, coordinates: list[tuple[float, float, float, float]]) -> None:
+def queue_route(
+    adapter: RobotAdapter, coordinates: list[tuple[float, float, float, float]]
+) -> None:
     for coord in coordinates:
         result = adapter.move_to_coordinates(coord, wait=False)
         assert result.ok, f"Failed to queue {coord}: {result.error}"

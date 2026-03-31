@@ -143,7 +143,12 @@ def test_get_pose_maps_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.ok is True
     assert pose is not None
     assert (pose.x, pose.y, pose.z, pose.r) == (1.0, 2.0, 3.0, 4.0)
-    assert (pose.joint1, pose.joint2, pose.joint3, pose.joint4) == (10.0, 20.0, 30.0, 40.0)
+    assert (pose.joint1, pose.joint2, pose.joint3, pose.joint4) == (
+        10.0,
+        20.0,
+        30.0,
+        40.0,
+    )
 
 
 def test_pause_resume_stop_call_expected_dll(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -152,7 +152,9 @@ class RobotAdapter:
         ret = DobotDllType.ConnectDobot(self._api, port, self._baud)[0]
         if ret == 0:
             if hasattr(DobotDllType, "SetCmdTimeout"):
-                DobotDllType.SetCmdTimeout(self._api, int(self.COMMAND_TIMEOUT_S * 1000))
+                DobotDllType.SetCmdTimeout(
+                    self._api, int(self.COMMAND_TIMEOUT_S * 1000)
+                )
             if hasattr(DobotDllType, "SetQueuedCmdClear"):
                 DobotDllType.SetQueuedCmdClear(self._api)
             if hasattr(DobotDllType, "SetQueuedCmdStartExec"):
@@ -175,7 +177,9 @@ class RobotAdapter:
             ret = DobotDllType.ConnectDobot(self._api, port, self._baud)[0]
             if ret == 0:
                 if hasattr(DobotDllType, "SetCmdTimeout"):
-                    DobotDllType.SetCmdTimeout(self._api, int(self.COMMAND_TIMEOUT_S * 1000))
+                    DobotDllType.SetCmdTimeout(
+                        self._api, int(self.COMMAND_TIMEOUT_S * 1000)
+                    )
                 if hasattr(DobotDllType, "SetQueuedCmdClear"):
                     DobotDllType.SetQueuedCmdClear(self._api)
                 if hasattr(DobotDllType, "SetQueuedCmdStartExec"):
@@ -219,7 +223,9 @@ class RobotAdapter:
             return RobotResult(False, str(failure[0]))
         return RobotResult(True)
 
-    def move_to_coordinates(self, coords: Tuple[float, float, float, float], wait: bool = True) -> RobotResult:
+    def move_to_coordinates(
+        self, coords: Tuple[float, float, float, float], wait: bool = True
+    ) -> RobotResult:
         """Move robot to (x, y, z, r). If wait=True, blocks until the move finishes."""
         if self._api is None:
             return RobotResult(ok=False, error="No Dobot connection")
@@ -239,11 +245,15 @@ class RobotAdapter:
         except Exception as e:
             return RobotResult(ok=False, error=str(e))
 
-    def move(self, x: float, y: float, z: float, r: float, wait: bool = True) -> RobotResult:
+    def move(
+        self, x: float, y: float, z: float, r: float, wait: bool = True
+    ) -> RobotResult:
         """Compatibility wrapper used by orchestrator/tests."""
         return self.move_to_coordinates((x, y, z, r), wait=wait)
 
-    def execute_route(self, coordinates: List[Tuple[float, float, float, float]]) -> RobotResult:
+    def execute_route(
+        self, coordinates: List[Tuple[float, float, float, float]]
+    ) -> RobotResult:
         """
         Execute a sequence of moves and return home afterwards.
 
@@ -402,7 +412,9 @@ class RobotAdapter:
         DobotDllType.SetQueuedCmdStartExec(self._api)
         return RobotResult(True)
 
-    def wait_until_queue_empty(self, timeout_s: float = 10.0, poll_interval_s: float = 0.05) -> RobotResult:
+    def wait_until_queue_empty(
+        self, timeout_s: float = 10.0, poll_interval_s: float = 0.05
+    ) -> RobotResult:
         """Block until the queued command execution finishes or timeout is reached."""
         if not self._api:
             return RobotResult(False, "Not connected")
@@ -418,7 +430,11 @@ class RobotAdapter:
         while time.monotonic() <= deadline:
             try:
                 finished_raw = DobotDllType.GetQueuedCmdMotionFinish(self._api)
-                finished = bool(finished_raw[0]) if isinstance(finished_raw, (tuple, list)) else bool(finished_raw)
+                finished = (
+                    bool(finished_raw[0])
+                    if isinstance(finished_raw, (tuple, list))
+                    else bool(finished_raw)
+                )
                 if finished:
                     return RobotResult(True)
             except Exception as exc:
