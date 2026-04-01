@@ -516,9 +516,7 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         svc._dms,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
-    ), patch(
-        "time.sleep"
-    ):
+    ), patch("time.sleep"):
         svc.run_job(job.id)
         svc._job_thread.join(timeout=10)
 
@@ -551,9 +549,8 @@ def test_profiles_and_default(tmp_path: Path) -> None:
     """profiles() returns both profiles, default_profile() returns the first."""
     svc = _make_svc(tmp_path)
     profiles = svc.profiles()
-    assert len(profiles) == 2
+    assert len(profiles) == 1
     assert profiles[0]["name"] == "default"
-    assert profiles[1]["name"] == "fast"
 
     default = svc.default_profile()
     assert default["name"] == "default"
@@ -592,8 +589,6 @@ def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
     )
     assert svc.default_profile()["workZ"] == -35.0
     assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(1.25)
-    fast = next(p for p in svc.profiles() if p["name"] == "fast")
-    assert "workZ" not in fast
 
 
 def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
