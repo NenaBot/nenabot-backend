@@ -226,13 +226,13 @@ def test_is_calibrated_property(tmp_path: Path) -> None:
     assert svc.is_calibrated is True
 
 
-# ---- ORC-TC-013: sort_pixel_path_from_canvas_start path ordering ----
+# ---- ORC-TC-013: sort_pixel_path_from_canvas_start orders_by_start_distance ----
 
 
-def test_sort_pixel_path_from_canvas_start_orders_nearest_neighbor(
+def test_sort_pixel_path_from_canvas_start_orders_by_start_distance(
     tmp_path: Path,
 ) -> None:
-    """sort_pixel_path_from_canvas_start should anchor at canvas start and return sorted waypoints only."""
+    """sort_pixel_path_from_canvas_start should order waypoints by distance from the canvas start and return sorted waypoints only."""
     svc = _make_svc(tmp_path)
     svc._cal_canvas_start = (640.0, 400.0)
 

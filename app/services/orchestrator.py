@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
+MAX_MEASURING_POINTS_PER_CM = 10.0
+MAX_POPULATED_PATH_POINTS = 20000
+
 
 class OrchestratorService:
     def __init__(
@@ -672,6 +675,10 @@ class OrchestratorService:
             )
         if measuring_points_per_cm <= 0:
             raise ValueError("measuring_points_per_cm must be > 0")
+        if measuring_points_per_cm > MAX_MEASURING_POINTS_PER_CM:
+            raise ValueError(
+                f"measuring_points_per_cm must be <= {MAX_MEASURING_POINTS_PER_CM}"
+            )
 
         canvas_start = self._cal_canvas_start
         step_px = (10.0 / measuring_points_per_cm) * self._cal_pixels_per_mm
@@ -705,6 +712,10 @@ class OrchestratorService:
                     continue
 
                 sample_count = max(1, int(math.ceil(edge_len / step_px)))
+                if len(path) + sample_count > MAX_POPULATED_PATH_POINTS:
+                    raise ValueError(
+                        "Requested path is too dense; reduce measuringPointsPerCm or battery count"
+                    )
                 for measurement_idx in range(sample_count):
                     t = measurement_idx / sample_count
                     px = x1 + (x2 - x1) * t
