@@ -45,8 +45,7 @@ class OrchestratorService:
                 "description": "Default inspection profile",
                 "workZ": default_work_z,
                 "measuringPointsPerCm": default_measuring_points_per_cm,
-            },
-            {"name": "fast", "description": "Faster run, lower accuracy"},
+            }
         ]
         self._running_job_id: str | None = None
         self._stop_requested = False
