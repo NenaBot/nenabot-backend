@@ -22,7 +22,7 @@ sequenceDiagram
 
     U->>FE: Click Start Job
     FE->>BE: POST /api/job { path, workZ, workR, dryRun, imageBase64 }
-    Note over BE: fetch current possition of robot arm and path.length > 0 and check if the arm can go here (check arm)
+    Note over BE: fetch current position of robot arm and path.length > 0 and check if the arm can go here (check arm)
 
 
     FE->>BE: GET /api/job/{job_id}/events (SSE)
