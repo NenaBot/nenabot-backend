@@ -28,11 +28,13 @@ class OrchestratorService:
         robot: RobotAdapter,
         dms: IVAdapter,
         storage: StorageAdapter,
+        max_jobs: int = 0,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
         self._dms = dms
         self._storage = storage
+        self._max_jobs = max_jobs  # 0 = unlimited
         self._started_at = time.monotonic()
         self._profiles = [
             {"name": "default", "description": "Default inspection profile"},
@@ -418,6 +420,7 @@ class OrchestratorService:
             self._storage.update_job_state(
                 job.id, job.state, job.last_point_processed, job.error
             )
+            self._prune_old_data()
 
             self._publish_event(
                 job.id,
@@ -431,6 +434,71 @@ class OrchestratorService:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             )
+
+    # ---- Data retention ----
+
+    def _prune_image_files(self) -> None:
+        """Delete the oldest ``capture_*.jpg`` files beyond *max_jobs*.
+
+        Captured JPEG files accumulate every time ``detect_path()`` is called
+        (i.e. on every ``POST /paths`` calibration request), regardless of
+        whether a job is running.  This helper is therefore called both after
+        each capture *and* at the end of every job so that the output
+        directory never grows without bound.
+
+        The ``max_jobs`` newest files (sorted by modification time) are kept;
+        everything older is removed.  A failed ``unlink`` is logged as a
+        warning and does not raise so that a transient OS error never causes
+        a calibration or job failure.
+
+        When ``max_jobs`` is 0 (unlimited) this is a no-op.
+        """
+        if self._max_jobs <= 0:
+            return
+        image_dir: Path = self._camera_vision._output_dir
+        if not image_dir.is_dir():
+            return
+        files = sorted(
+            image_dir.glob("capture_*.jpg"),
+            key=lambda f: f.stat().st_mtime,
+        )
+        excess = len(files) - self._max_jobs
+        for f in files[:excess]:
+            try:
+                f.unlink()
+                logger.debug("Retention policy: deleted image file %s", f)
+            except OSError as exc:
+                logger.warning("Retention policy: could not delete %s — %s", f, exc)
+
+    def _prune_old_data(self) -> None:
+        """Remove excess jobs (DB) and captured image files (disk).
+
+        Called automatically at the end of every job execution.  When
+        ``max_jobs`` is 0 (the default) this is a no-op.
+
+        DB cleanup
+        ----------
+        The oldest jobs beyond the limit are hard-deleted.  Because the
+        ``waypoints``, ``measurements``, and ``job_images`` tables all
+        reference ``jobs`` with ``ON DELETE CASCADE``, a single
+        ``DELETE FROM jobs`` removes every related row automatically.
+
+        Disk cleanup
+        ------------
+        Delegates to :meth:`_prune_image_files`.
+        """
+        if self._max_jobs <= 0:
+            return
+
+        deleted_ids = self._storage.prune_jobs(self._max_jobs)
+        if deleted_ids:
+            logger.info(
+                "Retention policy: pruned %d old job(s) — %s",
+                len(deleted_ids),
+                deleted_ids,
+            )
+
+        self._prune_image_files()
 
     # ---- Misc ----
 
@@ -579,6 +647,10 @@ class OrchestratorService:
         capture = self._camera_vision.capture()
         if not capture.ok or not capture.image_path:
             return DetectionResults(ok=False, error=capture.error or "Capture failed")
+
+        # Prune old capture files immediately after writing a new one so the
+        # output directory never grows without bound even when no jobs are run.
+        self._prune_image_files()
 
         # Replace any previous calibration with values derived from this capture.
         self._cal_robot_start = None

@@ -49,6 +49,16 @@ def create_orchestrator(
         or _derive_ws_base_url(dms_base_url)
     ).rstrip("/")
 
+    max_jobs_raw = _first_env("NENABOT_MAX_JOBS")
+    try:
+        max_jobs = int(max_jobs_raw) if max_jobs_raw else 0
+    except ValueError:
+        logger.warning(
+            "NENABOT_MAX_JOBS='%s' is not a valid integer — retention disabled",
+            max_jobs_raw,
+        )
+        max_jobs = 0
+
     db = Database(db_path=db_path)
     db.init_db()
 
@@ -64,6 +74,7 @@ def create_orchestrator(
         robot=robot,
         dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
         storage=StorageAdapter(db=db),
+        max_jobs=max_jobs,
     )
 
 

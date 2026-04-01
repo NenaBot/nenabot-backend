@@ -69,6 +69,26 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 - `POST /paths` — detect path and battery contours
 - `DELETE /jobs/{id}`
 
+## Configuration
+
+The following environment variables control nenabot's runtime behaviour.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `IONVISION_BASE_URL` / `NENABOT_DMS_BASE_URL` | `http://localhost:8080` | HTTP base URL of the IonVision DMS device |
+| `IONVISION_WS_BASE_URL` / `NENABOT_DMS_WS_BASE_URL` | derived from HTTP URL | WebSocket base URL of the IonVision DMS device |
+| `NENABOT_MAX_JOBS` | *(unset — unlimited)* | Maximum number of jobs to retain. When set to a positive integer, the oldest jobs beyond this limit are automatically deleted at the end of every job execution. Both the database records (job, waypoints, measurements, snapshot image) and the captured JPEG files in `data/images/` are cleaned up. Set this to a small number (e.g. `10`) on memory-constrained devices to prevent unbounded disk and SQLite growth. |
+
+Example Docker run with a 10-job retention limit:
+
+```bash
+docker run -d --name nenabot \
+  -p 8000:8000 \
+  -v nenabot-data:/app/data \
+  -e NENABOT_MAX_JOBS=10 \
+  nenabot
+```
+
 ## Hardware integration notes
 
 - **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. Supports both automated job execution and manual control via `/robot/move` and `/robot/pose` endpoints for calibration testing.
