@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 # ---- Waypoint / Measurement ----
 
@@ -112,7 +112,11 @@ class PopulatedPathPointSchema(BaseModel):
 
 class PathPopulateRequest(BaseModel):
     batteries: list[BatteryCornersSchema] = Field(default_factory=list)
-    measuring_points_per_cm: float = Field(alias="measuringPointsPerCm", gt=0.0)
+    measuring_points_per_cm: float = Field(
+        alias="measuringPointsPerCm",
+        gt=0.0,
+        le=10.0,
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -235,20 +239,12 @@ class JobEvent(BaseModel):
 
 class JobCreateRequest(BaseModel):
     class JobPathPointSchema(BaseModel):
-        pixel_x: float | None = Field(None, alias="pixelX")
-        pixel_y: float | None = Field(None, alias="pixelY")
+        pixel_x: float = Field(alias="pixelX")
+        pixel_y: float = Field(alias="pixelY")
         index: str | None = None
         battery_nr: int | None = Field(None, alias="batteryNr")
         corner_index: int | None = Field(None, alias="cornerIndex")
         measurement_index: int | None = Field(None, alias="measurementIndex")
-
-        @model_validator(mode="after")
-        def validate_coordinates(self) -> JobCreateRequest.JobPathPointSchema:
-            has_pixel = self.pixel_x is not None and self.pixel_y is not None
-            if not has_pixel:
-                msg = "Each path point must include (pixelX,pixelY)"
-                raise ValueError(msg)
-            return self
 
         model_config = {"populate_by_name": True}
 
