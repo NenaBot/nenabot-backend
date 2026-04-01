@@ -69,6 +69,24 @@ def create_orchestrator(
         )
         default_work_z = 0.0
 
+    default_measuring_points_per_cm_raw = _first_env(
+        "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM"
+    )
+    try:
+        default_measuring_points_per_cm = (
+            float(default_measuring_points_per_cm_raw)
+            if default_measuring_points_per_cm_raw
+            else 0.5
+        )
+        if default_measuring_points_per_cm <= 0:
+            raise ValueError("must be > 0")
+    except ValueError:
+        logger.warning(
+            "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM='%s' is not a valid positive float — using 0.5",
+            default_measuring_points_per_cm_raw,
+        )
+        default_measuring_points_per_cm = 0.5
+
     db = Database(db_path=db_path)
     db.init_db()
 
@@ -91,6 +109,7 @@ def create_orchestrator(
         storage=StorageAdapter(db=db),
         max_jobs=max_jobs,
         default_work_z=default_work_z,
+        default_measuring_points_per_cm=default_measuring_points_per_cm,
     )
 
 

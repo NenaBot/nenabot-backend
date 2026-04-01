@@ -187,6 +187,7 @@ def test_profiles_and_paths(client: TestClient) -> None:
     response = client.get("/api/profile/default")
     assert response.status_code == 200
     assert response.json()["name"]
+    assert response.json()["measuringPointsPerCm"] > 0
 
     response = client.post("/api/path/detect", json={"options": {"speed": 1}})
     assert response.status_code == 201

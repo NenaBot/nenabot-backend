@@ -31,6 +31,7 @@ class OrchestratorService:
         storage: StorageAdapter,
         max_jobs: int = 0,
         default_work_z: float = 0.0,
+        default_measuring_points_per_cm: float = 0.5,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
@@ -43,6 +44,7 @@ class OrchestratorService:
                 "name": "default",
                 "description": "Default inspection profile",
                 "workZ": default_work_z,
+                "measuringPointsPerCm": default_measuring_points_per_cm,
             },
             {"name": "fast", "description": "Faster run, lower accuracy"},
         ]
