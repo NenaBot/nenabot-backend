@@ -63,6 +63,34 @@ def test_save_and_get_job(tmp_path: Path) -> None:
     assert fetched.state == "created"
 
 
+def test_waypoint_index_metadata_roundtrip(tmp_path: Path) -> None:
+    store = _make_storage(tmp_path)
+    job = _sample_job(
+        path=[
+            Waypoint(
+                x=1,
+                y=2,
+                z=0,
+                r=0,
+                index="0-1-2",
+                battery_nr=0,
+                corner_index=1,
+                measurement_index=2,
+            )
+        ]
+    )
+    store.save_job(job)
+
+    fetched = store.get_job("j-1")
+    assert fetched is not None
+    assert len(fetched.path) == 1
+    wp = fetched.path[0]
+    assert wp.index == "0-1-2"
+    assert wp.battery_nr == 0
+    assert wp.corner_index == 1
+    assert wp.measurement_index == 2
+
+
 def test_list_jobs(tmp_path: Path) -> None:
     store = _make_storage(tmp_path)
     store.save_job(_sample_job(id="a"))

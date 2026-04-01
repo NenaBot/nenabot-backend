@@ -24,9 +24,9 @@ In this project, Uvicorn is responsible for:
 - Accepting HTTP connections and routing requests into FastAPI
 - Serving OpenAPI docs (`/docs`) and JSON schema (`/openapi.json`)
 - Keeping long-lived streaming connections open for MJPEG endpoints:
-    - `GET /streams/camera/feed`
-    - `GET /streams/detection/feed`
-- Serving Server-Sent Events (SSE) for real-time job progress via `GET /jobs/{id}/events`
+    - `GET /api/stream/camera/feed`
+    - `GET /api/stream/detection/feed`
+- Serving Server-Sent Events (SSE) for real-time job progress via `GET /api/job/{id}/events`
 - Handling robot control endpoints for calibration and manual positioning
 - Supporting development reload mode (`--reload`) so code changes restart the server automatically
 
@@ -49,13 +49,13 @@ Notes about current behavior:
 - All job state is persisted in a SQLite database (`data/nenabot.db`) via `Database` + `StorageAdapter`.
 - WAL journal mode enables concurrent reads (API thread) and writes (background job thread).
 - Captured images are stored as BLOBs in the `job_images` table.
-- `IVAdapter` (`app/adapters/ionVision/ionVision.py`) is an HTTP client to the external IonVision API.
+- `IVAdapter` (`app/adapters/ionVision.py`) is an HTTP/WebSocket client to the external IonVision API.
 - `CameraVisionAdapter` handles image capture, contour detection, and live stream generation.
 - `RobotAdapter` (`app/adapters/robot.py`) wraps Dobot hardware control; supports both job automation and manual calibration moves.
 - Robot control endpoints:
-    - `POST /robot/move` — manual positioning for calibration
-    - `GET /robot/pose` — read current end-effector position and joint angles
-    - `POST /robot/stop` — halt active job and stop robot motion
+    - `POST /api/robot/move` — manual positioning for calibration
+    - `GET /api/robot/pose` — read current end-effector position and joint angles
+    - `POST /api/robot/stop` — halt active job and stop robot motion
 - Some API/internal fields still use legacy `dms` naming (for example `Health.dms`), while adapter naming is now IonVision/IV.
 
 ## 4. Folder structure (commented tree)
@@ -71,10 +71,9 @@ nenabot-main/
 |  |- services/
 |  |  |- orchestrator.py                 # Core use-case orchestration and in-memory job state
 |  |- adapters/
-|    |- camera_vision.py                # Camera capture, ArUco/contour detection, MJPEG streaming
+|  |  |- camera_vision.py                # Camera capture, ArUco/contour detection, MJPEG streaming
 |  |  |- database.py                     # Thin sqlite3 wrapper (WAL mode, foreign keys)
-|  |  |- ionVision/
-|  |  |  |- ionVision.py                 # IonVision HTTP adapter (IVAdapter)
+|  |  |- ionVision.py                    # IonVision HTTP/WebSocket adapter (IVAdapter)
 |  |  |- robot.py                        # Dobot robot control wrapper
 |  |  |- storage.py                      # SQLite-backed persistence (jobs, waypoints, measurements, images)
 |  |- domain/
@@ -126,8 +125,8 @@ graph TD
     Storage --> SQLite[SQLite data/nenabot.db]
 
     Routes -->|stream endpoints| Camera
-    Routes -->|POST /paths| Service
-    Routes -->|GET /jobs/id/image| Storage
+    Routes -->|POST /api/path/detect| Service
+    Routes -->|GET /api/job/id/image| Storage
 ```
 
 ## 6. Practical dependency notes
