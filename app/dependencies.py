@@ -66,6 +66,11 @@ def create_orchestrator(
     result = robot.connect_first_available()
     if result.ok:
         logger.info("Robot connected on startup")
+        home_result = robot.home()
+        if home_result.ok:
+            logger.info("Robot homed on startup")
+        else:
+            logger.warning("Robot homing failed on startup: %s", home_result.error)
     else:
         logger.warning("Robot not connected on startup: %s", result.error)
 
