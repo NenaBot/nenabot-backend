@@ -39,7 +39,11 @@ class OrchestratorService:
         self._max_jobs = max_jobs  # 0 = unlimited
         self._started_at = time.monotonic()
         self._profiles = [
-            {"name": "default", "description": "Default inspection profile", "workZ": default_work_z},
+            {
+                "name": "default",
+                "description": "Default inspection profile",
+                "workZ": default_work_z,
+            },
             {"name": "fast", "description": "Faster run, lower accuracy"},
         ]
         self._running_job_id: str | None = None

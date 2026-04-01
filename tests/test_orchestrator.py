@@ -574,14 +574,18 @@ def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
     db = Database(db_path=str(tmp_path / "test.db"))
     db.init_db()
     camera = CameraVisionAdapter()
-    camera.ping = MagicMock(return_value=CaptureResult(ok=False, error="no camera in test"))
+    camera.ping = MagicMock(
+        return_value=CaptureResult(ok=False, error="no camera in test")
+    )
     robot = RobotAdapter()
     robot.ping = MagicMock(return_value=RobotResult(ok=False, error="no robot in test"))
     svc = OrchestratorService(
         camera_vision=camera,
         robot=robot,
         storage=StorageAdapter(db=db),
-        dms=IVAdapter(base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"),
+        dms=IVAdapter(
+            base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
+        ),
         default_work_z=-35.0,
     )
     assert svc.default_profile()["workZ"] == -35.0
