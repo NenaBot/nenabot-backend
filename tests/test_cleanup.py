@@ -240,8 +240,13 @@ def test_prune_image_files_triggered_by_detect_path(tmp_path: Path) -> None:
     )
     svc._camera_vision.capture = capture_mock
     svc._camera_vision.detect = MagicMock(
-        return_value=MagicMock(ok=False, error="no markers", pixels_per_mm=None,
-                               marker_corners=[], marker_count=0)
+        return_value=MagicMock(
+            ok=False,
+            error="no markers",
+            pixels_per_mm=None,
+            marker_corners=[],
+            marker_count=0,
+        )
     )
     svc._robot.get_pose = MagicMock(
         return_value=MagicMock(ok=False, error="no robot", x=0, y=0, z=0, r=0)
@@ -337,7 +342,9 @@ def test_create_orchestrator_reads_max_jobs_env(tmp_path: Path) -> None:
             patch("app.dependencies.IVAdapter"),
         ):
             mock_robot = MagicMock()
-            mock_robot.connect_first_available.return_value = MagicMock(ok=False, error="no robot")
+            mock_robot.connect_first_available.return_value = MagicMock(
+                ok=False, error="no robot"
+            )
             mock_robot_cls.return_value = mock_robot
 
             svc = create_orchestrator(db_path=str(tmp_path / "test.db"))
@@ -354,7 +361,9 @@ def test_create_orchestrator_defaults_to_unlimited(tmp_path: Path) -> None:
             patch("app.dependencies.IVAdapter"),
         ):
             mock_robot = MagicMock()
-            mock_robot.connect_first_available.return_value = MagicMock(ok=False, error="no robot")
+            mock_robot.connect_first_available.return_value = MagicMock(
+                ok=False, error="no robot"
+            )
             mock_robot_cls.return_value = mock_robot
 
             svc = create_orchestrator(db_path=str(tmp_path / "test.db"))
@@ -370,7 +379,9 @@ def test_create_orchestrator_invalid_max_jobs_defaults_to_zero(tmp_path: Path) -
             patch("app.dependencies.IVAdapter"),
         ):
             mock_robot = MagicMock()
-            mock_robot.connect_first_available.return_value = MagicMock(ok=False, error="no robot")
+            mock_robot.connect_first_available.return_value = MagicMock(
+                ok=False, error="no robot"
+            )
             mock_robot_cls.return_value = mock_robot
 
             svc = create_orchestrator(db_path=str(tmp_path / "test.db"))

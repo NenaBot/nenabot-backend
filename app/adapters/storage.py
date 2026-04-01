@@ -114,9 +114,7 @@ class StorageAdapter:
         """
         if max_jobs <= 0:
             return []
-        rows = self._db.fetchall(
-            "SELECT id FROM jobs ORDER BY created_at ASC"
-        )
+        rows = self._db.fetchall("SELECT id FROM jobs ORDER BY created_at ASC")
         excess = len(rows) - max_jobs
         if excess <= 0:
             return []
