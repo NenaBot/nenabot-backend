@@ -433,6 +433,20 @@
             el.scrollTop = el.scrollHeight;
         }
 
+        async function loadDefaultProfile() {
+            try {
+                const res = await fetch(`${api()}/profiles/default`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (typeof data.workZ === 'number') {
+                    $('workZ').value = data.workZ;
+                    log(`Default work Z loaded from profile: ${data.workZ}`);
+                }
+            } catch (e) {
+                log('Could not load default profile (server may be offline)');
+            }
+        }
+
         /* ---- Tool selection ---- */
         function setTool(tool) {
             activeTool = tool;
@@ -1055,6 +1069,7 @@
     </tr>`;
             }
         }
+        loadDefaultProfile();
     </script>
 </body>
 

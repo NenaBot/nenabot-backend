@@ -73,6 +73,7 @@ class Status(BaseModel):
 class Profile(BaseModel):
     name: str
     description: str | None = None
+    work_z: float = Field(0.0, alias="workZ")
 
 
 # ---- Path detection ----

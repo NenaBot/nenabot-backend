@@ -79,14 +79,18 @@ The following environment variables control nenabot's runtime behaviour.
 | `IONVISION_BASE_URL` / `NENABOT_DMS_BASE_URL` | `http://localhost:8080` | HTTP base URL of the IonVision DMS device |
 | `IONVISION_WS_BASE_URL` / `NENABOT_DMS_WS_BASE_URL` | derived from HTTP URL | WebSocket base URL of the IonVision DMS device |
 | `NENABOT_MAX_JOBS` | *(unset — unlimited)* | Maximum number of jobs to retain. When set to a positive integer, the oldest jobs beyond this limit are automatically deleted at the end of every job execution. Both the database records (job, waypoints, measurements, snapshot image) and the captured JPEG files in `data/images/` are cleaned up. Set this to a small number (e.g. `10`) on memory-constrained devices to prevent unbounded disk and SQLite growth. |
+| `NENABOT_DEFAULT_WORK_Z` | `0.0` | Default Z coordinate (mm) for the default inspection profile. Pre-filled in the job tester UI on page load. Negative values lower the arm below the calibration plane (e.g. `-35`). |
 
-Example Docker run with a 10-job retention limit:
+See `.env.example` for a reference file with all variables.
+
+Example Docker run with job retention and a default work Z:
 
 ```bash
 docker run -d --name nenabot \
   -p 8000:8000 \
   -v nenabot-data:/app/data \
   -e NENABOT_MAX_JOBS=10 \
+  -e NENABOT_DEFAULT_WORK_Z=-35 \
   nenabot
 ```
 

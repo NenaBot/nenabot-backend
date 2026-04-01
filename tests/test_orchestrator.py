@@ -1,3 +1,4 @@
+import os
 import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -390,6 +391,65 @@ def test_profiles_and_default(tmp_path: Path) -> None:
     default = svc.default_profile()
     assert default["name"] == "default"
     assert "description" in default
+
+
+# ---- ORC-TC-018b: Default profile work_z ----
+
+
+def test_default_profile_work_z_defaults_to_zero(tmp_path: Path) -> None:
+    """default_profile() has workZ=0.0 when OrchestratorService is created without it."""
+    svc = _make_svc(tmp_path)
+    assert svc.default_profile()["workZ"] == 0.0
+
+
+def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
+    """OrchestratorService stores default_work_z in the default profile dict."""
+    db = Database(db_path=str(tmp_path / "test.db"))
+    db.init_db()
+    camera = CameraVisionAdapter()
+    camera.ping = MagicMock(return_value=CaptureResult(ok=False, error="no camera in test"))
+    robot = RobotAdapter()
+    robot.ping = MagicMock(return_value=RobotResult(ok=False, error="no robot in test"))
+    svc = OrchestratorService(
+        camera_vision=camera,
+        robot=robot,
+        storage=StorageAdapter(db=db),
+        dms=IVAdapter(base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"),
+        default_work_z=-35.0,
+    )
+    assert svc.default_profile()["workZ"] == -35.0
+    fast = next(p for p in svc.profiles() if p["name"] == "fast")
+    assert "workZ" not in fast
+
+
+def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
+    """create_orchestrator() parses NENABOT_DEFAULT_WORK_Z and passes it to OrchestratorService."""
+    from app.dependencies import create_orchestrator
+
+    with patch(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        return_value=RobotResult(ok=False, error="no robot"),
+    ), patch.dict(os.environ, {"NENABOT_DEFAULT_WORK_Z": "-42.5"}):
+        svc = create_orchestrator(
+            db_path=str(tmp_path / "test.db"),
+            dms_base_url="http://localhost:8080",
+        )
+    assert svc.default_profile()["workZ"] == pytest.approx(-42.5)
+
+
+def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
+    """create_orchestrator() uses 0.0 when NENABOT_DEFAULT_WORK_Z is not a valid float."""
+    from app.dependencies import create_orchestrator
+
+    with patch(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        return_value=RobotResult(ok=False, error="no robot"),
+    ), patch.dict(os.environ, {"NENABOT_DEFAULT_WORK_Z": "not-a-number"}):
+        svc = create_orchestrator(
+            db_path=str(tmp_path / "test.db"),
+            dms_base_url="http://localhost:8080",
+        )
+    assert svc.default_profile()["workZ"] == 0.0
 
 
 # ---- ORC-TC-019: Manual move via orchestrator ----

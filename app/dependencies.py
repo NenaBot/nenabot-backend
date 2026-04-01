@@ -59,6 +59,16 @@ def create_orchestrator(
         )
         max_jobs = 0
 
+    default_work_z_raw = _first_env("NENABOT_DEFAULT_WORK_Z")
+    try:
+        default_work_z = float(default_work_z_raw) if default_work_z_raw else 0.0
+    except ValueError:
+        logger.warning(
+            "NENABOT_DEFAULT_WORK_Z='%s' is not a valid float — using 0.0",
+            default_work_z_raw,
+        )
+        default_work_z = 0.0
+
     db = Database(db_path=db_path)
     db.init_db()
 
@@ -80,6 +90,7 @@ def create_orchestrator(
         dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
         storage=StorageAdapter(db=db),
         max_jobs=max_jobs,
+        default_work_z=default_work_z,
     )
 
 
