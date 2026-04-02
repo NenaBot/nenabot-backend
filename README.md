@@ -80,6 +80,7 @@ All endpoints are prefixed with `/api`.
 ## Hardware integration notes
 
 - **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. Supports both automated job execution and manual control via `POST /api/robot/move` and `GET /api/robot/pose` for calibration testing.
+- **Robot startup homing**: disabled by default. Set `NENABOT_ENABLE_STARTUP_HOMING=1` to home the arm automatically after it connects during app startup.
 - **Camera/Vision**: `app/adapters/camera_vision.py` loads the intrinsic camera profile, runs shared-camera capture, detects checkerboards and battery contours, and serves MJPEG streams.
 - **Calibration**: runtime 4-point mapping is written to `data/calibration/robot_mapping.json`. The last calibration timestamp is exposed through `GET /api/status`.
 - **IonVision (DMS)**: `app/adapters/ionVision.py` is an HTTP/WebSocket client to the external IonVision API. Configure the base URL with `IONVISION_BASE_URL` / `IONVISION_WS_BASE_URL` or in `app/dependencies.py`.
@@ -112,6 +113,7 @@ RUN_ROBOT_HARDWARE_TESTS=1 pytest -s -v tests/test_robot_hardware.py
 | Variable                     | Default | Description                                                                   |
 | :--------------------------- | :------ | :---------------------------------------------------------------------------- |
 | `RUN_ROBOT_HARDWARE_TESTS`   | —       | Set to `1` to enable the suite                                                |
+| `NENABOT_ENABLE_STARTUP_HOMING` | `0`  | Set to `1` to home the arm automatically during app startup after connect     |
 | `DOBOT_ENABLE_LEGACY_HOMING` | `0`     | Set to `1` to use legacy `SetHOMECmd` (only if `SetHOMECmdEx` is unavailable) |
 
 For full details see [`docs/robot.md`](docs/robot.md).

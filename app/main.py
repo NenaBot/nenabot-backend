@@ -40,7 +40,7 @@ def _custom_openapi(app: FastAPI) -> dict:
 async def lifespan(app: FastAPI):
     # Set log level after uvicorn has configured its own logging
     logging.getLogger("app").setLevel(logging.INFO)
-    # Run blocking startup (robot connect + homing) in a thread so the event loop stays free
+    # Run blocking startup (robot connect + optional homing) in a thread.
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, get_orchestrator)
     yield
@@ -60,5 +60,4 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-
 

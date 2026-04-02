@@ -12,6 +12,7 @@ from app.adapters.storage import StorageAdapter
 from app.services.orchestrator import OrchestratorService
 
 logger = logging.getLogger(__name__)
+_TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 
 
 def _first_env(*names: str) -> str | None:
@@ -21,6 +22,14 @@ def _first_env(*names: str) -> str | None:
         if value:
             return value
     return None
+
+
+def _env_flag(*names: str, default: bool = False) -> bool:
+    """Parse the first configured env var as a boolean flag."""
+    value = _first_env(*names)
+    if value is None:
+        return default
+    return value.strip().lower() in _TRUE_ENV_VALUES
 
 
 def _derive_ws_base_url(base_url: str) -> str:
@@ -60,6 +69,10 @@ def create_orchestrator(
         or _first_env("NENABOT_MAPPING_PATH")
         or "data/calibration/robot_mapping.json"
     )
+    startup_homing_enabled = _env_flag(
+        "NENABOT_ENABLE_STARTUP_HOMING",
+        default=False,
+    )
 
     db = Database(db_path=db_path)
     db.init_db()
@@ -68,11 +81,16 @@ def create_orchestrator(
     result = robot.connect_first_available()
     if result.ok:
         logger.info("Robot connected on startup")
-        home_result = robot.home()
-        if home_result.ok:
-            logger.info("Robot homed on startup")
+        if startup_homing_enabled:
+            home_result = robot.home()
+            if home_result.ok:
+                logger.info("Robot homed on startup")
+            else:
+                logger.warning("Robot homing failed on startup: %s", home_result.error)
         else:
-            logger.warning("Robot homing failed on startup: %s", home_result.error)
+            logger.info(
+                "Skipping robot homing on startup; set NENABOT_ENABLE_STARTUP_HOMING=1 to enable"
+            )
     else:
         logger.warning("Robot not connected on startup: %s", result.error)
 
