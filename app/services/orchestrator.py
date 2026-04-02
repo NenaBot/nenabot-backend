@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 MAX_MEASURING_POINTS_PER_CM = 10.0
 MAX_POPULATED_PATH_POINTS = 20000
 TOTAL_CALIBRATION_STEPS = len(FIXED_CALIBRATION_POINTS)
+MIN_ROBOT_REACH_MM = 120.0
+MAX_ROBOT_REACH_MM = 360.0
 
 
 @dataclass
@@ -458,6 +460,34 @@ class OrchestratorService:
 
     def default_profile(self) -> dict:
         return self._profiles[0]
+
+    def validate_job_waypoints(
+        self,
+        path: list[Waypoint],
+        dry_run: bool,
+    ) -> None:
+        if not path:
+            raise ValueError("Job path is empty")
+
+        for index, waypoint in enumerate(path, start=1):
+            coords = (waypoint.x, waypoint.y, waypoint.z, waypoint.r)
+            if any(not math.isfinite(value) for value in coords):
+                raise ValueError(f"Waypoint {index} contains non-finite values")
+
+            reach = math.hypot(waypoint.x, waypoint.y)
+            if reach < MIN_ROBOT_REACH_MM or reach > MAX_ROBOT_REACH_MM:
+                raise ValueError(
+                    "Waypoint "
+                    f"{index} is outside the Dobot working radius: "
+                    f"reach={reach:.1f} mm, expected {MIN_ROBOT_REACH_MM:.0f}-{MAX_ROBOT_REACH_MM:.0f} mm"
+                )
+
+        if dry_run:
+            return
+
+        robot_status = self._robot.ping()
+        if not robot_status.ok:
+            raise RuntimeError(f"Robot not ready: {robot_status.error or 'unknown error'}")
 
     # ---- Calibration ----
 

@@ -109,6 +109,11 @@ def create_job(
         waypoint.measurement_index = point.measurement_index
         robot_waypoints.append(waypoint)
 
+    try:
+        svc.validate_job_waypoints(robot_waypoints, dry_run=payload.dry_run)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     image_bytes: bytes | None = None
     if payload.image_base64:
         try:

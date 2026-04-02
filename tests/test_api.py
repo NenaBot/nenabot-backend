@@ -193,6 +193,46 @@ def test_job_creation_requires_calibration(uncalibrated_bundle) -> None:
     assert "calibrat" in response.json()["detail"].lower()
 
 
+def test_real_job_creation_requires_ready_robot(calibrated_bundle) -> None:
+    client = calibrated_bundle["client"]
+    service = calibrated_bundle["service"]
+    service._robot.ping = MagicMock(
+        return_value=RobotResult(ok=False, error="robot offline")
+    )
+
+    response = client.post(
+        "/api/job",
+        json={
+            "path": [{"pixelX": 150.0, "pixelY": 150.0}],
+            "dryRun": False,
+            "workZ": -48,
+            "workR": 0,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "robot not ready" in response.json()["detail"].lower()
+
+
+def test_real_job_creation_rejects_unreachable_waypoints(calibrated_bundle) -> None:
+    client = calibrated_bundle["client"]
+    service = calibrated_bundle["service"]
+    service._robot.ping = MagicMock(return_value=RobotResult(ok=True))
+
+    response = client.post(
+        "/api/job",
+        json={
+            "path": [{"pixelX": 1.0, "pixelY": 1.0}],
+            "dryRun": False,
+            "workZ": -48,
+            "workR": 0,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "working radius" in response.json()["detail"].lower()
+
+
 def test_calibration_flow_endpoint_writes_mapping_and_updates_status(
     uncalibrated_bundle,
 ) -> None:
