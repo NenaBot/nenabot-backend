@@ -420,11 +420,11 @@
         let lastSnapshotImg = null;  // Image object of last detection snapshot
         let lastSnapshotBase64 = null; // raw base64 JPEG from POST /path/detect (clean, no overlays)
         let lastDetections = [];     // raw detection objects from last POST /path/detect
-        let lastPixelsPerMm = null;  // scale factor (for display only)
-        let lastMarkerCorners = [];  // ArUco marker corner data
+        let lastPixelsPerMm = null;  // legacy display slot, no longer provided by backend
+        let lastMarkerCorners = [];  // legacy display slot, no longer provided by backend
 
-        // Calibration state — read-only, populated from POST /path/detect response
-        let calibration = null;      // {calibrated, robotStart, canvasStart, pixelsPerMm} or null
+        // Calibration state — read-only, populated from GET /status response
+        let calibration = null;      // {intrinsicsLoaded, checkerboardVisible, calibrationInProgress, currentStep, totalSteps, calibrated, lastCalibratedAt}
 
         // Canvas interaction
         let activeTool = 'move';     // 'move' | 'add' | 'delete'
@@ -611,7 +611,7 @@
 
         /* ---- Path detection ---- */
         async function detectPath() {
-            log('Detecting path (robot arm must be at start position)…');
+            log('Detecting path from the latest shared frame…');
             try {
                 const res = await fetch(`${api()}/path/detect`, {
                     method: 'POST',
@@ -619,16 +619,12 @@
                     body: JSON.stringify({ options: {} }),
                 });
                 const data = await res.json();
-                log(`Path result: requestSucceeded=${requestSucceeded(data)}, ${data.detections?.length ?? 0} detections, ` +
-                    `pixelsPerMm=${data.pixelsPerMm ?? '?'}, markers=${data.markerCount ?? 0}`);
+                log(`Path result: requestSucceeded=${requestSucceeded(data)}, ${data.detections?.length ?? 0} detections`);
 
                 lastDetections = data.detections || [];
-                lastPixelsPerMm = data.pixelsPerMm || null;
-                lastMarkerCorners = data.markerCorners || [];
-
-                // Store calibration from backend
-                calibration = data.calibration || null;
-                updateCalibrationInfo();
+                lastPixelsPerMm = null;
+                lastMarkerCorners = [];
+                await refreshCalibrationStatus();
 
                 if (data.image_base64) {
                     lastSnapshotBase64 = data.image_base64;
@@ -649,18 +645,26 @@
             }
         }
 
+        async function refreshCalibrationStatus() {
+            try {
+                const res = await fetch(`${api()}/status`);
+                const data = await res.json();
+                calibration = data.calibration || null;
+                updateCalibrationInfo();
+            } catch (e) {
+                log('Status read error: ' + e.message);
+            }
+        }
+
         function updateCalibrationInfo() {
             const el = $('calibInfo');
             if (calibration && calibration.calibrated) {
-                const rs = calibration.robotStart;
-                const cs = calibration.canvasStart;
-                const ppm = calibration.pixelsPerMm;
-                el.textContent = `✓ Calibrated — Robot start: (${rs.robotX.toFixed(1)}, ${rs.robotY.toFixed(1)}, ${rs.robotZ.toFixed(1)}) mm` +
-                    ` | Canvas start: (${cs.pixelX.toFixed(0)}, ${cs.pixelY.toFixed(0)}) px` +
-                    ` | ppm: ${ppm?.toFixed(2) ?? '?'}`;
+                el.textContent = `✓ Calibrated — last calibrated at ${calibration.lastCalibratedAt || 'unknown time'}`;
                 el.style.color = 'var(--green)';
             } else {
-                el.textContent = 'Not calibrated — click Detect with robot at start position.';
+                const checker = calibration?.checkerboardVisible ? 'checkerboard visible' : 'checkerboard not visible';
+                const intrinsics = calibration?.intrinsicsLoaded ? 'intrinsics loaded' : 'intrinsics missing';
+                el.textContent = `Not calibrated — use docs/calibration-tester.html. Status: ${checker}, ${intrinsics}.`;
                 el.style.color = 'var(--dim)';
             }
         }
@@ -692,9 +696,7 @@
         function updatePathInfo() {
             let text = '';
             if (calibration?.calibrated) {
-                const cs = calibration.canvasStart;
-                const rs = calibration.robotStart;
-                text += `Start: (${cs.pixelX.toFixed(0)}, ${cs.pixelY.toFixed(0)})px → (${rs.robotX.toFixed(1)}, ${rs.robotY.toFixed(1)})mm  |  `;
+                text += `Calibration ready (last calibrated: ${calibration.lastCalibratedAt || 'unknown'})  |  `;
             }
             const populatedCount = detectedPath.filter(hasPopulationMeta).length;
             text += detectedPath.length
@@ -819,22 +821,6 @@
                 ctx.lineWidth = 2;
             }
 
-            // ArUco marker corners (magenta dashed)
-            for (const mc of lastMarkerCorners) {
-                if (mc.corners?.length >= 4) {
-                    ctx.strokeStyle = '#ff55ff';
-                    ctx.lineWidth = 1;
-                    ctx.setLineDash([4, 4]);
-                    ctx.beginPath();
-                    ctx.moveTo(mc.corners[0].pixelX, mc.corners[0].pixelY);
-                    for (let i = 1; i < mc.corners.length; i++)
-                        ctx.lineTo(mc.corners[i].pixelX, mc.corners[i].pixelY);
-                    ctx.closePath();
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                }
-            }
-
             // Waypoint path line (yellow dashed)
             if (detectedPath.length > 1) {
                 ctx.strokeStyle = '#facc15';
@@ -868,38 +854,6 @@
                 ctx.fillText(label, w.x + 9, w.y - 5);
             }
 
-            // Canvas start marker (orange diamond) — from backend calibration
-            const canvasStartPos = calibration?.canvasStart;
-            if (canvasStartPos) {
-                const sx = canvasStartPos.pixelX, sy = canvasStartPos.pixelY;
-                const sz = 10;
-                ctx.fillStyle = '#ff8c00';
-                ctx.beginPath();
-                ctx.moveTo(sx, sy - sz);
-                ctx.lineTo(sx + sz, sy);
-                ctx.lineTo(sx, sy + sz);
-                ctx.lineTo(sx - sz, sy);
-                ctx.closePath();
-                ctx.fill();
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-                ctx.fillStyle = '#ff8c00';
-                ctx.font = 'bold 12px system-ui';
-                ctx.fillText('START', sx + 14, sy + 4);
-
-                if (detectedPath.length > 0) {
-                    ctx.strokeStyle = '#ffffff88';
-                    ctx.lineWidth = 1;
-                    ctx.setLineDash([8, 5]);
-                    ctx.beginPath();
-                    ctx.moveTo(sx, sy);
-                    ctx.lineTo(detectedPath[0].x, detectedPath[0].y);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                }
-            }
-
             updatePathInfo();
         }
 
@@ -929,32 +883,14 @@
 
         async function testMoveToWP() {
             if (!calibration?.calibrated) {
-                log('⚠ Cannot test move — not calibrated (run Detect first).');
+                log('⚠ Cannot test move — calibration is not ready.');
                 return;
             }
             if (!detectedPath.length) {
                 log('⚠ No waypoints — add or detect waypoints first.');
                 return;
             }
-            // Send just the first pixel waypoint as a 1-waypoint job-like move for testing.
-            // The backend will convert it. For a quick test, use robot/move with the backend-known start.
-            const rs = calibration.robotStart;
-            log(`Test Move: sending robot to start position → (${rs.robotX.toFixed(2)}, ${rs.robotY.toFixed(2)}, ${rs.robotZ.toFixed(2)}) mm`);
-            try {
-                const res = await fetch(`${api()}/robot/move`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ x: rs.robotX, y: rs.robotY, z: rs.robotZ, r: rs.robotR }),
-                });
-                const data = await res.json();
-                if (requestSucceeded(data)) {
-                    log('  ✓ Move command sent. Check physical robot position.');
-                } else {
-                    log(`  ✗ Move failed: ${data.error}`);
-                }
-            } catch (e) {
-                log('  Test move error: ' + e.message);
-            }
+            log('Test Move uses the dedicated calibration tester now. Use docs/calibration-tester.html for guided point capture and validation moves.');
         }
 
         /* ---- Job launch with confirmation ---- */
@@ -970,14 +906,12 @@
 
             pendingDryRun = dryRun;
 
-            const rs = calibration.robotStart;
             const banner = $('confirmBanner');
             banner.style.display = 'block';
             $('confirmBtn').textContent = dryRun ? 'Confirm & Dry Run' : 'Confirm & Start';
             $('confirmDetail').textContent =
                 `${detectedPath.length} pixel waypoints (backend converts → robot mm)` +
-                ` | Robot start: (${rs.robotX.toFixed(1)}, ${rs.robotY.toFixed(1)}, ${rs.robotZ.toFixed(1)}) mm` +
-                ` | ppm=${calibration.pixelsPerMm?.toFixed(2) ?? '?'}` +
+                ` | Calibration ready: yes` +
                 ` | ${dryRun ? 'DRY RUN' : 'REAL MOVEMENT'}`;
         }
 
@@ -1181,6 +1115,8 @@
     </tr>`;
             }
         }
+
+        refreshCalibrationStatus();
     </script>
 </body>
 

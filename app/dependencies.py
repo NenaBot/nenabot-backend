@@ -36,6 +36,8 @@ def create_orchestrator(
     db_path: str = "data/nenabot.db",
     dms_base_url: str | None = None,
     dms_ws_base_url: str | None = None,
+    intrinsics_path: str | None = None,
+    mapping_path: str | None = None,
 ) -> OrchestratorService:
     """Create an OrchestratorService with default dependencies."""
     dms_base_url = (
@@ -48,6 +50,16 @@ def create_orchestrator(
         or _first_env("IONVISION_WS_BASE_URL", "NENABOT_DMS_WS_BASE_URL")
         or _derive_ws_base_url(dms_base_url)
     ).rstrip("/")
+    intrinsics_path = (
+        intrinsics_path
+        or _first_env("NENABOT_INTRINSICS_PATH")
+        or "calibration-coordinate-mapping/camera_params.json"
+    )
+    mapping_path = (
+        mapping_path
+        or _first_env("NENABOT_MAPPING_PATH")
+        or "data/calibration/robot_mapping.json"
+    )
 
     db = Database(db_path=db_path)
     db.init_db()
@@ -65,10 +77,11 @@ def create_orchestrator(
         logger.warning("Robot not connected on startup: %s", result.error)
 
     return OrchestratorService(
-        camera_vision=CameraVisionAdapter(),
+        camera_vision=CameraVisionAdapter(intrinsics_path=intrinsics_path),
         robot=robot,
         dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
         storage=StorageAdapter(db=db),
+        mapping_path=mapping_path,
     )
 
 

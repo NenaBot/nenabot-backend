@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
-# ---- Waypoint / Measurement ----
 
 
 class WaypointSchema(BaseModel):
@@ -32,9 +30,6 @@ class MeasurementSchema(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-# ---- Job ----
-
-
 class JobStatusState(BaseModel):
     state: str = "created"
     last_point_processed: int = Field(0, alias="lastPointProcessed")
@@ -54,9 +49,6 @@ class Job(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-# ---- Health / Status / Profile ----
-
-
 class ComponentHealth(BaseModel):
     status: str
     error: str | None = None
@@ -72,16 +64,28 @@ class Health(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class CalibrationStatusSchema(BaseModel):
+    intrinsics_loaded: bool = Field(alias="intrinsicsLoaded")
+    checkerboard_visible: bool = Field(alias="checkerboardVisible")
+    calibration_in_progress: bool = Field(alias="calibrationInProgress")
+    current_step: int = Field(alias="currentStep")
+    total_steps: int = Field(alias="totalSteps")
+    calibrated: bool
+    last_calibrated_at: str | None = Field(None, alias="lastCalibratedAt")
+
+    model_config = {"populate_by_name": True}
+
+
 class Status(BaseModel):
     state: str
+    calibration: CalibrationStatusSchema
+
+    model_config = {"populate_by_name": True}
 
 
 class Profile(BaseModel):
     name: str
     description: str | None = None
-
-
-# ---- Path detection ----
 
 
 class CornerSchema(BaseModel):
@@ -138,28 +142,14 @@ class PathItem(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class MarkerCornersSchema(BaseModel):
-    corners: list[CornerSchema] = Field(default_factory=list)
-
-
 class PathResponse(BaseModel):
     request_succeeded: bool = Field(alias="requestSucceeded")
     detections: list[PathItem] = Field(default_factory=list)
     image_base64: str | None = Field(None, description="JPEG image as base64 string")
-    pixels_per_mm: float | None = Field(None, alias="pixelsPerMm")
-    marker_count: int = Field(0, alias="markerCount")
-    marker_corners: list[MarkerCornersSchema] = Field(
-        default_factory=list,
-        alias="markerCorners",
-    )
-    calibration: CalibrationResponse | None = None
     error: str | None = None
     options: dict[str, Any] | None = None
 
     model_config = {"populate_by_name": True}
-
-
-# ---- Robot pose ----
 
 
 class RobotPoseResponse(BaseModel):
@@ -175,9 +165,6 @@ class RobotPoseResponse(BaseModel):
     error: str | None = None
 
 
-# ---- Robot move request ----
-
-
 class RobotMoveRequest(BaseModel):
     x: float
     y: float
@@ -190,39 +177,37 @@ class RobotMoveResponse(BaseModel):
     error: str | None = None
 
 
-# ---- Pixel point (canvas coordinates) ----
-
-
 class PixelPointSchema(BaseModel):
-    """A point in canvas/pixel coordinates."""
-
     pixel_x: float = Field(alias="pixelX")
     pixel_y: float = Field(alias="pixelY")
 
     model_config = {"populate_by_name": True}
 
 
-# ---- Calibration ----
+class CalibrationActionRequest(BaseModel):
+    action: Literal["start", "capture"]
 
 
-class CalibrationResponse(BaseModel):
-    """Returned by POST /paths to confirm calibration was captured."""
-
+class CalibrationFlowResponse(BaseModel):
+    ok: bool
+    message: str
+    checkerboard_visible: bool = Field(alias="checkerboardVisible")
+    current_step: int = Field(alias="currentStep")
+    total_steps: int = Field(alias="totalSteps")
+    target_point: PixelPointSchema | None = Field(None, alias="targetPoint")
+    captured_points: list[PixelPointSchema] = Field(
+        default_factory=list,
+        alias="capturedPoints",
+    )
+    reference_image_base64: str | None = Field(None, alias="referenceImageBase64")
     calibrated: bool = False
-    robot_start: WaypointSchema | None = Field(None, alias="robotStart")
-    canvas_start: PixelPointSchema | None = Field(None, alias="canvasStart")
-    pixels_per_mm: float | None = Field(None, alias="pixelsPerMm")
+    last_calibrated_at: str | None = Field(None, alias="lastCalibratedAt")
 
     model_config = {"populate_by_name": True}
 
 
-# ---- SSE Job Events ----
-
-
 class JobEvent(BaseModel):
-    """Payload for server-sent events on GET /jobs/{id}/events."""
-
-    type: str  # job:started, job:waypoint_started, job:waypoint_completed, job:completed, job:failed, job:stopped, job:snapshot
+    type: str
     job_id: str = Field(alias="jobId")
     state: str
     last_point_processed: int = Field(0, alias="lastPointProcessed")
@@ -232,9 +217,6 @@ class JobEvent(BaseModel):
     timestamp: str | None = None
 
     model_config = {"populate_by_name": True}
-
-
-# ---- Job creation request ----
 
 
 class JobCreateRequest(BaseModel):

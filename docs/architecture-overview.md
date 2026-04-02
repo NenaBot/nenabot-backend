@@ -3,7 +3,7 @@
 ## 1. What this codebase is
 
 This repository is a FastAPI-based orchestrator for hardware and vision workflows.
-It exposes HTTP endpoints for health/status, job lifecycle, live camera streams, and path detection.
+It exposes HTTP endpoints for health/status, runtime calibration, job lifecycle, live camera streams, and path detection.
 
 The architecture is a single Python service with in-process adapters:
 
@@ -50,12 +50,13 @@ Notes about current behavior:
 - WAL journal mode enables concurrent reads (API thread) and writes (background job thread).
 - Captured images are stored as BLOBs in the `job_images` table.
 - `IVAdapter` (`app/adapters/ionVision.py`) is an HTTP/WebSocket client to the external IonVision API.
-- `CameraVisionAdapter` handles image capture, contour detection, and live stream generation.
-- `RobotAdapter` (`app/adapters/robot.py`) wraps Dobot hardware control; supports both job automation and manual calibration moves.
+- `CameraVisionAdapter` handles intrinsic-profile loading, shared image capture, checkerboard detection, contour detection, and live stream generation.
+- `RobotAdapter` (`app/adapters/robot.py`) wraps Dobot hardware control; supports both job automation and the guided 4-point calibration flow.
 - Robot control endpoints:
     - `POST /api/robot/move` — manual positioning for calibration
     - `GET /api/robot/pose` — read current end-effector position and joint angles
     - `POST /api/robot/stop` — halt active job and stop robot motion
+- Runtime calibration state is stored in `data/calibration/robot_mapping.json` and surfaced through `GET /api/status`.
 - Some API/internal fields still use legacy `dms` naming (for example `Health.dms`), while adapter naming is now IonVision/IV.
 
 ## 4. Folder structure (commented tree)
@@ -67,11 +68,11 @@ nenabot-main/
 |  |- dependencies.py                    # Dependency factory + singleton orchestrator provider
 |  |- schemas.py                         # Pydantic request/response models used by API
 |  |- api/
-|  |  |- routes.py                       # HTTP endpoints (health, jobs, profiles, paths, streams, robot control)
+|  |  |- routes.py                       # HTTP endpoints (health, status, calibration, jobs, profiles, paths, streams, robot control)
 |  |- services/
 |  |  |- orchestrator.py                 # Core use-case orchestration and in-memory job state
 |  |- adapters/
-|  |  |- camera_vision.py                # Camera capture, ArUco/contour detection, MJPEG streaming
+|  |  |- camera_vision.py                # Shared camera capture, checkerboard detection, battery detection, MJPEG streaming
 |  |  |- database.py                     # Thin sqlite3 wrapper (WAL mode, foreign keys)
 |  |  |- ionVision.py                    # IonVision HTTP/WebSocket adapter (IVAdapter)
 |  |  |- robot.py                        # Dobot robot control wrapper
@@ -85,8 +86,10 @@ nenabot-main/
 |- docs/
 |  |- architecture-overview.md           # This file
 |  |- database.md                        # Database schema and persistence details
+|  |- vision-calibration.md              # Intrinsic profile + runtime 4-point calibration flow
 |  |- raspberry-pi-setup.md              # Raspberry Pi remote access and Cloudflare Tunnel SSH guide
 |  |- streaming.md                       # Streaming architecture and usage guide
+|  |- calibration-tester.html            # Guided runtime calibration UI
 |  |- stream-viewer.html                 # Manual HTML viewer for camera/detection feeds
 |  |- job-tester.html                    # Job creation / testing UI
 |  |- job-results.html                   # Job results browser with frontend-rendered measurement points

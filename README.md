@@ -50,6 +50,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 - [Architecture Overview](docs/architecture-overview.md)
 - [Database Documentation](docs/database.md)
 - [Streaming Guide](docs/streaming.md)
+- [Vision Calibration](docs/vision-calibration.md)
 - [IonVision Integration Tests](docs/ionVision.md)
 
 ## Endpoints
@@ -69,16 +70,18 @@ All endpoints are prefixed with `/api`.
 - `GET /api/stream/camera/feed` — raw camera MJPEG stream
 - `GET /api/stream/detection/feed` — detection overlay MJPEG stream
 - `POST /api/job` — create and run a new job
+- `POST /api/calibration` — start or advance the runtime 4-point calibration flow
 - `POST /api/robot/stop` — halt active job
 - `POST /api/robot/move` — move robot to specific position (calibration)
-- `POST /api/path/detect` — capture image, detect batteries, and calibrate
+- `POST /api/path/detect` — capture image and detect batteries
 - `POST /api/path/populate` — generate perimeter measurement points
 - `DELETE /api/job/{id}`
 
 ## Hardware integration notes
 
 - **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. Supports both automated job execution and manual control via `POST /api/robot/move` and `GET /api/robot/pose` for calibration testing.
-- **Camera/Vision**: `app/adapters/camera_vision.py` handles ArUco marker detection, battery-contour detection, and MJPEG streaming via `GET /api/stream/camera/feed` and `GET /api/stream/detection/feed`.
+- **Camera/Vision**: `app/adapters/camera_vision.py` loads the intrinsic camera profile, runs shared-camera capture, detects checkerboards and battery contours, and serves MJPEG streams.
+- **Calibration**: runtime 4-point mapping is written to `data/calibration/robot_mapping.json`. The last calibration timestamp is exposed through `GET /api/status`.
 - **IonVision (DMS)**: `app/adapters/ionVision.py` is an HTTP/WebSocket client to the external IonVision API. Configure the base URL with `IONVISION_BASE_URL` / `IONVISION_WS_BASE_URL` or in `app/dependencies.py`.
 - **Database**: SQLite (`data/nenabot.db`) stores all job state, waypoints, measurements, and snapshot images. See [Database Documentation](docs/database.md).
 
@@ -87,6 +90,7 @@ All endpoints are prefixed with `/api`.
 | Page          | URL                                    | Description                               |
 | :------------ | :------------------------------------- | :---------------------------------------- |
 | OpenAPI docs  | `/docs`                                | Auto-generated interactive API reference  |
+| Calibration Tester | Open `docs/calibration-tester.html` locally | Guided runtime 4-point calibration |
 | Job Tester    | Open `docs/job-tester.html` locally    | Create and monitor jobs                   |
 | Job Results   | Open `docs/job-results.html` locally   | Browse jobs, view images and measurements |
 | Stream Viewer | Open `docs/stream-viewer.html` locally | Live camera / detection stream viewer     |
