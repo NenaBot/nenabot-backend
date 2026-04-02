@@ -37,6 +37,19 @@ class Corner:
 
 
 @dataclass
+class CalibrationTarget:
+    x: float
+    y: float
+    row: int
+    col: int
+    step: int
+
+    @property
+    def label(self) -> str:
+        return f"P{self.step} ({self.row},{self.col})"
+
+
+@dataclass
 class DetectionResult:
     corners: list[Corner] = field(default_factory=list)
     width_mm: float = 0.0
@@ -59,6 +72,7 @@ class CheckerboardResult:
     ok: bool
     corners: list[Corner] = field(default_factory=list)
     target_points: list[Corner] = field(default_factory=list)
+    target_specs: list[CalibrationTarget] = field(default_factory=list)
     image_size: tuple[int, int] | None = None
     error: str | None = None
 
@@ -154,6 +168,8 @@ class CameraVisionAdapter:
             checkerboard_size=(int(checkerboard_size[0]), int(checkerboard_size[1])),
             square_size_mm=square_size_mm,
         )
+        self._frame_width = resolution[0]
+        self._frame_height = resolution[1]
         self._intrinsics_error = None
 
     @property
@@ -200,6 +216,10 @@ class CameraVisionAdapter:
         cap = cv2.VideoCapture(self._device_index)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
+        try:
+            cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+        except Exception:  # pragma: no cover
+            logger.debug("Failed to disable autofocus", exc_info=True)
 
         if not cap.isOpened():
             self._capture_error = "Unable to open camera"
@@ -392,6 +412,20 @@ class CameraVisionAdapter:
     def find_checkerboard(self, frame: np.ndarray) -> CheckerboardResult:
         import cv2
 
+        if self._intrinsics:
+            expected_size = self._intrinsics.resolution
+            actual_size = (frame.shape[1], frame.shape[0])
+            if actual_size != expected_size:
+                return CheckerboardResult(
+                    ok=False,
+                    image_size=actual_size,
+                    error=(
+                        "Camera frame resolution "
+                        f"{actual_size[0]}x{actual_size[1]} does not match intrinsic calibration "
+                        f"{expected_size[0]}x{expected_size[1]}"
+                    ),
+                )
+
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         found, corners = cv2.findChessboardCorners(gray, self.checkerboard_size, None)
         if not found or corners is None:
@@ -411,22 +445,32 @@ class CameraVisionAdapter:
         all_corners = [
             Corner(x=float(point[0][0]), y=float(point[0][1])) for point in refined
         ]
-        targets = self._extract_target_points(refined)
+        target_specs = self._extract_target_specs(refined)
+        targets = [Corner(x=target.x, y=target.y) for target in target_specs]
 
         return CheckerboardResult(
             ok=True,
             corners=all_corners,
             target_points=targets,
+            target_specs=target_specs,
             image_size=(frame.shape[1], frame.shape[0]),
         )
 
-    def _extract_target_points(self, corners: np.ndarray) -> list[Corner]:
+    def _extract_target_specs(self, corners: np.ndarray) -> list[CalibrationTarget]:
         cols, _rows = self.checkerboard_size
-        targets: list[Corner] = []
-        for row, col in FIXED_CALIBRATION_POINTS:
+        targets: list[CalibrationTarget] = []
+        for step, (row, col) in enumerate(FIXED_CALIBRATION_POINTS, start=1):
             flat_index = row * cols + col
             point = corners[flat_index][0]
-            targets.append(Corner(x=float(point[0]), y=float(point[1])))
+            targets.append(
+                CalibrationTarget(
+                    x=float(point[0]),
+                    y=float(point[1]),
+                    row=row,
+                    col=col,
+                    step=step,
+                )
+            )
         return targets
 
     # ---- streaming ----
@@ -513,17 +557,56 @@ class CameraVisionAdapter:
             pts = np.array([[int(c.x), int(c.y)] for c in checkerboard.corners])
             for point in pts:
                 cv2.circle(annotated, tuple(point), 3, (255, 0, 255), -1)
-            for index, point in enumerate(checkerboard.target_points, start=1):
-                px = int(point.x)
-                py = int(point.y)
+            for target in checkerboard.target_specs:
+                px = int(target.x)
+                py = int(target.y)
                 cv2.circle(annotated, (px, py), 10, (0, 140, 255), 2)
                 cv2.putText(
                     annotated,
-                    str(index),
+                    target.label,
                     (px + 10, py - 10),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
+                    0.5,
                     (0, 140, 255),
+                    2,
+                )
+
+            if len(checkerboard.target_specs) >= 4:
+                p1 = checkerboard.target_specs[0]
+                p2 = checkerboard.target_specs[1]
+                p4 = checkerboard.target_specs[3]
+                cv2.arrowedLine(
+                    annotated,
+                    (int(p1.x), int(p1.y)),
+                    (int(p2.x), int(p2.y)),
+                    (38, 189, 248),
+                    2,
+                    tipLength=0.03,
+                )
+                cv2.arrowedLine(
+                    annotated,
+                    (int(p1.x), int(p1.y)),
+                    (int(p4.x), int(p4.y)),
+                    (34, 197, 94),
+                    2,
+                    tipLength=0.03,
+                )
+                cv2.putText(
+                    annotated,
+                    "col+",
+                    (int((p1.x + p2.x) / 2), int((p1.y + p2.y) / 2) - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (38, 189, 248),
+                    2,
+                )
+                cv2.putText(
+                    annotated,
+                    "row+",
+                    (int((p1.x + p4.x) / 2) + 8, int((p1.y + p4.y) / 2)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (34, 197, 94),
                     2,
                 )
 

@@ -103,6 +103,12 @@ def write_mapping(
         "start_pose": {"x": 10.0, "y": 20.0, "z": 30.0, "r": 40.0},
         "rvec": rvec.tolist(),
         "tvec": tvec.tolist(),
+        "plane": {
+            "origin": [200.0, 100.0, -50.0],
+            "x_axis": [1.0, 0.0, 0.0],
+            "y_axis": [0.0, 1.0, 0.0],
+            "normal": [0.0, 0.0, 1.0],
+        },
     }
 
     path.parent.mkdir(parents=True, exist_ok=True)

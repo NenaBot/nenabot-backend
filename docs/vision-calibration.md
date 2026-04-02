@@ -23,6 +23,8 @@ The backend loads:
 - `resolution`
 - optional checkerboard metadata
 
+The live runtime calibration must use the same camera resolution as the intrinsic file. The backend now adopts the intrinsic file resolution automatically so the highlighted checkerboard points match the research calibration setup.
+
 If the intrinsic JSON is missing or invalid:
 
 - `GET /api/status` reports `intrinsicsLoaded = false`
@@ -43,10 +45,12 @@ Open [`docs/calibration-tester.html`](./calibration-tester.html) and follow the 
 
 The fixed checkerboard sequence is:
 
-- `(1, 0)`
-- `(1, 6)`
-- `(5, 7)`
-- `(5, 0)`
+- `P1 (1, 0)`
+- `P2 (1, 6)`
+- `P3 (5, 7)`
+- `P4 (5, 0)`
+
+Those are the same four board indices used in the research scripts. The detection overlay also draws the `row+` and `col+` directions from `P1` so the operator can confirm the board orientation before capturing points.
 
 ## Mapping File Contents
 
@@ -61,6 +65,7 @@ The fixed checkerboard sequence is:
 - `start_pose`
 - `rvec`
 - `tvec`
+- `plane`
 
 `calibrated_at` is surfaced through `GET /api/status` as `lastCalibratedAt` so the frontend can show when calibration was last completed.
 

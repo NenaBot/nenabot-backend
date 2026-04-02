@@ -13,6 +13,7 @@ from pathlib import Path
 
 from app.adapters.camera_vision import (
     FIXED_CALIBRATION_POINTS,
+    CalibrationTarget,
     CameraVisionAdapter,
     DetectionResults,
 )
@@ -31,7 +32,7 @@ TOTAL_CALIBRATION_STEPS = len(FIXED_CALIBRATION_POINTS)
 @dataclass
 class CalibrationSession:
     reference_image_base64: str
-    image_points: list[tuple[float, float]]
+    targets: list[CalibrationTarget]
     start_pose: Waypoint
     captured_robot_points: list[tuple[float, float, float]] = field(
         default_factory=list
@@ -533,7 +534,20 @@ class OrchestratorService:
 
         session = CalibrationSession(
             reference_image_base64=self._camera_vision.frame_to_base64(frame),
-            image_points=[(point.x, point.y) for point in checkerboard.target_points],
+            targets=checkerboard.target_specs
+            or [
+                CalibrationTarget(
+                    x=point.x,
+                    y=point.y,
+                    row=row,
+                    col=col,
+                    step=step,
+                )
+                for step, ((row, col), point) in enumerate(
+                    zip(FIXED_CALIBRATION_POINTS, checkerboard.target_points),
+                    start=1,
+                )
+            ],
             start_pose=Waypoint(x=pose.x, y=pose.y, z=pose.z, r=pose.r),
         )
         with self._calibration_lock:
@@ -541,7 +555,10 @@ class OrchestratorService:
 
         return self._calibration_response(
             ok=True,
-            message="Calibration started",
+            message=(
+                "Calibration started. Move the robot tip to "
+                f"{session.targets[0].label} and press Capture Current Point."
+            ),
             checkerboard_visible=True,
             session=session,
             include_reference=True,
@@ -576,9 +593,13 @@ class OrchestratorService:
 
         session.captured_robot_points.append((pose.x, pose.y, pose.z))
         if session.current_step < TOTAL_CALIBRATION_STEPS:
+            next_target = session.targets[session.current_step]
             return self._calibration_response(
                 ok=True,
-                message=f"Captured point {session.current_step}/{TOTAL_CALIBRATION_STEPS}",
+                message=(
+                    f"Captured point {session.current_step}/{TOTAL_CALIBRATION_STEPS}. "
+                    f"Move to {next_target.label} and press Capture Current Point."
+                ),
                 checkerboard_visible=self._camera_vision.checkerboard_visible(),
                 session=session,
             )
@@ -604,7 +625,7 @@ class OrchestratorService:
             message="Calibration completed",
             checkerboard_visible=self._camera_vision.checkerboard_visible(),
             current_step=TOTAL_CALIBRATION_STEPS,
-            captured_points=session.image_points,
+            captured_targets=session.targets,
             calibrated=True,
             last_calibrated_at=mapping["calibrated_at"],
         )
@@ -618,21 +639,39 @@ class OrchestratorService:
         include_reference: bool = False,
         current_step: int | None = None,
         captured_points: list[tuple[float, float]] | None = None,
+        captured_targets: list[CalibrationTarget] | None = None,
         calibrated: bool | None = None,
         last_calibrated_at: str | None = None,
     ) -> dict[str, object]:
         active_session = session or self._calibration_session
-        captured = captured_points
-        if captured is None and active_session is not None:
-            captured = active_session.image_points[: active_session.current_step]
+        if captured_targets is not None:
+            captured = captured_targets
+        elif captured_points is not None:
+            captured = [
+                CalibrationTarget(
+                    x=point[0],
+                    y=point[1],
+                    row=row,
+                    col=col,
+                    step=step,
+                )
+                for step, ((row, col), point) in enumerate(
+                    zip(FIXED_CALIBRATION_POINTS, captured_points),
+                    start=1,
+                )
+            ]
+        elif active_session is not None:
+            captured = active_session.targets[: active_session.current_step]
+        else:
+            captured = []
 
         step = current_step
         if step is None:
             step = active_session.current_step if active_session else 0
 
-        target_point: tuple[float, float] | None = None
+        target_point: CalibrationTarget | None = None
         if active_session and active_session.current_step < TOTAL_CALIBRATION_STEPS:
-            target_point = active_session.image_points[active_session.current_step]
+            target_point = active_session.targets[active_session.current_step]
 
         response: dict[str, object] = {
             "ok": ok,
@@ -641,12 +680,27 @@ class OrchestratorService:
             "currentStep": step,
             "totalSteps": TOTAL_CALIBRATION_STEPS,
             "targetPoint": (
-                {"pixelX": target_point[0], "pixelY": target_point[1]}
+                {
+                    "pixelX": target_point.x,
+                    "pixelY": target_point.y,
+                    "gridRow": target_point.row,
+                    "gridCol": target_point.col,
+                    "step": target_point.step,
+                    "label": target_point.label,
+                }
                 if target_point is not None
                 else None
             ),
             "capturedPoints": [
-                {"pixelX": point[0], "pixelY": point[1]} for point in (captured or [])
+                {
+                    "pixelX": point.x,
+                    "pixelY": point.y,
+                    "gridRow": point.row,
+                    "gridCol": point.col,
+                    "step": point.step,
+                    "label": point.label,
+                }
+                for point in captured
             ],
             "calibrated": self.is_calibrated if calibrated is None else calibrated,
             "lastCalibratedAt": (
@@ -668,7 +722,9 @@ class OrchestratorService:
                 self._camera_vision.intrinsics_error or "Intrinsics missing"
             )
 
-        image_points = np.array(session.image_points, dtype=np.float64).reshape(
+        image_points = np.array(
+            [[target.x, target.y] for target in session.targets], dtype=np.float64
+        ).reshape(
             -1, 1, 2
         )
         robot_points = np.array(
@@ -683,6 +739,8 @@ class OrchestratorService:
         if not success:
             raise RuntimeError("solvePnP failed")
 
+        plane = self._build_plane_metadata(robot_points, rvec, tvec)
+
         calibrated_at = datetime.now(timezone.utc).isoformat()
         mapping = {
             "calibrated_at": calibrated_at,
@@ -695,14 +753,12 @@ class OrchestratorService:
             },
             "image_points": [
                 {
-                    "row": row,
-                    "col": col,
-                    "pixelX": point[0],
-                    "pixelY": point[1],
+                    "row": target.row,
+                    "col": target.col,
+                    "pixelX": target.x,
+                    "pixelY": target.y,
                 }
-                for (row, col), point in zip(
-                    FIXED_CALIBRATION_POINTS, session.image_points
-                )
+                for target in session.targets
             ],
             "robot_points": [
                 {
@@ -725,6 +781,7 @@ class OrchestratorService:
             },
             "rvec": rvec.tolist(),
             "tvec": tvec.tolist(),
+            "plane": plane,
         }
 
         self._mapping_path.parent.mkdir(parents=True, exist_ok=True)
@@ -750,12 +807,107 @@ class OrchestratorService:
             for key in required:
                 if key not in data:
                     raise ValueError(f"Missing mapping key: {key}")
+            fixed_points = (
+                data.get("checkerboard", {}).get("fixed_points")
+                or [list(point) for point in FIXED_CALIBRATION_POINTS]
+            )
+            if fixed_points != [list(point) for point in FIXED_CALIBRATION_POINTS]:
+                raise ValueError("Unsupported checkerboard point order")
+            if self._camera_vision.intrinsics_loaded:
+                current_intrinsics_path = self._camera_vision.intrinsics_path
+                if current_intrinsics_path and data.get(
+                    "intrinsics_path"
+                ) != current_intrinsics_path:
+                    raise ValueError("Mapping intrinsics do not match current camera")
+                expected_resolution = list(
+                    self._camera_vision.intrinsics_resolution or []
+                )
+                if expected_resolution and data.get("resolution") != expected_resolution:
+                    raise ValueError("Mapping resolution does not match intrinsics")
             return data
         except Exception as exc:
             logger.warning(
                 "Ignoring invalid mapping file %s: %s", self._mapping_path, exc
             )
             return None
+
+    def _build_plane_metadata(self, robot_points, rvec, tvec) -> dict[str, list[float]]:
+        import cv2
+        import numpy as np
+
+        if len(robot_points) != TOTAL_CALIBRATION_STEPS:
+            raise RuntimeError("Calibration requires four robot points")
+
+        origin = np.array(robot_points[0], dtype=np.float64)
+        x_direction = np.array(robot_points[1], dtype=np.float64) - origin
+        y_direction = np.array(robot_points[3], dtype=np.float64) - origin
+
+        x_norm = np.linalg.norm(x_direction)
+        y_direction = y_direction - (
+            np.dot(y_direction, x_direction) / max(x_norm**2, 1e-12)
+        ) * x_direction
+        y_norm = np.linalg.norm(y_direction)
+
+        if x_norm <= 1e-9 or y_norm <= 1e-9:
+            raise RuntimeError("Calibration points do not define a stable board plane")
+
+        x_axis = x_direction / x_norm
+        y_axis = y_direction / y_norm
+        normal = np.cross(x_axis, y_axis)
+        normal_norm = np.linalg.norm(normal)
+        if normal_norm <= 1e-9:
+            raise RuntimeError("Calibration plane is degenerate")
+        normal = normal / normal_norm
+
+        rotation, _ = cv2.Rodrigues(np.array(rvec, dtype=np.float64))
+        tvec_array = np.array(tvec, dtype=np.float64).reshape(3, 1)
+        camera_origin = (-rotation.T @ tvec_array).reshape(3)
+        if np.dot(normal, camera_origin - origin) < 0:
+            normal = -normal
+
+        return {
+            "origin": origin.tolist(),
+            "x_axis": x_axis.tolist(),
+            "y_axis": y_axis.tolist(),
+            "normal": normal.tolist(),
+        }
+
+    def _plane_geometry(self) -> tuple[object, object, object]:
+        import cv2
+        import numpy as np
+
+        if not self.is_calibrated or not self._mapping_data:
+            raise RuntimeError("Not calibrated")
+
+        rvec = np.array(self._mapping_data["rvec"], dtype=np.float64)
+        tvec = np.array(self._mapping_data["tvec"], dtype=np.float64).reshape(3, 1)
+        rotation, _ = cv2.Rodrigues(rvec)
+        camera_origin = (-rotation.T @ tvec).reshape(3)
+
+        plane_meta = self._mapping_data.get("plane") or {}
+        if plane_meta:
+            origin = np.array(plane_meta["origin"], dtype=np.float64)
+            normal = np.array(plane_meta["normal"], dtype=np.float64)
+        else:
+            robot_points = np.array(
+                [
+                    [
+                        point["robotX"],
+                        point["robotY"],
+                        point["robotZ"],
+                    ]
+                    for point in self._mapping_data["robot_points"]
+                ],
+                dtype=np.float64,
+            )
+            plane_meta = self._build_plane_metadata(robot_points, rvec, tvec)
+            origin = np.array(plane_meta["origin"], dtype=np.float64)
+            normal = np.array(plane_meta["normal"], dtype=np.float64)
+
+        if np.dot(normal, camera_origin - origin) < 0:
+            normal = -normal
+
+        return rotation, camera_origin, (origin, normal)
 
     def _plane_point_from_pixel(
         self, px: float, py: float
@@ -776,31 +928,9 @@ class OrchestratorService:
             dtype=np.float64,
         )
 
-        rvec = np.array(self._mapping_data["rvec"], dtype=np.float64)
-        tvec = np.array(self._mapping_data["tvec"], dtype=np.float64).reshape(3, 1)
-        rotation, _ = cv2.Rodrigues(rvec)
+        rotation, camera_origin, plane = self._plane_geometry()
+        origin, normal = plane
         ray_world = (rotation.T @ ray_camera.reshape(3, 1)).reshape(3)
-        camera_origin = (-rotation.T @ tvec).reshape(3)
-
-        robot_points = np.array(
-            [
-                [
-                    point["robotX"],
-                    point["robotY"],
-                    point["robotZ"],
-                ]
-                for point in self._mapping_data["robot_points"]
-            ],
-            dtype=np.float64,
-        )
-        origin = robot_points[0]
-        normal = np.cross(robot_points[1] - origin, robot_points[2] - origin)
-        norm = np.linalg.norm(normal)
-        if norm <= 1e-9:
-            raise RuntimeError("Calibration plane is degenerate")
-        normal = normal / norm
-        if np.dot(normal, camera_origin - origin) < 0:
-            normal = -normal
 
         denominator = float(np.dot(normal, ray_world))
         if abs(denominator) <= 1e-9:

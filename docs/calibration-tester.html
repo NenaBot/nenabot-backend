@@ -281,7 +281,7 @@
                 ctx.beginPath();
                 ctx.arc(point.pixelX, point.pixelY, 8, 0, Math.PI * 2);
                 ctx.stroke();
-                ctx.fillText(String(index + 1), point.pixelX + 10, point.pixelY - 10);
+                ctx.fillText(point.label || `P${index + 1}`, point.pixelX + 10, point.pixelY - 10);
             });
 
             if (state.targetPoint) {
@@ -290,7 +290,11 @@
                 ctx.arc(state.targetPoint.pixelX, state.targetPoint.pixelY, 14, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.fillStyle = "#f59e0b";
-                ctx.fillText("NEXT", state.targetPoint.pixelX + 16, state.targetPoint.pixelY - 14);
+                ctx.fillText(
+                    state.targetPoint.label || "NEXT",
+                    state.targetPoint.pixelX + 16,
+                    state.targetPoint.pixelY - 14,
+                );
             }
         }
 

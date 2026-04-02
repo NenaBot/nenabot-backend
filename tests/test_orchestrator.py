@@ -148,7 +148,12 @@ def test_calibration_flow_writes_mapping_file_and_status_date(tmp_path: Path) ->
     assert start_response["ok"] is True
     assert start_response["referenceImageBase64"] == "encoded-image"
     assert start_response["currentStep"] == 0
-    assert start_response["targetPoint"] == {"pixelX": 100.0, "pixelY": 100.0}
+    assert start_response["targetPoint"]["pixelX"] == 100.0
+    assert start_response["targetPoint"]["pixelY"] == 100.0
+    assert start_response["targetPoint"]["gridRow"] == 1
+    assert start_response["targetPoint"]["gridCol"] == 0
+    assert start_response["targetPoint"]["step"] == 1
+    assert start_response["targetPoint"]["label"] == "P1 (1,0)"
 
     for expected_step in range(1, 5):
         response = service.calibration_action("capture")
@@ -158,6 +163,10 @@ def test_calibration_flow_writes_mapping_file_and_status_date(tmp_path: Path) ->
     saved = json.loads(mapping_path.read_text())
     assert saved["intrinsics_path"] == str(intrinsics_path)
     assert saved["calibrated_at"]
+    assert saved["plane"]["origin"] == pytest.approx([200.0, 100.0, -50.0])
+    assert saved["plane"]["x_axis"] == pytest.approx([1.0, 0.0, 0.0])
+    assert saved["plane"]["y_axis"] == pytest.approx([0.0, 1.0, 0.0])
+    assert saved["plane"]["normal"] == pytest.approx([0.0, 0.0, -1.0])
     assert service.is_calibrated is True
     assert service.last_calibrated_at == saved["calibrated_at"]
 

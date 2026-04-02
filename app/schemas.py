@@ -180,6 +180,10 @@ class RobotMoveResponse(BaseModel):
 class PixelPointSchema(BaseModel):
     pixel_x: float = Field(alias="pixelX")
     pixel_y: float = Field(alias="pixelY")
+    grid_row: int | None = Field(None, alias="gridRow")
+    grid_col: int | None = Field(None, alias="gridCol")
+    step: int | None = None
+    label: str | None = None
 
     model_config = {"populate_by_name": True}
 
