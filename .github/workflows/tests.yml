@@ -38,6 +38,7 @@ jobs:
         run: |
           set -o pipefail
           python -m pytest \
+            -m "not hardware and not integration" \
             --junitxml=pytest-report.xml \
             --cov=app \
             --cov-report=xml \

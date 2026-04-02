@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
 import queue
 import threading
 import time
@@ -19,6 +20,9 @@ from app.domain.models import Job, Measurement, Waypoint
 logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
+
+MAX_MEASURING_POINTS_PER_CM = 10.0
+MAX_POPULATED_PATH_POINTS = 20000
 
 
 class OrchestratorService:
@@ -540,6 +544,121 @@ class OrchestratorService:
     def calibration_pixels_per_mm(self) -> float | None:
         return self._cal_pixels_per_mm
 
+    def sort_pixel_path_from_canvas_start(
+        self,
+        waypoints: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        """Order waypoints by direct distance to the calibrated canvas start."""
+        if self._cal_canvas_start is None:
+            raise RuntimeError(
+                "Not calibrated — call POST /path/detect first "
+                "(with robot arm at starting position)"
+            )
+
+        if not waypoints:
+            return []
+
+        start = self._cal_canvas_start
+        return sorted(
+            waypoints,
+            key=lambda p: math.hypot(p[0] - start[0], p[1] - start[1]),
+        )
+
+    def _normalize_corners_clockwise_start_nearest(
+        self,
+        corners: list[tuple[float, float]],
+        start: tuple[float, float],
+    ) -> list[tuple[float, float]]:
+        """Return corners ordered clockwise and rotated to start nearest to canvas start."""
+        if len(corners) < 2:
+            return list(corners)
+
+        cx = sum(x for x, _ in corners) / len(corners)
+        cy = sum(y for _, y in corners) / len(corners)
+
+        # Ascending angle yields clockwise order in image coordinates (Y grows down).
+        ordered = sorted(corners, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+
+        nearest_idx = min(
+            range(len(ordered)),
+            key=lambda i: math.hypot(
+                ordered[i][0] - start[0],
+                ordered[i][1] - start[1],
+            ),
+        )
+        return ordered[nearest_idx:] + ordered[:nearest_idx]
+
+    def populate_pixel_path_from_batteries(
+        self,
+        batteries: list[list[tuple[float, float]]],
+        measuring_points_per_cm: float,
+    ) -> list[dict[str, float | int | str]]:
+        """Generate perimeter measurement points for frontend-provided battery corners."""
+        if self._cal_canvas_start is None or self._cal_pixels_per_mm is None:
+            raise RuntimeError(
+                "Not calibrated — call POST /path/detect first "
+                "(with robot arm at starting position)"
+            )
+        if measuring_points_per_cm <= 0:
+            raise ValueError("measuring_points_per_cm must be > 0")
+        if measuring_points_per_cm > MAX_MEASURING_POINTS_PER_CM:
+            raise ValueError(
+                f"measuring_points_per_cm must be <= {MAX_MEASURING_POINTS_PER_CM}"
+            )
+
+        canvas_start = self._cal_canvas_start
+        step_px = (10.0 / measuring_points_per_cm) * self._cal_pixels_per_mm
+
+        ordered_batteries: list[tuple[float, list[tuple[float, float]]]] = []
+        for corners in batteries:
+            clean = [(float(x), float(y)) for x, y in corners]
+            if len(clean) < 2:
+                continue
+
+            normalized = self._normalize_corners_clockwise_start_nearest(
+                clean,
+                canvas_start,
+            )
+            nearest_dist = min(
+                math.hypot(px - canvas_start[0], py - canvas_start[1])
+                for px, py in normalized
+            )
+            ordered_batteries.append((nearest_dist, normalized))
+
+        ordered_batteries.sort(key=lambda item: item[0])
+
+        path: list[dict[str, float | int | str]] = []
+        for battery_nr, (_, corners) in enumerate(ordered_batteries):
+            corner_count = len(corners)
+            for corner_idx in range(corner_count):
+                x1, y1 = corners[corner_idx]
+                x2, y2 = corners[(corner_idx + 1) % corner_count]
+                edge_len = math.hypot(x2 - x1, y2 - y1)
+                if edge_len == 0:
+                    continue
+
+                sample_count = max(1, int(math.ceil(edge_len / step_px)))
+                if len(path) + sample_count > MAX_POPULATED_PATH_POINTS:
+                    raise ValueError(
+                        "Requested path is too dense; reduce measuringPointsPerCm or battery count"
+                    )
+                for measurement_idx in range(sample_count):
+                    t = measurement_idx / sample_count
+                    px = x1 + (x2 - x1) * t
+                    py = y1 + (y2 - y1) * t
+                    path.append(
+                        {
+                            "index": f"{battery_nr}-{corner_idx}-{measurement_idx}",
+                            "batteryNr": battery_nr,
+                            "cornerIndex": corner_idx,
+                            "measurementIndex": measurement_idx,
+                            "pixelX": px,
+                            "pixelY": py,
+                        }
+                    )
+
+        return path
+
     def pixel_to_robot(
         self, px: float, py: float, work_z: float, work_r: float
     ) -> Waypoint:
@@ -631,6 +750,8 @@ class OrchestratorService:
             msg = "No ArUco markers detected"
             messages.append(msg)
             logger.warning("Calibration: no ArUco markers — canvas start not set")
+
+        # Keep detector output order unchanged so frontend receives initial values as-is.
 
         result.error = "; ".join(dict.fromkeys(msg for msg in messages if msg)) or None
 

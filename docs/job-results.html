@@ -352,8 +352,8 @@
                     const scan = m.scanResult ? JSON.stringify(m.scanResult).slice(0, 120) : '—';
                     rows += `<tr>
         <td>${(m.waypointIndex ?? 0) + 1}</td>
-        <td>${w.x?.toFixed(1)}</td><td>${w.y?.toFixed(1)}</td>
-        <td>${w.z?.toFixed(1)}</td><td>${w.r?.toFixed(1)}</td>
+        <td>${w.robotX?.toFixed(1)}</td><td>${w.robotY?.toFixed(1)}</td>
+        <td>${w.robotZ?.toFixed(1)}</td><td>${w.robotR?.toFixed(1)}</td>
         <td>${m.simulated ? 'Yes' : 'No'}</td>
         <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${scan}</td>
         <td>${m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '—'}</td>

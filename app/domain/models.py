@@ -11,6 +11,10 @@ class Waypoint:
     y: float
     z: float = 0.0
     r: float = 0.0
+    index: str | None = None
+    battery_nr: int | None = None
+    corner_index: int | None = None
+    measurement_index: int | None = None
 
 
 @dataclass

@@ -8,6 +8,7 @@ from app.adapters.camera_vision import (
     CameraVisionAdapter,
     CaptureResult,
     Corner,
+    DetectionResult,
     DetectionResults,
     MarkerCorners,
 )
@@ -224,6 +225,173 @@ def test_is_calibrated_property(tmp_path: Path) -> None:
     assert svc.is_calibrated is True
 
 
+# ---- ORC-TC-013: sort_pixel_path_from_canvas_start orders_by_start_distance ----
+
+
+def test_sort_pixel_path_from_canvas_start_orders_by_start_distance(
+    tmp_path: Path,
+) -> None:
+    """sort_pixel_path_from_canvas_start should order waypoints by distance from the canvas start and return sorted waypoints only."""
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+
+    waypoints = [
+        (700.0, 400.0),
+        (642.0, 401.0),
+        (650.0, 400.0),
+    ]
+
+    sorted_points = svc.sort_pixel_path_from_canvas_start(waypoints)
+    assert sorted_points == [
+        (642.0, 401.0),
+        (650.0, 400.0),
+        (700.0, 400.0),
+    ]
+    assert (640.0, 400.0) not in sorted_points
+
+
+def test_sort_pixel_path_from_canvas_start_raises_when_uncalibrated(
+    tmp_path: Path,
+) -> None:
+    """sort_pixel_path_from_canvas_start should raise without canvas start calibration."""
+    svc = _make_svc(tmp_path)
+    with pytest.raises(RuntimeError, match="Not calibrated"):
+        svc.sort_pixel_path_from_canvas_start([(1.0, 2.0)])
+
+
+def test_populate_pixel_path_from_batteries_generates_perimeter_points(
+    tmp_path: Path,
+) -> None:
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+    svc._cal_pixels_per_mm = 2.0
+
+    path = svc.populate_pixel_path_from_batteries(
+        batteries=[
+            [
+                (650.0, 390.0),
+                (690.0, 390.0),
+                (690.0, 430.0),
+                (650.0, 430.0),
+            ]
+        ],
+        measuring_points_per_cm=0.5,
+    )
+
+    assert len(path) == 4
+    assert path[0]["index"] == "0-0-0"
+    assert path[0]["batteryNr"] == 0
+    assert path[0]["cornerIndex"] == 0
+    assert path[0]["measurementIndex"] == 0
+    assert path[0]["pixelX"] == pytest.approx(650.0)
+    assert path[0]["pixelY"] == pytest.approx(390.0)
+
+
+def test_populate_pixel_path_from_batteries_orders_batteries_by_start_distance(
+    tmp_path: Path,
+) -> None:
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+    svc._cal_pixels_per_mm = 2.0
+
+    path = svc.populate_pixel_path_from_batteries(
+        batteries=[
+            [
+                (900.0, 500.0),
+                (940.0, 500.0),
+                (940.0, 540.0),
+                (900.0, 540.0),
+            ],
+            [
+                (650.0, 390.0),
+                (690.0, 390.0),
+                (690.0, 430.0),
+                (650.0, 430.0),
+            ],
+        ],
+        measuring_points_per_cm=0.5,
+    )
+
+    assert path
+    assert path[0]["batteryNr"] == 0
+    assert path[0]["pixelX"] == pytest.approx(650.0)
+    assert path[0]["pixelY"] == pytest.approx(390.0)
+    assert any(point["batteryNr"] == 1 for point in path)
+
+
+def test_detect_path_keeps_detection_order(tmp_path: Path) -> None:
+    """detect_path() should keep detector output order unchanged."""
+    svc = _make_svc(tmp_path)
+
+    image_path = tmp_path / "capture.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    marker = MarkerCorners(
+        corners=[
+            Corner(x=10.0, y=10.0),
+            Corner(x=20.0, y=10.0),
+            Corner(x=20.0, y=20.0),
+            Corner(x=10.0, y=20.0),
+        ]
+    )
+
+    detections = [
+        DetectionResult(
+            corners=[],
+            width_mm=50.0,
+            height_mm=50.0,
+            center_x=700.0,
+            center_y=400.0,
+            confidence=0.9,
+        ),
+        DetectionResult(
+            corners=[],
+            width_mm=50.0,
+            height_mm=50.0,
+            center_x=642.0,
+            center_y=401.0,
+            confidence=0.9,
+        ),
+        DetectionResult(
+            corners=[],
+            width_mm=50.0,
+            height_mm=50.0,
+            center_x=650.0,
+            center_y=400.0,
+            confidence=0.9,
+        ),
+    ]
+    with patch.object(
+        svc._camera_vision,
+        "capture",
+        return_value=CaptureResult(ok=True, image_path=str(image_path)),
+    ), patch.object(
+        svc._camera_vision,
+        "detect",
+        return_value=DetectionResults(
+            ok=True,
+            detections=detections,
+            pixels_per_mm=2.0,
+            marker_count=1,
+            marker_corners=[marker],
+            error=None,
+        ),
+    ), patch.object(
+        svc._robot,
+        "get_pose",
+        return_value=PoseResult(ok=True, x=100.0, y=200.0, z=0.0, r=0.0),
+    ):
+        result = svc.detect_path()
+
+    assert result.ok is True
+    assert len(result.detections) == 3
+    assert result.detections[0].center_x == 700.0
+    assert result.detections[0].center_y == 400.0
+    assert result.detections[1].center_x == 642.0
+    assert result.detections[1].center_y == 401.0
+    assert result.detections[2].center_x == 650.0
+    assert result.detections[2].center_y == 400.0
+
+
 def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
     tmp_path: Path,
 ) -> None:
@@ -232,7 +400,6 @@ def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
     svc._cal_robot_start = Waypoint(x=100.0, y=200.0, z=0.0, r=0.0)
     svc._cal_canvas_start = (640.0, 400.0)
     svc._cal_pixels_per_mm = 2.0
-
     image_path = tmp_path / "capture.jpg"
     image_path.write_bytes(b"fake-jpeg")
     marker = MarkerCorners(
@@ -264,10 +431,10 @@ def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
         "get_pose",
         return_value=PoseResult(ok=True, x=0.0, y=0.0, z=0.0, r=0.0),
     ):
-        result = svc.detect_path()
+        origin_result = svc.detect_path()
 
-    assert result.ok is False
-    assert "origin" in (result.error or "").lower()
+    assert origin_result.ok is False
+    assert "origin" in (origin_result.error or "").lower()
     assert svc.calibration_robot_start is None
     assert svc.is_calibrated is False
 

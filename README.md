@@ -20,6 +20,8 @@ OpenAPI spec is generated from the controllers and available at:
 - http://127.0.0.1:8000/openapi.json
 - http://127.0.0.1:8000/docs
 
+All API endpoints are served under the `/api` prefix (e.g. `GET /api/health`).
+
 ## Running with Docker
 
 ```bash
@@ -47,33 +49,37 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 
 - [Architecture Overview](docs/architecture-overview.md)
 - [Database Documentation](docs/database.md)
-- [IonVision Integration Tests](docs/ionvision-integration-tests/README.md)
+- [Streaming Guide](docs/streaming.md)
+- [IonVision Integration Tests](docs/ionVision.md)
 
 ## Endpoints
 
-- `GET /health`
-- `GET /status`
-- `GET /jobs`
-- `GET /jobs/{id}`
-- `GET /jobs/{id}/image` — clean base JPEG snapshot
-- `GET /jobs/{id}/events` — SSE stream of real-time job progress events
-- `GET /jobs/latest`
-- `GET /profiles`
-- `GET /profiles/default`
-- `GET /robot/pose` — current end-effector position and joint angles
-- `GET /streams/camera/feed` — raw camera MJPEG stream
-- `GET /streams/detection/feed` — detection overlay MJPEG stream
-- `POST /jobs`
-- `POST /robot/stop` — halt active job
-- `POST /robot/move` — move robot to specific position (calibration)
-- `POST /paths` — detect path and battery contours
-- `DELETE /jobs/{id}`
+All endpoints are prefixed with `/api`.
+
+- `GET /api/health`
+- `GET /api/status`
+- `GET /api/job` — list all jobs
+- `GET /api/job/latest` — most recent job
+- `GET /api/job/{id}` — single job by ID
+- `GET /api/job/{id}/image` — clean base JPEG snapshot
+- `GET /api/job/{id}/events` — SSE stream of real-time job progress events
+- `GET /api/profile` — list configuration profiles
+- `GET /api/profile/default`
+- `GET /api/robot/pose` — current end-effector position and joint angles
+- `GET /api/stream/camera/feed` — raw camera MJPEG stream
+- `GET /api/stream/detection/feed` — detection overlay MJPEG stream
+- `POST /api/job` — create and run a new job
+- `POST /api/robot/stop` — halt active job
+- `POST /api/robot/move` — move robot to specific position (calibration)
+- `POST /api/path/detect` — capture image, detect batteries, and calibrate
+- `POST /api/path/populate` — generate perimeter measurement points
+- `DELETE /api/job/{id}`
 
 ## Hardware integration notes
 
-- **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. Supports both automated job execution and manual control via `/robot/move` and `/robot/pose` endpoints for calibration testing.
-- **Camera/Vision**: `app/adapters/camera_vision.py` handles ArUco marker detection, battery-contour detection, and MJPEG streaming via `/streams/camera/feed` and `/streams/detection/feed`.
-- **IonVision (DMS)**: `app/adapters/ionVision.py` is an HTTP client to the external IonVision API. Configure the base URL with `IONVISION_BASE_URL` / `IONVISION_WS_BASE_URL` or in `app/dependencies.py`.
+- **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. Supports both automated job execution and manual control via `POST /api/robot/move` and `GET /api/robot/pose` for calibration testing.
+- **Camera/Vision**: `app/adapters/camera_vision.py` handles ArUco marker detection, battery-contour detection, and MJPEG streaming via `GET /api/stream/camera/feed` and `GET /api/stream/detection/feed`.
+- **IonVision (DMS)**: `app/adapters/ionVision.py` is an HTTP/WebSocket client to the external IonVision API. Configure the base URL with `IONVISION_BASE_URL` / `IONVISION_WS_BASE_URL` or in `app/dependencies.py`.
 - **Database**: SQLite (`data/nenabot.db`) stores all job state, waypoints, measurements, and snapshot images. See [Database Documentation](docs/database.md).
 
 ## UI pages
@@ -91,8 +97,41 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 pytest -q
 ```
 
-For the manual real-device IonVision integration suite, see
-[`docs/IonVision/ionvision-integration-tests/README.md`](docs/IonVision/ionvision-integration-tests/README.md).
+CI runs only unit tests. Hardware/integration tests are excluded via `-m "not hardware and not integration"` and must be run manually when connected to the devices.
+
+### Robot arm hardware tests
+
+```bash
+RUN_ROBOT_HARDWARE_TESTS=1 pytest -s -v tests/test_robot_hardware.py
+```
+
+| Variable                     | Default | Description                                                                   |
+| :--------------------------- | :------ | :---------------------------------------------------------------------------- |
+| `RUN_ROBOT_HARDWARE_TESTS`   | —       | Set to `1` to enable the suite                                                |
+| `DOBOT_ENABLE_LEGACY_HOMING` | `0`     | Set to `1` to use legacy `SetHOMECmd` (only if `SetHOMECmdEx` is unavailable) |
+
+For full details see [`docs/robot.md`](docs/robot.md).
+
+### IonVision hardware tests
+
+Defaults to `http://192.168.1.109/api` / `ws://192.168.1.109/socket`. Override with env vars:
+
+```bash
+IONVISION_RUN_HARDWARE_TESTS=1 pytest -s -v tests/test_ionvision_hardware.py
+```
+
+Key env vars (all optional — hardcoded defaults are used if not set):
+
+| Variable                                     | Default                     | Description                                      |
+| :------------------------------------------- | :-------------------------- | :----------------------------------------------- |
+| `IONVISION_BASE_URL`                         | `http://192.168.1.109/api`  | IonVision HTTP base URL                          |
+| `IONVISION_WS_BASE_URL`                      | `ws://192.168.1.109/socket` | WebSocket URL (derived from base URL if omitted) |
+| `IONVISION_REQUEST_TIMEOUT_S`                | `10.0`                      | Per-request timeout                              |
+| `IONVISION_ENABLE_MUTATION_TESTS`            | `true`                      | Allow scan start/stop and comment writes         |
+| `IONVISION_RUN_WS_TEST`                      | `true`                      | Enable WebSocket tests                           |
+| `IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S` | `120.0`                     | How long to wait for `scan.resultsProcessed`     |
+
+For full details see [`docs/ionVision.md`](docs/ionVision.md).
 
 # GitHub Workflow & Contribution Guidelines
 
