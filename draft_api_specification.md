@@ -88,7 +88,7 @@ The job object encapsulates the configuration, output data, and current processi
 
 ```json
 {
-    "ok": true,
+    "requestSucceeded": true,
     "detections": [
         {
             "corners": [
@@ -104,11 +104,10 @@ The job object encapsulates the configuration, output data, and current processi
             "confidence": 0.95
         }
     ],
-    "detections_sorted": "boolean — true if detections are ordered by nearest-neighbor from canvas start",
     "image_base64": "string (full JPEG as base64)",
-    "pixels_per_mm": 2.5,
-    "marker_count": 1,
-    "marker_corners": [
+    "pixelsPerMm": 2.5,
+    "markerCount": 1,
+    "markerCorners": [
         {
             "corners": [
                 { "pixelX": 50.0, "pixelY": 50.0 },
@@ -120,14 +119,14 @@ The job object encapsulates the configuration, output data, and current processi
     ],
     "calibration": {
         "calibrated": true,
-        "robot_start": {
+        "robotStart": {
             "robotX": 100.0,
             "robotY": 200.0,
             "robotZ": 0.0,
             "robotR": 0.0
         },
-        "canvas_start": { "pixelX": 640.0, "pixelY": 450.0 },
-        "pixels_per_mm": 2.5
+        "canvasStart": { "pixelX": 640.0, "pixelY": 450.0 },
+        "pixelsPerMm": 2.5
     },
     "error": null
 }
@@ -185,7 +184,7 @@ The job object encapsulates the configuration, output data, and current processi
 - Generates points on each battery perimeter only (no interior fill).
 - Density is controlled by `measuringPointsPerCm`.
 - Each battery traversal starts at the corner nearest to `canvas_start`, then proceeds clockwise.
-- Batteries are ordered by nearest distance from `canvas_start` (not by shortest route between batteries).
+- Batteries are ordered by nearest distance from `canvasStart` (not by shortest route between batteries).
 - Requires prior calibration (status **409** if not calibrated).
 
 ---
@@ -195,4 +194,4 @@ The job object encapsulates the configuration, output data, and current processi
 Real-time job progress is delivered via Server-Sent Events on this endpoint.
 
 The event types, payload schemas, and full documentation are included in the
-OpenAPI specification and visible in the interactive Swagger UI at `/api/docs`.
+OpenAPI specification and visible in the interactive Swagger UI at `/docs`.

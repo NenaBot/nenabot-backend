@@ -384,7 +384,11 @@ async def job_events(
         svc.unsubscribe(job_id, q)
 
 
-@router.post("/path/populate", status_code=status.HTTP_200_OK)
+@router.post(
+    "/path/populate",
+    response_model=PathPopulateResponse,
+    status_code=status.HTTP_200_OK,
+)
 def populate_path(
     payload: PathPopulateRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
@@ -400,10 +404,13 @@ def populate_path(
         [(corner.pixel_x, corner.pixel_y) for corner in battery.corners]
         for battery in payload.batteries
     ]
-    populated = svc.populate_pixel_path_from_batteries(
-        batteries,
-        payload.measuring_points_per_cm,
-    )
+    try:
+        populated = svc.populate_pixel_path_from_batteries(
+            batteries,
+            payload.measuring_points_per_cm,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return PathPopulateResponse(
         path=[PopulatedPathPointSchema(**point) for point in populated]

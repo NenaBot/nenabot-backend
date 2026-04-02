@@ -98,7 +98,9 @@ class StorageAdapter:
         return [self._row_to_job(r) for r in rows]
 
     def latest_job(self) -> Job | None:
-        row = self._db.fetchone("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1")
+        row = self._db.fetchone(
+            "SELECT * FROM jobs ORDER BY created_at DESC, updated_at DESC, rowid DESC LIMIT 1"
+        )
         if not row:
             return None
         return self._row_to_job(row)

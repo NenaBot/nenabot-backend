@@ -8,9 +8,9 @@ sequenceDiagram
     Note over FE,BE: Base URL: http://localhost:8000, API prefix: /api
 
     opt Optional live preview streams
-        FE->>BE: GET /api/streams/camera/feed
+        FE->>BE: GET /api/stream/camera/feed
         BE-->>FE: Camera stream
-        FE->>BE: GET /api/streams/detection/feed
+        FE->>BE: GET /api/stream/detection/feed
         BE-->>FE: Detection stream
     end
 
@@ -22,7 +22,7 @@ sequenceDiagram
 
     U->>FE: Click Start Job
     FE->>BE: POST /api/job { path, workZ, workR, dryRun, imageBase64 }
-    Note over BE: fetch current possition of robot arm and path.length > 0 and check if the arm can go here (check arm)
+    Note over BE: fetch current position of robot arm and path.length > 0 and check if the arm can go here (check arm)
 
 
     FE->>BE: GET /api/job/{job_id}/events (SSE)

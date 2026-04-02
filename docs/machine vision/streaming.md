@@ -6,10 +6,10 @@ natively supported by browsers.
 
 ## Available streams
 
-| Stream            | Endpoint                      | Description                                             |
-| ----------------- | ----------------------------- | ------------------------------------------------------- |
-| Camera (raw)      | `GET /streams/camera/feed`    | Raw camera frames, no processing                        |
-| Detection overlay | `GET /streams/detection/feed` | Frames annotated with ArUco markers and battery contour |
+| Stream            | Endpoint                           | Description                                             |
+| ----------------- | ---------------------------------- | ------------------------------------------------------- |
+| Camera (raw)      | `GET /api/stream/camera/feed`      | Raw camera frames, no processing                        |
+| Detection overlay | `GET /api/stream/detection/feed`   | Frames annotated with ArUco markers and battery contour |
 
 ## Stream lifecycle
 
@@ -24,7 +24,7 @@ Each stream has a single endpoint:
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # 2. Open the feed in a browser
-open http://localhost:8000/streams/camera/feed
+open http://localhost:8000/api/stream/camera/feed
 ```
 
 ## Stream viewer (HTML test page)
@@ -40,7 +40,7 @@ Features:
 
 - **API URL** field (defaults to `http://localhost:8000`)
 - **Start / Stop** buttons for each feed (camera + detection)
-- **Snapshot** button that calls `POST /paths` and logs the detected
+- **Snapshot** button that calls `POST /api/path/detect` and logs the detected
   battery corners to the on-screen log
 - Status badges showing LIVE / OFF per stream
 
@@ -51,17 +51,17 @@ Features:
 
 ### Browser
 
-Open `http://localhost:8000/streams/camera/feed` directly. The browser
+Open `http://localhost:8000/api/stream/camera/feed` directly. The browser
 renders the MJPEG stream natively as a continuously updating image.
 
 ### curl
 
 ```bash
 # Save 5 seconds of MJPEG to a file
-curl --max-time 5 -o camera.mjpeg http://localhost:8000/streams/camera/feed
+curl --max-time 5 -o camera.mjpeg http://localhost:8000/api/stream/camera/feed
 
 # Pipe to ffplay for live preview
-curl -s http://localhost:8000/streams/detection/feed | ffplay -f mjpeg -
+curl -s http://localhost:8000/api/stream/detection/feed | ffplay -f mjpeg -
 ```
 
 ### Python (requests)
@@ -69,7 +69,7 @@ curl -s http://localhost:8000/streams/detection/feed | ffplay -f mjpeg -
 ```python
 import requests
 
-with requests.get("http://localhost:8000/streams/camera/feed", stream=True) as r:
+with requests.get("http://localhost:8000/api/stream/camera/feed", stream=True) as r:
     for chunk in r.iter_content(chunk_size=4096):
         # each chunk is part of a JPEG frame boundary
         print(f"received {len(chunk)} bytes")
@@ -80,9 +80,9 @@ with requests.get("http://localhost:8000/streams/camera/feed", stream=True) as r
 ### HTML `<img>` tag (simplest)
 
 ```html
-<img src="http://localhost:8000/streams/camera/feed" alt="Live camera" />
+<img src="http://localhost:8000/api/stream/camera/feed" alt="Live camera" />
 <img
-    src="http://localhost:8000/streams/detection/feed"
+    src="http://localhost:8000/api/stream/detection/feed"
     alt="Detection overlay"
 />
 ```
@@ -98,7 +98,7 @@ export function CameraFeed({
 }: {
     stream?: "camera" | "detection";
 }) {
-    const src = `${import.meta.env.VITE_API_URL}/streams/${stream}/feed`;
+    const src = `${import.meta.env.VITE_API_URL}/api/stream/${stream}/feed`;
     return (
         <img
             src={src}
@@ -126,7 +126,7 @@ async function readStream(url) {
     }
 }
 
-readStream("/streams/camera/feed");
+readStream("/api/stream/camera/feed");
 ```
 
 > **Note**: For most UIs the `<img>` tag approach is recommended. Use
@@ -140,7 +140,7 @@ API calls.
 
 | Event                                          | What happens                                                                                                          |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Client connects to `/streams/camera/feed`      | Adapter opens `cv2.VideoCapture`, begins yielding JPEG frames                                                         |
+| Client connects to `/api/stream/camera/feed`      | Adapter opens `cv2.VideoCapture`, begins yielding JPEG frames                                                         |
 | Client disconnects (tab closed, fetch aborted) | Starlette detects the broken connection, the async generator's `finally` block runs, `cap.release()` frees the camera |
 | No clients connected                           | Camera is **not open**, zero CPU/memory used                                                                          |
 
@@ -150,7 +150,7 @@ resources. No background thread keeps running.
 
 ## How it works internally
 
-1. `GET /streams/{type}/feed` returns a `StreamingResponse` wrapping the
+1. `GET /api/stream/{type}/feed` returns a `StreamingResponse` wrapping the
    adapter's async generator.
 2. The generator opens `cv2.VideoCapture`, reads frames in a loop, and
    yields JPEG-encoded bytes with MJPEG boundary headers.
