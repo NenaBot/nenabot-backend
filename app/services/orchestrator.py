@@ -838,9 +838,29 @@ class OrchestratorService:
         if len(robot_points) != TOTAL_CALIBRATION_STEPS:
             raise RuntimeError("Calibration requires four robot points")
 
-        origin = np.array(robot_points[0], dtype=np.float64)
-        x_direction = np.array(robot_points[1], dtype=np.float64) - origin
-        y_direction = np.array(robot_points[3], dtype=np.float64) - origin
+        targets = [
+            CalibrationTarget(
+                x=0.0,
+                y=0.0,
+                row=row,
+                col=col,
+                step=step,
+            )
+            for step, (row, col) in enumerate(FIXED_CALIBRATION_POINTS, start=1)
+        ]
+        orientation = self._camera_vision._orientation_targets(targets)
+        if orientation is None:
+            raise RuntimeError("Calibration points do not define board orientation")
+
+        origin_target, col_target, row_target = orientation
+        robot_by_grid = {
+            (target.row, target.col): np.array(robot_point, dtype=np.float64)
+            for target, robot_point in zip(targets, robot_points)
+        }
+
+        origin = robot_by_grid[(origin_target.row, origin_target.col)]
+        x_direction = robot_by_grid[(col_target.row, col_target.col)] - origin
+        y_direction = robot_by_grid[(row_target.row, row_target.col)] - origin
 
         x_norm = np.linalg.norm(x_direction)
         y_direction = y_direction - (

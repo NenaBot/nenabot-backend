@@ -16,10 +16,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FIXED_CALIBRATION_POINTS: tuple[tuple[int, int], ...] = (
-    (1, 0),
-    (1, 6),
-    (5, 7),
-    (5, 0),
+    (4, 0),
+    (4, 6),
+    (0, 7),
+    (0, 0),
 )
 
 
@@ -473,6 +473,36 @@ class CameraVisionAdapter:
             )
         return targets
 
+    @staticmethod
+    def _orientation_targets(
+        targets: list[CalibrationTarget],
+    ) -> tuple[CalibrationTarget, CalibrationTarget, CalibrationTarget] | None:
+        candidates: list[
+            tuple[CalibrationTarget, CalibrationTarget, CalibrationTarget]
+        ] = []
+        for origin in targets:
+            col_targets = [
+                target
+                for target in targets
+                if target.row == origin.row and target.col > origin.col
+            ]
+            row_targets = [
+                target
+                for target in targets
+                if target.col == origin.col and target.row > origin.row
+            ]
+            if not col_targets or not row_targets:
+                continue
+
+            col_target = max(col_targets, key=lambda target: target.col - origin.col)
+            row_target = max(row_targets, key=lambda target: target.row - origin.row)
+            candidates.append((origin, col_target, row_target))
+
+        if not candidates:
+            return None
+
+        return min(candidates, key=lambda item: (item[0].row, item[0].col))
+
     # ---- streaming ----
 
     def _error_frame(self, text: str) -> bytes:
@@ -571,22 +601,21 @@ class CameraVisionAdapter:
                     2,
                 )
 
-            if len(checkerboard.target_specs) >= 4:
-                p1 = checkerboard.target_specs[0]
-                p2 = checkerboard.target_specs[1]
-                p4 = checkerboard.target_specs[3]
+            orientation = self._orientation_targets(checkerboard.target_specs)
+            if orientation is not None:
+                origin, col_target, row_target = orientation
                 cv2.arrowedLine(
                     annotated,
-                    (int(p1.x), int(p1.y)),
-                    (int(p2.x), int(p2.y)),
+                    (int(origin.x), int(origin.y)),
+                    (int(col_target.x), int(col_target.y)),
                     (38, 189, 248),
                     2,
                     tipLength=0.03,
                 )
                 cv2.arrowedLine(
                     annotated,
-                    (int(p1.x), int(p1.y)),
-                    (int(p4.x), int(p4.y)),
+                    (int(origin.x), int(origin.y)),
+                    (int(row_target.x), int(row_target.y)),
                     (34, 197, 94),
                     2,
                     tipLength=0.03,
@@ -594,7 +623,10 @@ class CameraVisionAdapter:
                 cv2.putText(
                     annotated,
                     "col+",
-                    (int((p1.x + p2.x) / 2), int((p1.y + p2.y) / 2) - 12),
+                    (
+                        int((origin.x + col_target.x) / 2),
+                        int((origin.y + col_target.y) / 2) - 12,
+                    ),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.45,
                     (38, 189, 248),
@@ -603,7 +635,10 @@ class CameraVisionAdapter:
                 cv2.putText(
                     annotated,
                     "row+",
-                    (int((p1.x + p4.x) / 2) + 8, int((p1.y + p4.y) / 2)),
+                    (
+                        int((origin.x + row_target.x) / 2) + 8,
+                        int((origin.y + row_target.y) / 2),
+                    ),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.45,
                     (34, 197, 94),

@@ -73,7 +73,7 @@ def write_mapping(
         "checkerboard": {
             "inner_corners": [8, 6],
             "square_size_mm": 34.0,
-            "fixed_points": [[1, 0], [1, 6], [5, 7], [5, 0]],
+            "fixed_points": [[4, 0], [4, 6], [0, 7], [0, 0]],
         },
         "image_points": [
             {
@@ -83,7 +83,7 @@ def write_mapping(
                 "pixelY": point[1],
             }
             for (row, col), point in zip(
-                ((1, 0), (1, 6), (5, 7), (5, 0)),
+                ((4, 0), (4, 6), (0, 7), (0, 0)),
                 image_points,
             )
         ],
@@ -96,7 +96,7 @@ def write_mapping(
                 "robotZ": point[2],
             }
             for (row, col), point in zip(
-                ((1, 0), (1, 6), (5, 7), (5, 0)),
+                ((4, 0), (4, 6), (0, 7), (0, 0)),
                 robot_points,
             )
         ],
@@ -104,10 +104,10 @@ def write_mapping(
         "rvec": rvec.tolist(),
         "tvec": tvec.tolist(),
         "plane": {
-            "origin": [200.0, 100.0, -50.0],
+            "origin": [200.0, 200.0, -50.0],
             "x_axis": [1.0, 0.0, 0.0],
-            "y_axis": [0.0, 1.0, 0.0],
-            "normal": [0.0, 0.0, 1.0],
+            "y_axis": [0.0, -1.0, 0.0],
+            "normal": [0.0, 0.0, -1.0],
         },
     }
 
