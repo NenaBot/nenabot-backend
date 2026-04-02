@@ -87,7 +87,11 @@ class Database:
                 x       REAL NOT NULL,
                 y       REAL NOT NULL,
                 z       REAL NOT NULL DEFAULT 0,
-                r       REAL NOT NULL DEFAULT 0
+                r       REAL NOT NULL DEFAULT 0,
+                index_label TEXT,
+                battery_nr INTEGER,
+                corner_index INTEGER,
+                measurement_index INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS measurements (
@@ -123,3 +127,16 @@ class Database:
             self.commit()
         except sqlite3.OperationalError:
             pass  # columns already exist
+
+        # Migrate existing databases: add waypoint index metadata if missing
+        for ddl in (
+            "ALTER TABLE waypoints ADD COLUMN index_label TEXT",
+            "ALTER TABLE waypoints ADD COLUMN battery_nr INTEGER",
+            "ALTER TABLE waypoints ADD COLUMN corner_index INTEGER",
+            "ALTER TABLE waypoints ADD COLUMN measurement_index INTEGER",
+        ):
+            try:
+                self.conn.execute(ddl)
+                self.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists

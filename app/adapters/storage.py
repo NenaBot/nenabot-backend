@@ -47,9 +47,23 @@ class StorageAdapter:
         if job.path:
             self._db.executemany(
                 "INSERT INTO waypoints "
-                "(job_id, seq, x, y, z, r) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                [(job.id, i, w.x, w.y, w.z, w.r) for i, w in enumerate(job.path)],
+                "(job_id, seq, x, y, z, r, index_label, battery_nr, corner_index, measurement_index) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        job.id,
+                        i,
+                        w.x,
+                        w.y,
+                        w.z,
+                        w.r,
+                        w.index,
+                        w.battery_nr,
+                        w.corner_index,
+                        w.measurement_index,
+                    )
+                    for i, w in enumerate(job.path)
+                ],
             )
         self._db.commit()
 
@@ -172,7 +186,19 @@ class StorageAdapter:
         wp_rows = self._db.fetchall(
             "SELECT * FROM waypoints WHERE job_id = ? ORDER BY seq ASC", (job_id,)
         )
-        path = [Waypoint(x=w["x"], y=w["y"], z=w["z"], r=w["r"]) for w in wp_rows]
+        path = [
+            Waypoint(
+                x=w["x"],
+                y=w["y"],
+                z=w["z"],
+                r=w["r"],
+                index=w["index_label"],
+                battery_nr=w["battery_nr"],
+                corner_index=w["corner_index"],
+                measurement_index=w["measurement_index"],
+            )
+            for w in wp_rows
+        ]
 
         # Measurements
         measurements = self.get_measurements(job_id)
