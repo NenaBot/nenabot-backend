@@ -133,7 +133,6 @@ class PathItem(BaseModel):
     height_mm: float = 0.0
     center_x: float = Field(0.0, alias="pixelCenterX")
     center_y: float = Field(0.0, alias="pixelCenterY")
-    confidence: float = 0.0
 
     model_config = {"populate_by_name": True}
 
