@@ -1,9 +1,8 @@
 .venv/
-orchestrator/data/images/*
-orchestrator/.idea/*
 __pycache__
 .coverage
-/data/*
+/data/nenabot.db*
+/data/images/*
+/data/calibration/robot_mapping.json
 .DS_Store
 *.egg-info/
-docs/IonVision/ionvision-integration-tests/.ionvision-hardware.json.example

@@ -62,7 +62,7 @@ def create_orchestrator(
     intrinsics_path = (
         intrinsics_path
         or _first_env("NENABOT_INTRINSICS_PATH")
-        or "calibration-coordinate-mapping/camera_params.json"
+        or "data/calibration/camera_params.json"
     )
     mapping_path = (
         mapping_path
