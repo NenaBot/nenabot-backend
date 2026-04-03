@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import sys
 import types
 
 import pytest
 
-from app.adapters.robot import RobotAdapter
+from app.adapters.robot import RobotAdapter, _get_dobot_dll_type
 
 
 class FakeDobotDllType:
@@ -74,6 +75,26 @@ def test_connect_success_starts_queue(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
 
+def test_get_dobot_dll_type_windows_uses_normal_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    dobot_module = _get_dobot_dll_type()
+
+    assert dobot_module.__name__.endswith("DobotDllType")
+
+
+def test_get_dobot_dll_type_non_windows_uses_multi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    dobot_module = _get_dobot_dll_type()
+
+    assert dobot_module.__name__.endswith("Multi")
+
+
 def test_connect_failure_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _install_fake_dobot(monkeypatch)
     fake.connect_ret = 2
@@ -82,7 +103,49 @@ def test_connect_failure_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
     result = adapter.connect("COM7")
 
     assert result.ok is False
-    assert "error code: 2" in (result.error or "")
+    assert "COM7->2" in (result.error or "")
+
+
+def test_connect_tries_windows_extended_com_notation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_dobot(monkeypatch)
+    returns = [2, 0]
+
+    def _connect(api, port, baud):
+        fake.calls.append(("ConnectDobot", (api, port, baud)))
+        return (returns.pop(0),)
+
+    fake.ConnectDobot = _connect
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    adapter = RobotAdapter()
+    result = adapter.connect("COM11")
+
+    assert result.ok is True
+    connect_calls = [
+        call for call in fake.calls if call[0] == "ConnectDobot"
+    ]
+    assert [args[1] for _, args in connect_calls] == ["COM11", "\\\\.\\COM11"]
+
+
+def test_connect_first_available_handles_dll_load_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BrokenDobotDllType:
+        @staticmethod
+        def load():
+            raise FileNotFoundError("DobotDll.dll not found in lib/dobot/.")
+
+    monkeypatch.setattr(
+        "app.adapters.robot._get_dobot_dll_type", lambda: _BrokenDobotDllType
+    )
+    adapter = RobotAdapter()
+
+    result = adapter.connect_first_available()
+
+    assert result.ok is False
+    assert "Dobot DLL load failed" in (result.error or "")
 
 
 def test_move_to_coordinates_requires_connection() -> None:
@@ -193,3 +256,89 @@ def test_wait_until_queue_empty_timeout(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert result.ok is False
     assert "Timed out waiting for queue" in (result.error or "")
+
+
+def test_windows_port_scan_reads_from_first_registry_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _KeyHandle:
+        def __init__(self, values):
+            self.values = values
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeWinReg:
+        HKEY_LOCAL_MACHINE = object()
+
+        def OpenKey(self, root, path):
+            assert root is self.HKEY_LOCAL_MACHINE
+            if path == r"HARDWARE\DEVICEMAP\SERIALCOMM":
+                return _KeyHandle(
+                    [
+                        ("\\Device\\Serial0", "COM7", 1),
+                        ("\\Device\\Serial1", "COM3", 1),
+                        ("\\Device\\Lpt", "LPT1", 1),
+                    ]
+                )
+            if path == r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Ports":
+                return _KeyHandle([])
+            raise OSError("missing key")
+
+        def EnumValue(self, key, index):
+            try:
+                return key.values[index]
+            except IndexError as exc:
+                raise OSError("done") from exc
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "winreg", _FakeWinReg())
+
+    adapter = RobotAdapter()
+    assert adapter._list_candidate_ports() == ["COM3", "COM7"]
+
+
+def test_windows_port_scan_falls_back_to_ports_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _KeyHandle:
+        def __init__(self, values):
+            self.values = values
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeWinReg:
+        HKEY_LOCAL_MACHINE = object()
+
+        def OpenKey(self, root, path):
+            assert root is self.HKEY_LOCAL_MACHINE
+            if path == r"HARDWARE\DEVICEMAP\SERIALCOMM":
+                raise OSError("missing")
+            if path == r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Ports":
+                return _KeyHandle(
+                    [
+                        ("COM11:", "", 1),
+                        ("COM2:", "", 1),
+                        ("NotCom", "COM5", 1),
+                    ]
+                )
+            raise OSError("missing key")
+
+        def EnumValue(self, key, index):
+            try:
+                return key.values[index]
+            except IndexError as exc:
+                raise OSError("done") from exc
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "winreg", _FakeWinReg())
+
+    adapter = RobotAdapter()
+    assert adapter._list_candidate_ports() == ["COM2", "COM5", "COM11"]

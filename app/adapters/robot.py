@@ -3,6 +3,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -12,6 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 def _get_dobot_dll_type():
+    if sys.platform.startswith("win"):
+        from lib.dobot import DobotDllType
+
+        return DobotDllType
+
     from lib.dobot import Multi
 
     return Multi
@@ -89,6 +95,12 @@ class RobotAdapter:
 
     def _list_candidate_ports(self) -> list[str]:
         """Best-effort serial port discovery without extra dependencies."""
+        def _port_sort_key(port: str) -> tuple[int, str]:
+            match = re.fullmatch(r"COM(\d+)", port.upper())
+            if match:
+                return (int(match.group(1)), port.upper())
+            return (10_000, port.upper())
+
         if sys.platform.startswith("win"):
             try:
                 import winreg
@@ -96,9 +108,9 @@ class RobotAdapter:
                 return []
 
             ports: list[str] = []
-            key_path = r"HARDWARE\DEVICEMAP\SERIALCOMM"
+            serial_key_path = r"HARDWARE\DEVICEMAP\SERIALCOMM"
             try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, serial_key_path) as key:
                     index = 0
                     while True:
                         try:
@@ -111,7 +123,27 @@ class RobotAdapter:
             except OSError:
                 pass
 
-            return sorted(set(ports))
+            # Fallback source for machines where SERIALCOMM is incomplete.
+            ports_key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Ports"
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, ports_key_path) as key:
+                    index = 0
+                    while True:
+                        try:
+                            value_name, value_data, _ = winreg.EnumValue(key, index)
+                        except OSError:
+                            break
+                        for candidate in (value_name, value_data):
+                            if not isinstance(candidate, str):
+                                continue
+                            candidate = candidate.rstrip(":").upper()
+                            if re.fullmatch(r"COM\d+", candidate):
+                                ports.append(candidate)
+                        index += 1
+            except OSError:
+                pass
+
+            return sorted(set(ports), key=_port_sort_key)
 
         patterns: list[str] = []
         if sys.platform == "darwin":
@@ -134,6 +166,47 @@ class RobotAdapter:
             ports.extend(glob.glob(pattern))
         return sorted(set(ports))
 
+    def _iter_connection_port_candidates(self, port: str) -> list[str]:
+        """Generate platform-specific port representations to maximize connect success."""
+        candidates: list[str] = []
+
+        normalized = (port or "").strip()
+        if normalized:
+            candidates.append(normalized)
+
+        if sys.platform.startswith("win") and normalized.upper().startswith("COM"):
+            # Some Windows stacks require the extended COM syntax for COM10+.
+            extended = f"\\\\.\\{normalized.upper()}"
+            if extended not in candidates:
+                candidates.append(extended)
+
+        return candidates
+
+    def _finalize_connection(self, DobotDllType, port: str) -> RobotResult:
+        if hasattr(DobotDllType, "SetCmdTimeout"):
+            DobotDllType.SetCmdTimeout(self._api, int(self.COMMAND_TIMEOUT_S * 1000))
+        if hasattr(DobotDllType, "SetQueuedCmdClear"):
+            DobotDllType.SetQueuedCmdClear(self._api)
+        if hasattr(DobotDllType, "SetQueuedCmdStartExec"):
+            DobotDllType.SetQueuedCmdStartExec(self._api)
+        self._connected_port = port
+        print(f"Connected to Dobot on {port}")
+        return RobotResult(True)
+
+    def _connect_with_port_candidates(
+        self, DobotDllType, requested_port: str
+    ) -> tuple[Optional[str], Optional[int], list[tuple[str, int]]]:
+        attempts: list[tuple[str, int]] = []
+        for candidate in self._iter_connection_port_candidates(requested_port):
+            try:
+                ret = DobotDllType.ConnectDobot(self._api, candidate, self._baud)[0]
+            except Exception:
+                ret = -1
+            attempts.append((candidate, ret))
+            if ret == 0:
+                return candidate, ret, attempts
+        return None, None, attempts
+
     def connect(self, port: str) -> RobotResult:
         """Connect to a Dobot on a specific serial port."""
         try:
@@ -141,21 +214,21 @@ class RobotAdapter:
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
 
-        self._api = DobotDllType.load()
-        ret = DobotDllType.ConnectDobot(self._api, port, self._baud)[0]
-        if ret == 0:
-            if hasattr(DobotDllType, "SetCmdTimeout"):
-                DobotDllType.SetCmdTimeout(
-                    self._api, int(self.COMMAND_TIMEOUT_S * 1000)
-                )
-            if hasattr(DobotDllType, "SetQueuedCmdClear"):
-                DobotDllType.SetQueuedCmdClear(self._api)
-            if hasattr(DobotDllType, "SetQueuedCmdStartExec"):
-                DobotDllType.SetQueuedCmdStartExec(self._api)
-            self._connected_port = port
-            print(f"Connected to Dobot on {port}")
-            return RobotResult(True)
-        return RobotResult(False, f"Failed to connect on {port}, error code: {ret}")
+        try:
+            self._api = DobotDllType.load()
+        except Exception as exc:
+            return RobotResult(False, f"Dobot DLL load failed: {exc}")
+        connected_port, _, attempts = self._connect_with_port_candidates(
+            DobotDllType, port
+        )
+        if connected_port is not None:
+            return self._finalize_connection(DobotDllType, connected_port)
+
+        attempts_summary = ", ".join(f"{p}->{code}" for p, code in attempts)
+        return RobotResult(
+            False,
+            f"Failed to connect on requested port {port}. Attempts: {attempts_summary}",
+        )
 
     def connect_first_available(self) -> RobotResult:
         """Auto-detect serial ports and connect to the first Dobot found."""
@@ -164,28 +237,30 @@ class RobotAdapter:
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
 
-        self._api = DobotDllType.load()
+        try:
+            self._api = DobotDllType.load()
+        except Exception as exc:
+            return RobotResult(False, f"Dobot DLL load failed: {exc}")
         ports = self._list_candidate_ports()
+        failed_attempts: list[tuple[str, int]] = []
         for port in ports:
-            ret = DobotDllType.ConnectDobot(self._api, port, self._baud)[0]
-            if ret == 0:
-                if hasattr(DobotDllType, "SetCmdTimeout"):
-                    DobotDllType.SetCmdTimeout(
-                        self._api, int(self.COMMAND_TIMEOUT_S * 1000)
-                    )
-                if hasattr(DobotDllType, "SetQueuedCmdClear"):
-                    DobotDllType.SetQueuedCmdClear(self._api)
-                if hasattr(DobotDllType, "SetQueuedCmdStartExec"):
-                    DobotDllType.SetQueuedCmdStartExec(self._api)
-                self._connected_port = port
-                print(f"Connected to Dobot on {port}")
-                return RobotResult(True)
+            connected_port, _, attempts = self._connect_with_port_candidates(
+                DobotDllType, port
+            )
+            failed_attempts.extend(attempts)
+            if connected_port is not None:
+                return self._finalize_connection(DobotDllType, connected_port)
 
         if not ports:
             return RobotResult(
                 False,
                 "No serial ports detected (Windows: expected COMx; macOS/Linux: expected /dev/*)",
             )
+        if failed_attempts:
+            attempts_summary = ", ".join(
+                f"{p}->{code}" for p, code in failed_attempts
+            )
+            return RobotResult(False, f"No Dobot device found. Attempts: {attempts_summary}")
         return RobotResult(False, "No Dobot device found")
 
     def ping(self) -> RobotResult:
