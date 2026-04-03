@@ -1,6 +1,6 @@
 {
     "calibrated_at": "2026-04-03T11:28:47.133511+00:00",
-    "intrinsics_path": "calibration-coordinate-mapping/camera_params.json",
+    "intrinsics_path": "data/calibration/camera_params.json",
     "resolution": [
         1920,
         1080
