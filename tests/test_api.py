@@ -267,10 +267,10 @@ def test_calibration_flow_endpoint_writes_mapping_and_updates_status(
     assert start_payload["referenceImageBase64"] == "encoded-image"
     assert start_payload["targetPoint"]["pixelX"] == 100.0
     assert start_payload["targetPoint"]["pixelY"] == 100.0
-    assert start_payload["targetPoint"]["gridRow"] == 4
+    assert start_payload["targetPoint"]["gridRow"] == 1
     assert start_payload["targetPoint"]["gridCol"] == 0
     assert start_payload["targetPoint"]["step"] == 1
-    assert start_payload["targetPoint"]["label"] == "P1 (4,0)"
+    assert start_payload["targetPoint"]["label"] == "P1 (1,0)"
 
     for expected_step in range(1, 5):
         response = client.post("/api/calibration", json={"action": "capture"})
@@ -280,7 +280,7 @@ def test_calibration_flow_endpoint_writes_mapping_and_updates_status(
 
     assert mapping_path.exists()
     saved = json.loads(mapping_path.read_text())
-    assert saved["plane"]["origin"] == pytest.approx([200.0, 200.0, -50.0])
+    assert saved["plane"]["origin"] == pytest.approx([200.0, 100.0, -50.0])
     status = client.get("/api/status").json()
     assert status["calibration"]["calibrated"] is True
     assert status["calibration"]["lastCalibratedAt"] is not None

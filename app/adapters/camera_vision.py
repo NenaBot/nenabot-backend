@@ -16,10 +16,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FIXED_CALIBRATION_POINTS: tuple[tuple[int, int], ...] = (
-    (4, 0),
-    (4, 6),
-    (0, 7),
-    (0, 0),
+    (1, 0),
+    (1, 6),
+    (5, 7),
+    (5, 0),
 )
 CHECKERBOARD_STATUS_CACHE_TTL_S = 0.75
 CAPTURE_IDLE_TIMEOUT_S = 2.0

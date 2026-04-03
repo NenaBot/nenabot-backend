@@ -45,12 +45,12 @@ Open [`docs/calibration-tester.html`](./calibration-tester.html) and follow the 
 
 The fixed checkerboard sequence is:
 
-- `P1 (4, 0)`
-- `P2 (4, 6)`
-- `P3 (0, 7)`
-- `P4 (0, 0)`
+- `P1 (1, 0)`
+- `P2 (1, 6)`
+- `P3 (5, 7)`
+- `P4 (5, 0)`
 
-This is the research point set mirrored bottom-to-top. The detection overlay draws the true `row+` and `col+` board directions from the checkerboard geometry so the operator can confirm the orientation before capturing points.
+These are the exact four board indices used in the research scripts in `calibration-coordinate-mapping/`. The detection overlay draws the true `row+` and `col+` board directions from the checkerboard geometry so the operator can confirm the orientation before capturing points.
 
 ## Mapping File Contents
 
