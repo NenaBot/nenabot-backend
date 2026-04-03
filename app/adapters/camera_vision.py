@@ -21,6 +21,10 @@ FIXED_CALIBRATION_POINTS: tuple[tuple[int, int], ...] = (
     (0, 7),
     (0, 0),
 )
+CHECKERBOARD_STATUS_CACHE_TTL_S = 0.75
+CAPTURE_IDLE_TIMEOUT_S = 2.0
+CAMERA_STREAM_INTERVAL_S = 0.1
+DETECTION_STREAM_INTERVAL_S = 0.15
 
 
 @dataclass
@@ -119,6 +123,9 @@ class CameraVisionAdapter:
         self._capture_ready = threading.Event()
         self._capture_running = False
         self._capture_error: str | None = None
+        self._capture_last_access = 0.0
+        self._checkerboard_status_cache: dict[str, bool | str | None] | None = None
+        self._checkerboard_status_cached_at = 0.0
 
     # ---- intrinsics ----
 
@@ -210,6 +217,33 @@ class CameraVisionAdapter:
 
     # ---- shared capture ----
 
+    def _capture_alive(self) -> bool:
+        return bool(self._capture_thread and self._capture_thread.is_alive())
+
+    def _touch_capture(self) -> None:
+        self._capture_last_access = time.monotonic()
+
+    def _cache_checkerboard_status(
+        self,
+        *,
+        visible: bool,
+        error: str | None,
+    ) -> dict[str, bool | str | None]:
+        status = {"visible": visible, "error": error}
+        self._checkerboard_status_cache = status
+        self._checkerboard_status_cached_at = time.monotonic()
+        return dict(status)
+
+    def _cached_checkerboard_status(self) -> dict[str, bool | str | None] | None:
+        if self._checkerboard_status_cache is None:
+            return None
+        if (
+            time.monotonic() - self._checkerboard_status_cached_at
+            > CHECKERBOARD_STATUS_CACHE_TTL_S
+        ):
+            return None
+        return dict(self._checkerboard_status_cache)
+
     def _capture_loop(self) -> None:
         import cv2
 
@@ -234,15 +268,25 @@ class CameraVisionAdapter:
 
         try:
             while self._capture_running:
+                if (
+                    self._capture_last_access
+                    and time.monotonic() - self._capture_last_access
+                    > CAPTURE_IDLE_TIMEOUT_S
+                ):
+                    break
                 ok, frame = cap.read()
                 if not ok or frame is None:
                     time.sleep(0.05)
                     continue
                 with self._frame_lock:
-                    self._latest_frame = frame.copy()
+                    self._latest_frame = frame
         finally:
             cap.release()
+            with self._frame_lock:
+                self._latest_frame = None
             self._capture_running = False
+            self._checkerboard_status_cache = None
+            self._checkerboard_status_cached_at = 0.0
 
     def _ensure_capture_running(self) -> CaptureResult:
         try:
@@ -251,12 +295,14 @@ class CameraVisionAdapter:
             return CaptureResult(False, error=f"OpenCV not available: {exc}")
 
         with self._capture_lock:
-            if self._capture_thread and self._capture_thread.is_alive():
+            if self._capture_alive():
+                self._touch_capture()
                 return CaptureResult(True)
 
             self._capture_ready.clear()
             self._capture_error = None
             self._capture_running = True
+            self._touch_capture()
             self._capture_thread = threading.Thread(
                 target=self._capture_loop,
                 daemon=True,
@@ -269,12 +315,35 @@ class CameraVisionAdapter:
         return CaptureResult(True)
 
     def ping(self) -> CaptureResult:
-        return self._ensure_capture_running()
+        try:
+            import cv2
+        except Exception as exc:  # pragma: no cover
+            return CaptureResult(False, error=f"OpenCV not available: {exc}")
 
-    def get_latest_frame(self, timeout_s: float = 1.0) -> np.ndarray | None:
-        result = self._ensure_capture_running()
-        if not result.ok:
+        if self._capture_alive():
+            return CaptureResult(True)
+
+        cap = cv2.VideoCapture(self._device_index)
+        if not cap.isOpened():
+            cap.release()
+            return CaptureResult(False, error="Unable to open camera")
+        cap.release()
+        return CaptureResult(True)
+
+    def get_latest_frame(
+        self,
+        timeout_s: float = 1.0,
+        *,
+        ensure_capture: bool = True,
+    ) -> np.ndarray | None:
+        if ensure_capture:
+            result = self._ensure_capture_running()
+            if not result.ok:
+                return None
+        elif not self._capture_alive():
             return None
+
+        self._touch_capture()
 
         deadline = time.monotonic() + max(timeout_s, 0.0)
         while time.monotonic() <= deadline:
@@ -396,18 +465,25 @@ class CameraVisionAdapter:
     # ---- checkerboard ----
 
     def checkerboard_visible(self) -> bool:
-        frame = self.get_latest_frame(timeout_s=0.5)
-        if frame is None:
-            return False
-        return self.find_checkerboard(frame).ok
+        return bool(self.checkerboard_status()["visible"])
 
     def checkerboard_status(self) -> dict[str, bool | str | None]:
-        frame = self.get_latest_frame(timeout_s=0.5)
+        cached = self._cached_checkerboard_status()
+        if cached is not None:
+            return cached
+
+        frame = self.get_latest_frame(timeout_s=0.1, ensure_capture=False)
         if frame is None:
-            return {"visible": False, "error": "No camera frame available"}
+            return self._cache_checkerboard_status(
+                visible=False,
+                error="No camera frame available",
+            )
 
         result = self.find_checkerboard(frame)
-        return {"visible": result.ok, "error": result.error}
+        return self._cache_checkerboard_status(
+            visible=result.ok,
+            error=result.error,
+        )
 
     def find_checkerboard(self, frame: np.ndarray) -> CheckerboardResult:
         import cv2
@@ -416,7 +492,7 @@ class CameraVisionAdapter:
             expected_size = self._intrinsics.resolution
             actual_size = (frame.shape[1], frame.shape[0])
             if actual_size != expected_size:
-                return CheckerboardResult(
+                result = CheckerboardResult(
                     ok=False,
                     image_size=actual_size,
                     error=(
@@ -425,15 +501,25 @@ class CameraVisionAdapter:
                         f"{expected_size[0]}x{expected_size[1]}"
                     ),
                 )
+                self._cache_checkerboard_status(
+                    visible=result.ok,
+                    error=result.error,
+                )
+                return result
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         found, corners = cv2.findChessboardCorners(gray, self.checkerboard_size, None)
         if not found or corners is None:
-            return CheckerboardResult(
+            result = CheckerboardResult(
                 ok=False,
                 image_size=(frame.shape[1], frame.shape[0]),
                 error="Checkerboard not found",
             )
+            self._cache_checkerboard_status(
+                visible=result.ok,
+                error=result.error,
+            )
+            return result
 
         criteria = (
             cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
@@ -448,13 +534,18 @@ class CameraVisionAdapter:
         target_specs = self._extract_target_specs(refined)
         targets = [Corner(x=target.x, y=target.y) for target in target_specs]
 
-        return CheckerboardResult(
+        result = CheckerboardResult(
             ok=True,
             corners=all_corners,
             target_points=targets,
             target_specs=target_specs,
             image_size=(frame.shape[1], frame.shape[0]),
         )
+        self._cache_checkerboard_status(
+            visible=result.ok,
+            error=result.error,
+        )
+        return result
 
     def _extract_target_specs(self, corners: np.ndarray) -> list[CalibrationTarget]:
         cols, _rows = self.checkerboard_size
@@ -548,7 +639,7 @@ class CameraVisionAdapter:
                 + jpeg.tobytes()
                 + b"\r\n"
             )
-            await asyncio.sleep(0.033)
+            await asyncio.sleep(CAMERA_STREAM_INTERVAL_S)
 
     async def stream_detection(self) -> AsyncGenerator[bytes, None]:
         import cv2
@@ -574,7 +665,7 @@ class CameraVisionAdapter:
                 + jpeg.tobytes()
                 + b"\r\n"
             )
-            await asyncio.sleep(0.033)
+            await asyncio.sleep(DETECTION_STREAM_INTERVAL_S)
 
     def detect_live(self, frame: np.ndarray) -> np.ndarray:
         import cv2
