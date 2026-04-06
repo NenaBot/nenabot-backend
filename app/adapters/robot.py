@@ -9,6 +9,26 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+from roboticstoolbox import DHRobot, RevoluteDH
+import numpy as np
+from spatialmath import SE3
+
+deg = np.pi / 180
+
+L1 = RevoluteDH(d=0.140, a=0, alpha=0,
+                qlim=[-120*deg, 120*deg])
+
+L2 = RevoluteDH(d=0, a=0, alpha=np.pi/2,
+                qlim=[-5*deg, 90*deg])
+
+L3 = RevoluteDH(d=0, a=0.135, alpha=0,
+                qlim=[-15*deg, 90*deg])
+
+L4 = RevoluteDH(d=0, a=0.147, alpha=0,
+                qlim=[-140*deg, 140*deg])
+
+DOBOT = DHRobot([L1, L2, L3, L4], name="DobotMagician")
+
 logger = logging.getLogger(__name__)
 
 
@@ -533,3 +553,21 @@ class RobotAdapter:
             pass
         self._api = None
         self._connected_port = None
+
+    def _check_reachability_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
+        """Return True when IK can find a joint-limited solution for a Cartesian point.
+
+        Inputs are in millimeters to match Dobot movement commands.
+        """
+        # The DH model uses meters, while Dobot command coordinates are millimeters.
+        x_m, y_m, z_m = x_mm / 1000.0, y_mm / 1000.0, z_mm / 1000.0
+
+        target = SE3.Trans(x_m, y_m, z_m)
+        sol = DOBOT.ikine_LM(target, mask=[1, 1, 1, 0, 0, 0], joint_limits=True)
+
+        if sol.success:
+            logger.debug("Reachable point: (%.1f, %.1f, %.1f) mm", x_mm, y_mm, z_mm)
+            return True
+
+        logger.debug("Unreachable point: (%.1f, %.1f, %.1f) mm", x_mm, y_mm, z_mm)
+        return False
