@@ -180,6 +180,22 @@ def robot_pose(
     )
 
 
+def _sweep_axis_values(start: float, end: float, step_mm: float = 20.0) -> list[float]:
+    """Return inclusive axis values from start to end with fixed step size."""
+    step = abs(step_mm) if step_mm != 0 else 20.0
+    direction = 1.0 if end >= start else -1.0
+    delta = step * direction
+
+    values: list[float] = []
+    value = float(start)
+    while (direction > 0 and value <= end + 1e-9) or (
+        direction < 0 and value >= end - 1e-9
+    ):
+        values.append(round(value, 6))
+        value += delta
+    return values
+
+
 @router.get("/debug/robot/reachability")
 @router.post("/debug/robot/reachability")
 def debug_robot_reachability(
@@ -204,65 +220,76 @@ def debug_robot_reachability(
             detail="Reachability function is not available on robot adapter",
         )
 
-    # Requested debug sweep: currently fixed at x=200 and z=50.
-    x = 200.0
-    z = 50.0
-    step = 20.0
+    wait_for_position = getattr(robot, "wait_for_position", None)
+    if not callable(wait_for_position):
+        raise HTTPException(
+            status_code=500,
+            detail="Position wait function is not available on robot adapter",
+        )
 
-    y_start = float(y_min)
-    y_end = float(y_max)
-    direction = 1.0 if y_end >= y_start else -1.0
-    y_step = step * direction
+    step = 50.0
+    x_values = _sweep_axis_values(x_min, x_max, step_mm=step)
+    y_values = _sweep_axis_values(y_min, y_max, step_mm=step)
+    z_values = _sweep_axis_values(z_min, z_max, step_mm=step)
 
     checks: list[dict] = []
-    y = y_start
-    while (direction > 0 and y <= y_end) or (direction < 0 and y >= y_end):
-        reachable = bool(reachability_check(x, y, z))
-        item: dict = {
-            "x": x,
-            "y": y,
-            "z": z,
-            "r": r,
-            "reachable": reachable,
-            "moveAttempted": False,
-            "moveOk": None,
-            "moveError": None,
-        }
+    total_points = len(x_values) * len(y_values) * len(z_values)
 
-        if reachable:
-            move_result = svc.move_robot(x, y, z, r)
-            item["moveAttempted"] = True
-            item["moveOk"] = move_result.ok
-            item["moveError"] = move_result.error
-            checks.append(item)
-            if not move_result.ok:
-                return {
-                    "stoppedEarly": True,
-                    "stopReason": "move_failed",
-                    "failedAt": {"x": x, "y": y, "z": z, "r": r},
-                    "checks": checks,
-                    "ignoredInputs": {
-                        "x_min": x_min,
-                        "x_max": x_max,
-                        "z_min": z_min,
-                        "z_max": z_max,
-                    },
+    for x in x_values:
+        for y in y_values:
+            for z in z_values:
+                reachable = bool(reachability_check(x, y, z))
+                item: dict = {
+                    "x": x,
+                    "y": y,
+                    "z": z,
+                    "r": r,
+                    "reachable": reachable,
+                    "moveAttempted": False,
+                    "moveOk": None,
+                    "moveError": None,
                 }
-        else:
-            checks.append(item)
 
-        y += y_step
+                if reachable:
+                    move_result = svc.move_robot(x, y, z, r)
+                    item["moveAttempted"] = True
+                    item["moveOk"] = move_result.ok
+                    item["moveError"] = move_result.error
+                    if move_result.ok:
+                        arrival = wait_for_position(
+                            x,
+                            y,
+                            z,
+                            r,
+                            tolerance_mm=1.0,
+                            timeout_s=20.0,
+                        )
+                        if not arrival.ok:
+                            item["moveOk"] = False
+                            item["moveError"] = (
+                                f"did_not_reach_target: {arrival.error}"
+                            )
+                    checks.append(item)
+                    if not item["moveOk"]:
+                        return {
+                            "stoppedEarly": True,
+                            "stopReason": "move_failed",
+                            "failedAt": {"x": x, "y": y, "z": z, "r": r},
+                            "testedPoints": len(checks),
+                            "totalPlannedPoints": total_points,
+                            "stepMm": step,
+                            "checks": checks,
+                        }
+                else:
+                    checks.append(item)
 
     return {
         "stoppedEarly": False,
         "stopReason": None,
+        "testedPoints": len(checks),
+        "totalPlannedPoints": total_points,
+        "stepMm": step,
         "checks": checks,
-        "ignoredInputs": {
-            "x_min": x_min,
-            "x_max": x_max,
-            "z_min": z_min,
-            "z_max": z_max,
-        },
     }
 
 
