@@ -183,11 +183,13 @@ def robot_pose(
 @router.get("/debug/robot/reachability")
 @router.post("/debug/robot/reachability")
 def debug_robot_reachability(
-    x: float,
-    y: float,
-    z: float,
+    x_max: float,
+    x_min: float,
+    y_max: float,
+    y_min: float,
+    z_max: float,
+    z_min: float,
     r: float = 0.0,
-    move: bool = False,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> dict:
     """Temporary endpoint for manual robot reachability checks during development."""
@@ -202,20 +204,66 @@ def debug_robot_reachability(
             detail="Reachability function is not available on robot adapter",
         )
 
-    reachable = bool(reachability_check(x, y, z))
-    response = {
-        "reachable": reachable,
-        "target": {"x": x, "y": y, "z": z, "r": r},
-        "moveAttempted": False,
+    # Requested debug sweep: currently fixed at x=200 and z=50.
+    x = 200.0
+    z = 50.0
+    step = 20.0
+
+    y_start = float(y_min)
+    y_end = float(y_max)
+    direction = 1.0 if y_end >= y_start else -1.0
+    y_step = step * direction
+
+    checks: list[dict] = []
+    y = y_start
+    while (direction > 0 and y <= y_end) or (direction < 0 and y >= y_end):
+        reachable = bool(reachability_check(x, y, z))
+        item: dict = {
+            "x": x,
+            "y": y,
+            "z": z,
+            "r": r,
+            "reachable": reachable,
+            "moveAttempted": False,
+            "moveOk": None,
+            "moveError": None,
+        }
+
+        if reachable:
+            move_result = svc.move_robot(x, y, z, r)
+            item["moveAttempted"] = True
+            item["moveOk"] = move_result.ok
+            item["moveError"] = move_result.error
+            checks.append(item)
+            if not move_result.ok:
+                return {
+                    "stoppedEarly": True,
+                    "stopReason": "move_failed",
+                    "failedAt": {"x": x, "y": y, "z": z, "r": r},
+                    "checks": checks,
+                    "ignoredInputs": {
+                        "x_min": x_min,
+                        "x_max": x_max,
+                        "z_min": z_min,
+                        "z_max": z_max,
+                    },
+                }
+        else:
+            checks.append(item)
+
+        y += y_step
+
+    return {
+        "stoppedEarly": False,
+        "stopReason": None,
+        "checks": checks,
+        "ignoredInputs": {
+            "x_min": x_min,
+            "x_max": x_max,
+            "z_min": z_min,
+            "z_max": z_max,
+        },
     }
-
-    if move:
-        move_result = svc.move_robot(x, y, z, r)
-        response["moveAttempted"] = True
-        response["moveOk"] = move_result.ok
-        response["moveError"] = move_result.error
-
-    return response
 
 
 @router.get("/profile", response_model=list[Profile])
