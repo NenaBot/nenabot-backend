@@ -180,6 +180,44 @@ def robot_pose(
     )
 
 
+@router.get("/debug/robot/reachability")
+@router.post("/debug/robot/reachability")
+def debug_robot_reachability(
+    x: float,
+    y: float,
+    z: float,
+    r: float = 0.0,
+    move: bool = False,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> dict:
+    """Temporary endpoint for manual robot reachability checks during development."""
+    robot = getattr(svc, "_robot", None)
+    if robot is None:
+        raise HTTPException(status_code=500, detail="Robot adapter not available")
+
+    reachability_check = getattr(robot, "_check_reachability_mm", None)
+    if not callable(reachability_check):
+        raise HTTPException(
+            status_code=500,
+            detail="Reachability function is not available on robot adapter",
+        )
+
+    reachable = bool(reachability_check(x, y, z))
+    response = {
+        "reachable": reachable,
+        "target": {"x": x, "y": y, "z": z, "r": r},
+        "moveAttempted": False,
+    }
+
+    if move:
+        move_result = svc.move_robot(x, y, z, r)
+        response["moveAttempted"] = True
+        response["moveOk"] = move_result.ok
+        response["moveError"] = move_result.error
+
+    return response
+
+
 @router.get("/profile", response_model=list[Profile])
 def profiles(svc: OrchestratorService = Depends(get_orchestrator)) -> list[Profile]:
     return [Profile(**profile) for profile in svc.profiles()]
