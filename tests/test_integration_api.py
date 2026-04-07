@@ -13,7 +13,6 @@ Note: Some tests are tolerant of API state because:
 - Tests are checking endpoint availability and basic schema correctness
 - Unit tests in test_api.py check full job lifecycle with pre-calibrated state
 """
-import time
 import httpx
 import pytest
 
