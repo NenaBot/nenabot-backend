@@ -58,6 +58,12 @@ def create_orchestrator(
             max_jobs_raw,
         )
         max_jobs = 0
+    if max_jobs < 0:
+        logger.warning(
+            "NENABOT_MAX_JOBS='%s' must be non-negative — retention disabled",
+            max_jobs_raw,
+        )
+        max_jobs = 0
 
     db = Database(db_path=db_path)
     db.init_db()

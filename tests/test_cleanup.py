@@ -216,6 +216,16 @@ def test_prune_image_files_noop_when_max_jobs_zero(tmp_path: Path) -> None:
     assert len(list(image_dir.glob("capture_*.jpg"))) == 10
 
 
+def test_prune_image_files_noop_when_under_limit(tmp_path: Path) -> None:
+    """When file count is below max_jobs, nothing should be deleted."""
+    image_dir = tmp_path / "images"
+    _make_image_files(image_dir, 3)
+    svc = _make_svc(tmp_path, max_jobs=5)
+    svc._prune_image_files()
+
+    assert len(list(image_dir.glob("capture_*.jpg"))) == 3
+
+
 def test_prune_image_files_missing_dir_does_not_raise(tmp_path: Path) -> None:
     """If the images directory doesn't exist yet, pruning should not error."""
     svc = _make_svc(tmp_path, max_jobs=2)
@@ -373,6 +383,24 @@ def test_create_orchestrator_defaults_to_unlimited(tmp_path: Path) -> None:
 
 def test_create_orchestrator_invalid_max_jobs_defaults_to_zero(tmp_path: Path) -> None:
     with patch.dict(os.environ, {"NENABOT_MAX_JOBS": "not-a-number"}):
+        with (
+            patch("app.dependencies.RobotAdapter") as mock_robot_cls,
+            patch("app.dependencies.CameraVisionAdapter"),
+            patch("app.dependencies.IVAdapter"),
+        ):
+            mock_robot = MagicMock()
+            mock_robot.connect_first_available.return_value = MagicMock(
+                ok=False, error="no robot"
+            )
+            mock_robot_cls.return_value = mock_robot
+
+            svc = create_orchestrator(db_path=str(tmp_path / "test.db"))
+
+    assert svc._max_jobs == 0
+
+
+def test_create_orchestrator_negative_max_jobs_defaults_to_zero(tmp_path: Path) -> None:
+    with patch.dict(os.environ, {"NENABOT_MAX_JOBS": "-4"}):
         with (
             patch("app.dependencies.RobotAdapter") as mock_robot_cls,
             patch("app.dependencies.CameraVisionAdapter"),

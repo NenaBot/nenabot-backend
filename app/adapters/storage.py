@@ -114,13 +114,25 @@ class StorageAdapter:
         """
         if max_jobs <= 0:
             return []
-        rows = self._db.fetchall("SELECT id FROM jobs ORDER BY created_at ASC")
-        excess = len(rows) - max_jobs
+        count_row = self._db.fetchone("SELECT COUNT(*) AS n FROM jobs")
+        total_jobs = int(count_row["n"]) if count_row else 0
+        excess = total_jobs - max_jobs
         if excess <= 0:
             return []
-        to_delete = [r["id"] for r in rows[:excess]]
-        for job_id in to_delete:
-            self._db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+
+        oldest_rows = self._db.fetchall(
+            "SELECT id FROM jobs ORDER BY created_at ASC LIMIT ?",
+            (excess,),
+        )
+        to_delete = [r["id"] for r in oldest_rows]
+        if not to_delete:
+            return []
+
+        placeholders = ",".join("?" for _ in to_delete)
+        self._db.execute(
+            f"DELETE FROM jobs WHERE id IN ({placeholders})",
+            tuple(to_delete),
+        )
         self._db.commit()
         return to_delete
 

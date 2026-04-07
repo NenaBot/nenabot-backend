@@ -455,14 +455,23 @@ class OrchestratorService:
         """
         if self._max_jobs <= 0:
             return
-        image_dir: Path = self._camera_vision._output_dir
+        image_dir: Path = self._camera_vision.output_dir
         if not image_dir.is_dir():
             return
-        files = sorted(
-            image_dir.glob("capture_*.jpg"),
-            key=lambda f: f.stat().st_mtime,
-        )
+        file_mtimes: list[tuple[float, Path]] = []
+        for f in image_dir.glob("capture_*.jpg"):
+            try:
+                file_mtimes.append((f.stat().st_mtime, f))
+            except OSError as exc:
+                logger.debug(
+                    "Retention policy: skipping image file %s during stat - %s",
+                    f,
+                    exc,
+                )
+        files = [f for _, f in sorted(file_mtimes, key=lambda item: item[0])]
         excess = len(files) - self._max_jobs
+        if excess <= 0:
+            return
         for f in files[:excess]:
             try:
                 f.unlink()
