@@ -35,7 +35,9 @@ class MockRobotAdapter:
         self._pose = PoseResult(ok=True, x=x, y=y, z=z, r=r)
         return RobotResult(ok=True)
 
-    def execute_route(self, coordinates: list[tuple[float, float, float, float]]) -> RobotResult:
+    def execute_route(
+        self, coordinates: list[tuple[float, float, float, float]]
+    ) -> RobotResult:
         for x, y, z, r in coordinates:
             result = self.move(x, y, z, r, wait=True)
             if not result.ok:
