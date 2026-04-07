@@ -226,7 +226,10 @@ def test_non_dry_run_job_uses_mock_ionvision_scan_flow(ionvision_client) -> None
     assert len(job["measurements"]) == 1
     assert job["measurements"][0]["simulated"] is False
     assert job["measurements"][0]["scanResult"]["id"] == "result-123"
-    assert job["measurements"][0]["scanResult"]["gasDetection"]["gasName"] == "ethanol"
+    assert (
+        job["measurements"][0]["scanResult"]["gasDetection"]["gasName"]
+        == "ethanol"
+    )
     assert fake_dms.start_new_scan_calls == 1
     assert fake_dms.get_current_scan_calls >= 2
     assert fake_dms.get_latest_dataobject_calls == 1

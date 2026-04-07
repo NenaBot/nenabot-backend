@@ -40,7 +40,11 @@ class TestHealthAndStatus:
         for component in ("camera", "robot", "dms"):
             assert component in health
             assert "status" in health[component]
-            assert health[component]["status"] in {"connected", "disconnected", "error"}
+            assert health[component]["status"] in {
+                "connected",
+                "disconnected",
+                "error",
+            }
 
     def test_status_returns_system_state(self):
         """GET /api/status should return current system state."""
@@ -69,7 +73,7 @@ class TestProfileEndpoints:
         # First get list of profiles
         response = client.get("/api/profile")
         profiles = response.json()
-        
+
         if len(profiles) > 0:
             profile_name = profiles[0].get("name", "default")
             response = client.get(f"/api/profile/{profile_name}")
@@ -112,7 +116,7 @@ class TestJobLifecycle:
             "workR": 0,
         }
         response = client.post("/api/job", json=payload)
-        
+
         # Live API may return 409 if not calibrated yet (normal behavior)
         # Unit tests pre-populate calibration and get 201
         # This test just verifies the endpoint accepts the format
