@@ -487,7 +487,9 @@ class OrchestratorService:
 
         robot_status = self._robot.ping()
         if not robot_status.ok:
-            raise RuntimeError(f"Robot not ready: {robot_status.error or 'unknown error'}")
+            raise RuntimeError(
+                f"Robot not ready: {robot_status.error or 'unknown error'}"
+            )
 
     # ---- Calibration ----
 
@@ -754,9 +756,7 @@ class OrchestratorService:
 
         image_points = np.array(
             [[target.x, target.y] for target in session.targets], dtype=np.float64
-        ).reshape(
-            -1, 1, 2
-        )
+        ).reshape(-1, 1, 2)
         robot_points = np.array(
             session.captured_robot_points, dtype=np.float64
         ).reshape(-1, 3)
@@ -837,22 +837,25 @@ class OrchestratorService:
             for key in required:
                 if key not in data:
                     raise ValueError(f"Missing mapping key: {key}")
-            fixed_points = (
-                data.get("checkerboard", {}).get("fixed_points")
-                or [list(point) for point in FIXED_CALIBRATION_POINTS]
-            )
+            fixed_points = data.get("checkerboard", {}).get("fixed_points") or [
+                list(point) for point in FIXED_CALIBRATION_POINTS
+            ]
             if fixed_points != [list(point) for point in FIXED_CALIBRATION_POINTS]:
                 raise ValueError("Unsupported checkerboard point order")
             if self._camera_vision.intrinsics_loaded:
                 current_intrinsics_path = self._camera_vision.intrinsics_path
-                if current_intrinsics_path and data.get(
-                    "intrinsics_path"
-                ) != current_intrinsics_path:
+                if (
+                    current_intrinsics_path
+                    and data.get("intrinsics_path") != current_intrinsics_path
+                ):
                     raise ValueError("Mapping intrinsics do not match current camera")
                 expected_resolution = list(
                     self._camera_vision.intrinsics_resolution or []
                 )
-                if expected_resolution and data.get("resolution") != expected_resolution:
+                if (
+                    expected_resolution
+                    and data.get("resolution") != expected_resolution
+                ):
                     raise ValueError("Mapping resolution does not match intrinsics")
             return data
         except Exception as exc:
@@ -893,9 +896,10 @@ class OrchestratorService:
         y_direction = robot_by_grid[(row_target.row, row_target.col)] - origin
 
         x_norm = np.linalg.norm(x_direction)
-        y_direction = y_direction - (
-            np.dot(y_direction, x_direction) / max(x_norm**2, 1e-12)
-        ) * x_direction
+        y_direction = (
+            y_direction
+            - (np.dot(y_direction, x_direction) / max(x_norm**2, 1e-12)) * x_direction
+        )
         y_norm = np.linalg.norm(y_direction)
 
         if x_norm <= 1e-9 or y_norm <= 1e-9:
