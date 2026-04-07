@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.adapters.memory_storage import InMemoryStorageAdapter
 from app.adapters.mock_camera_vision import MockCameraVisionAdapter
 from app.adapters.mock_ionVision import MockIVAdapter
 from app.adapters.mock_robot import MockRobotAdapter
@@ -55,6 +56,8 @@ def test_create_orchestrator_uses_mock_adapters_when_mock_mode_enabled(
 ) -> None:
     monkeypatch.setenv("NENABOT_MOCK_MODE", "1")
     monkeypatch.setenv("NENABOT_ENABLE_STARTUP_HOMING", "0")
+    database_ctor = MagicMock(side_effect=AssertionError("Database should not be used"))
+    monkeypatch.setattr("app.dependencies.Database", database_ctor)
 
     orchestrator = create_orchestrator(
         db_path=str(tmp_path / "test.db"),
@@ -65,6 +68,8 @@ def test_create_orchestrator_uses_mock_adapters_when_mock_mode_enabled(
     assert isinstance(orchestrator._camera_vision, MockCameraVisionAdapter)
     assert isinstance(orchestrator._robot, MockRobotAdapter)
     assert isinstance(orchestrator._dms, MockIVAdapter)
+    assert isinstance(orchestrator._storage, InMemoryStorageAdapter)
+    database_ctor.assert_not_called()
 
     health = orchestrator.health()
     assert health["robot"]["status"] == "connected"

@@ -12,6 +12,7 @@ from app.adapters.ionVision import IVAdapter
 from app.adapters.mock_camera_vision import MockCameraVisionAdapter
 from app.adapters.mock_ionVision import MockIVAdapter
 from app.adapters.mock_robot import MockRobotAdapter
+from app.adapters.memory_storage import InMemoryStorageAdapter
 from app.adapters.robot import RobotAdapter
 from app.adapters.storage import StorageAdapter
 from app.services.orchestrator import OrchestratorService
@@ -237,9 +238,6 @@ def create_orchestrator(
         )
         default_measuring_points_per_cm = 0.5
 
-    db = Database(db_path=db_path)
-    db.init_db()
-
     if mock_mode_enabled:
         _ensure_mock_calibration_files(intrinsics_path, mapping_path)
         logger.warning(
@@ -248,10 +246,14 @@ def create_orchestrator(
         camera = MockCameraVisionAdapter(intrinsics_path=intrinsics_path)
         robot = MockRobotAdapter()
         dms = MockIVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url)
+        storage = InMemoryStorageAdapter()
     else:
+        db = Database(db_path=db_path)
+        db.init_db()
         camera = CameraVisionAdapter(intrinsics_path=intrinsics_path)
         robot = RobotAdapter()
         dms = IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url)
+        storage = StorageAdapter(db=db)
 
     result = robot.connect_first_available()
     if result.ok:
@@ -273,7 +275,7 @@ def create_orchestrator(
         camera_vision=camera,
         robot=robot,
         dms=dms,
-        storage=StorageAdapter(db=db),
+        storage=storage,
         mapping_path=mapping_path,
         max_jobs=max_jobs,
         default_work_z=default_work_z,
