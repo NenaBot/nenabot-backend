@@ -43,7 +43,7 @@ def client(tmp_path: Path) -> TestClient:
     ):
         test_orchestrator = create_orchestrator(
             db_path=str(tmp_path / "test.db"),
-            dms_base_url="http://localhost:8080",
+            ionvision_base_url="http://localhost:8080",
         )
 
         # Pre-populate calibration state (normally set by POST /paths)
@@ -67,12 +67,12 @@ def test_health_and_status(client: TestClient) -> None:
     health = response.json()
     assert health["status"] == "ok"
     assert "camera" in health
-    assert "dms" in health
+    assert "ionvision" in health
     assert "robot" in health
     assert "uptimeSeconds" in health
     assert health["uptimeSeconds"] >= 0
     # Each component should report a status and optional error
-    for key in ("camera", "dms", "robot"):
+    for key in ("camera", "ionvision", "robot"):
         assert "status" in health[key]
         assert health[key]["status"] in {"connected", "disconnected", "error"}
 
@@ -239,7 +239,7 @@ def test_paths_returns_ok_when_detection_is_empty_but_calibration_succeeds(
     ):
         test_orchestrator = create_orchestrator(
             db_path=str(tmp_path / "test_paths_ok.db"),
-            dms_base_url="http://localhost:8080",
+            ionvision_base_url="http://localhost:8080",
         )
         app.dependency_overrides[get_orchestrator] = lambda: test_orchestrator
 
@@ -304,7 +304,7 @@ def test_job_creation_requires_calibration(tmp_path: Path) -> None:
     ):
         test_orchestrator = create_orchestrator(
             db_path=str(tmp_path / "test_nocal.db"),
-            dms_base_url="http://localhost:8080",
+            ionvision_base_url="http://localhost:8080",
         )
         # Deliberately NOT setting calibration state
 
@@ -477,7 +477,7 @@ def test_path_populate_requires_calibration(tmp_path: Path) -> None:
     ):
         test_orchestrator = create_orchestrator(
             db_path=str(tmp_path / "test_nocal_path.db"),
-            dms_base_url="http://localhost:8080",
+            ionvision_base_url="http://localhost:8080",
         )
         app.dependency_overrides[get_orchestrator] = lambda: test_orchestrator
 

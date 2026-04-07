@@ -14,8 +14,8 @@ services:
       - nenabot-data:/app/data
     environment:
       - DB_PATH=data/nenabot.db
-      - DMS_BASE_URL=http://localhost:8080
-      - DMS_WS_BASE_URL=ws://localhost:8080
+      - IONVISION_BASE_URL=http://localhost:8080
+      - IONVISION_WS_BASE_URL=ws://localhost:8080
     restart: unless-stopped
 
 volumes:

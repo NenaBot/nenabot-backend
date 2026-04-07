@@ -37,7 +37,7 @@ def _make_svc(tmp_path: Path) -> OrchestratorService:
         camera_vision=camera,
         robot=robot,
         storage=StorageAdapter(db=db),
-        dms=IVAdapter(
+        ionvision=IVAdapter(
             base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
         ),
     )
@@ -114,7 +114,7 @@ def test_health_returns_component_statuses(tmp_path: Path) -> None:
     assert result["status"] in {"ok", "degraded"}
     assert result["uptime_s"] >= 0
 
-    for key in ("robot", "camera", "dms"):
+    for key in ("robot", "camera", "ionvision"):
         assert key in result
         assert result[key]["status"] in {"connected", "disconnected", "error"}
 
@@ -507,13 +507,13 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         "wait_for_position",
         return_value=PoseResult(ok=True, x=0, y=0, z=0, r=0),
     ), patch.object(
-        svc._dms, "start_new_scan", return_value=IVResult(ok=True)
+        svc._ionvision, "start_new_scan", return_value=IVResult(ok=True)
     ), patch.object(
-        svc._dms,
+        svc._ionvision,
         "get_current_scan",
         return_value=IVResult(ok=True, payload={"state": "finished"}),
     ), patch.object(
-        svc._dms,
+        svc._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
     ), patch(
@@ -583,7 +583,7 @@ def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
         camera_vision=camera,
         robot=robot,
         storage=StorageAdapter(db=db),
-        dms=IVAdapter(
+        ionvision=IVAdapter(
             base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
         ),
         default_work_z=-35.0,
@@ -609,7 +609,7 @@ def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
     ):
         svc = create_orchestrator(
             db_path=str(tmp_path / "test.db"),
-            dms_base_url="http://localhost:8080",
+            ionvision_base_url="http://localhost:8080",
         )
     assert svc.default_profile()["workZ"] == pytest.approx(-42.5)
     assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.8)
@@ -631,7 +631,7 @@ def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
     ):
         svc = create_orchestrator(
             db_path=str(tmp_path / "test.db"),
-            dms_base_url="http://localhost:8080",
+            ionvision_base_url="http://localhost:8080",
         )
     assert svc.default_profile()["workZ"] == 0.0
     assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)

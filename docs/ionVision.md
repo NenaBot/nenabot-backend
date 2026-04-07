@@ -171,23 +171,23 @@ pytest -s -v tests/test_ionvision_hardware.py
 
 All variables are optional — hardcoded defaults are used if not set.
 
-| Variable | Default | Description |
-| :--- | :--- | :--- |
-| `IONVISION_RUN_HARDWARE_TESTS` | — | Set to `1` to enable the suite |
-| `IONVISION_BASE_URL` | `http://192.168.1.109/api` | IonVision HTTP base URL |
-| `IONVISION_WS_BASE_URL` | `ws://192.168.1.109/socket` | WebSocket URL (derived from base URL if omitted) |
-| `IONVISION_REQUEST_TIMEOUT_S` | `10.0` | Per-request timeout in seconds |
-| `IONVISION_ENABLE_MUTATION_TESTS` | `true` | Allow scan start/stop and comment writes |
-| `IONVISION_RUN_WS_TEST` | `true` | Enable WebSocket tests |
-| `IONVISION_WS_EVENT_TIMEOUT_S` | `10.0` | Timeout for quick WS events (`controllers.status`, `scan.stopped`) |
-| `IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S` | `120.0` | Timeout waiting for `scan.resultsProcessed` |
-| `IONVISION_RESULTS_MAX_RESULTS` | `100` | Max results returned from `/results` |
-| `IONVISION_RESULTS_PAGE` | — | Page number (uses device default if unset) |
-| `IONVISION_RESULTS_START_DATE` | `2026-03-17T13:01:11.874Z` | Results query start date |
-| `IONVISION_RESULTS_END_DATE` | `2026-03-25T13:01:11.874Z` | Results query end date |
-| `IONVISION_RESULTS_SORT_BY` | `date_dsc` | Results sort order |
-| `IONVISION_RESULTS_ONLY_METADATA` | `true` | Return metadata only (no full data objects) |
-| `IONVISION_RESULTS_IDS` | — | Comma-separated result IDs to filter by |
+| Variable                                     | Default                     | Description                                                        |
+| :------------------------------------------- | :-------------------------- | :----------------------------------------------------------------- |
+| `IONVISION_RUN_HARDWARE_TESTS`               | —                           | Set to `1` to enable the suite                                     |
+| `IONVISION_BASE_URL`                         | `http://192.168.1.109/api`  | IonVision HTTP base URL                                            |
+| `IONVISION_WS_BASE_URL`                      | `ws://192.168.1.109/socket` | WebSocket URL (derived from base URL if omitted)                   |
+| `IONVISION_REQUEST_TIMEOUT_S`                | `10.0`                      | Per-request timeout in seconds                                     |
+| `IONVISION_ENABLE_MUTATION_TESTS`            | `true`                      | Allow scan start/stop and comment writes                           |
+| `IONVISION_RUN_WS_TEST`                      | `true`                      | Enable WebSocket tests                                             |
+| `IONVISION_WS_EVENT_TIMEOUT_S`               | `10.0`                      | Timeout for quick WS events (`controllers.status`, `scan.stopped`) |
+| `IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S` | `120.0`                     | Timeout waiting for `scan.resultsProcessed`                        |
+| `IONVISION_RESULTS_MAX_RESULTS`              | `100`                       | Max results returned from `/results`                               |
+| `IONVISION_RESULTS_PAGE`                     | —                           | Page number (uses device default if unset)                         |
+| `IONVISION_RESULTS_START_DATE`               | `2026-03-17T13:01:11.874Z`  | Results query start date                                           |
+| `IONVISION_RESULTS_END_DATE`                 | `2026-03-25T13:01:11.874Z`  | Results query end date                                             |
+| `IONVISION_RESULTS_SORT_BY`                  | `date_dsc`                  | Results sort order                                                 |
+| `IONVISION_RESULTS_ONLY_METADATA`            | `true`                      | Return metadata only (no full data objects)                        |
+| `IONVISION_RESULTS_IDS`                      | —                           | Comma-separated result IDs to filter by                            |
 
 ### Running specific tests
 
@@ -235,7 +235,7 @@ uvicorn app.main:app --reload
 curl http://127.0.0.1:8000/api/health
 ```
 
-The `dms` component should report `connected` if the adapter can reach the device.
+The `ionvision` component should report `connected` if the adapter can reach the device.
 
 ### Example output (13 tests, all passing)
 

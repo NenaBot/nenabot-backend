@@ -30,7 +30,7 @@ class OrchestratorService:
         self,
         camera_vision: CameraVisionAdapter,
         robot: RobotAdapter,
-        dms: IVAdapter,
+        ionvision: IVAdapter,
         storage: StorageAdapter,
         max_jobs: int = 0,
         default_work_z: float = 0.0,
@@ -38,7 +38,7 @@ class OrchestratorService:
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
-        self._dms = dms
+        self._ionvision = ionvision
         self._storage = storage
         self._max_jobs = max_jobs  # 0 = unlimited
         self._started_at = time.monotonic()
@@ -284,10 +284,10 @@ class OrchestratorService:
                     # Dwell at the waypoint for 1.5 seconds
                     time.sleep(1.5)
 
-                    # Here comes the reading of the DMS
-                    scan_start = self._dms.start_new_scan()
+                    # Here comes the reading from IonVision
+                    scan_start = self._ionvision.start_new_scan()
                     if scan_start.ok:
-                        # # --- SSE: emit scan-started event (uncomment when DMS is connected) ---
+                        # # --- SSE: emit scan-started event (uncomment when IonVision is connected) ---
                         # self._publish_event(job.id, {
                         #     "type": "job:scanning",
                         #     "job_id": job.id,
@@ -299,13 +299,13 @@ class OrchestratorService:
                         # })
                         for _ in range(120):
                             time.sleep(1.5)
-                            status = self._dms.get_current_scan()
+                            status = self._ionvision.get_current_scan()
                             if not status.ok:
                                 break
                             payload = status.payload or {}
                             if payload.get("state") == "finished":
                                 break
-                            # # --- SSE: emit scan-progress event (uncomment when DMS is connected) ---
+                            # # --- SSE: emit scan-progress event (uncomment when IonVision is connected) ---
                             # self._publish_event(job.id, {
                             #     "type": "job:scan_progress",
                             #     "job_id": job.id,
@@ -316,7 +316,7 @@ class OrchestratorService:
                             #     "scan_state": payload.get("state"),
                             #     "timestamp": datetime.now(timezone.utc).isoformat(),
                             # })
-                        latest = self._dms.get_latest_dataobject()
+                        latest = self._ionvision.get_latest_dataobject()
                         if latest.ok:
                             scan_result = latest.payload
                 else:
@@ -545,15 +545,15 @@ class OrchestratorService:
         except Exception as exc:
             components["camera"] = {"status": "error", "error": str(exc)}
 
-        # DMS (IonVision)
+        # IonVision
         try:
-            res = self._dms.ping()
-            components["dms"] = {
+            res = self._ionvision.ping()
+            components["ionvision"] = {
                 "status": "connected" if res.ok else "disconnected",
                 "error": res.error,
             }
         except Exception as exc:
-            components["dms"] = {"status": "error", "error": str(exc)}
+            components["ionvision"] = {"status": "error", "error": str(exc)}
 
         any_error = any(c["status"] == "error" for c in components.values())
         overall = "degraded" if any_error else "ok"
@@ -852,19 +852,21 @@ class OrchestratorService:
         return self._storage.latest_result()
 
     # WEBSOCKET SERVICES
-    async def initialize_dms(self) -> None:
+    async def initialize_ionvision(self) -> None:
         """Initialize async WebSocket handlers, etc"""
-        await self._dms.initialize_websocket()
-        self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
-        self._dms.on_event("scan.stopped", self._handle_scan_stopped)
-
-    async def _close_dms(self) -> None:
-        """Clean up DMS connection and handlers"""
-        await self._dms.disconnect_websocket()
-        self._dms.off_event(
+        await self._ionvision.initialize_websocket()
+        self._ionvision.on_event(
             "scan.resultsProcessed", self._handle_scan_results_processed
         )
-        self._dms.off_event("scan.stopped", self._handle_scan_stopped)
+        self._ionvision.on_event("scan.stopped", self._handle_scan_stopped)
+
+    async def _close_ionvision(self) -> None:
+        """Clean up IonVision connection and handlers"""
+        await self._ionvision.disconnect_websocket()
+        self._ionvision.off_event(
+            "scan.resultsProcessed", self._handle_scan_results_processed
+        )
+        self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         """The results of the previously finished scan have been

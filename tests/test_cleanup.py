@@ -46,7 +46,7 @@ def _make_svc(tmp_path: Path, max_jobs: int = 0) -> OrchestratorService:
         camera_vision=camera,
         robot=robot,
         storage=StorageAdapter(db=db),
-        dms=IVAdapter(
+        ionvision=IVAdapter(
             base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
         ),
         max_jobs=max_jobs,

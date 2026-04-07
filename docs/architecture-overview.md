@@ -56,7 +56,7 @@ Notes about current behavior:
     - `POST /api/robot/move` — manual positioning for calibration
     - `GET /api/robot/pose` — read current end-effector position and joint angles
     - `POST /api/robot/stop` — halt active job and stop robot motion
-- Some API/internal fields still use legacy `dms` naming (for example `Health.dms`), while adapter naming is now IonVision/IV.
+- API and internal component naming uses `ionvision` consistently for the IonVision adapter.
 
 ## 4. Folder structure (commented tree)
 
