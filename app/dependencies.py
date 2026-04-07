@@ -74,6 +74,44 @@ def create_orchestrator(
         default=False,
     )
 
+    max_jobs_raw = _first_env("NENABOT_MAX_JOBS")
+    try:
+        max_jobs = int(max_jobs_raw) if max_jobs_raw else 0
+    except ValueError:
+        logger.warning(
+            "NENABOT_MAX_JOBS='%s' is not a valid integer — retention disabled",
+            max_jobs_raw,
+        )
+        max_jobs = 0
+
+    default_work_z_raw = _first_env("NENABOT_DEFAULT_WORK_Z")
+    try:
+        default_work_z = float(default_work_z_raw) if default_work_z_raw else 0.0
+    except ValueError:
+        logger.warning(
+            "NENABOT_DEFAULT_WORK_Z='%s' is not a valid float — using 0.0",
+            default_work_z_raw,
+        )
+        default_work_z = 0.0
+
+    default_measuring_points_per_cm_raw = _first_env(
+        "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM"
+    )
+    try:
+        default_measuring_points_per_cm = (
+            float(default_measuring_points_per_cm_raw)
+            if default_measuring_points_per_cm_raw
+            else 0.5
+        )
+        if default_measuring_points_per_cm <= 0:
+            raise ValueError("must be > 0")
+    except ValueError:
+        logger.warning(
+            "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM='%s' is not a valid positive float — using 0.5",
+            default_measuring_points_per_cm_raw,
+        )
+        default_measuring_points_per_cm = 0.5
+
     db = Database(db_path=db_path)
     db.init_db()
 

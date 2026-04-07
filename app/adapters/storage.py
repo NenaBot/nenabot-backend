@@ -116,6 +116,36 @@ class StorageAdapter:
             self._db.commit()
             return cur.rowcount > 0
 
+    def prune_jobs(self, max_jobs: int) -> list[str]:
+        """Delete the oldest jobs so that at most *max_jobs* remain.
+
+        Jobs are ordered by ``created_at`` ascending; the oldest ones are
+        removed first.  Cascade constraints on the ``waypoints``,
+        ``measurements``, and ``job_images`` tables ensure all child rows
+        are deleted automatically.
+
+        Parameters
+        ----------
+        max_jobs:
+            Maximum number of jobs to retain.  Values ≤ 0 are a no-op.
+
+        Returns
+        -------
+        list[str]
+            IDs of the jobs that were deleted.
+        """
+        if max_jobs <= 0:
+            return []
+        rows = self._db.fetchall("SELECT id FROM jobs ORDER BY created_at ASC")
+        excess = len(rows) - max_jobs
+        if excess <= 0:
+            return []
+        to_delete = [r["id"] for r in rows[:excess]]
+        for job_id in to_delete:
+            self._db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        self._db.commit()
+        return to_delete
+
     # ---- Measurements ----
 
     def save_measurement(self, job_id: str, m: Measurement) -> None:

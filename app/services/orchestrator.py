@@ -61,8 +61,12 @@ class OrchestratorService:
         self._mapping_path = Path(mapping_path)
         self._started_at = time.monotonic()
         self._profiles = [
-            {"name": "default", "description": "Default inspection profile"},
-            {"name": "fast", "description": "Faster run, lower accuracy"},
+            {
+                "name": "default",
+                "description": "Default inspection profile",
+                "workZ": default_work_z,
+                "measuringPointsPerCm": default_measuring_points_per_cm,
+            }
         ]
         self._running_job_id: str | None = None
         self._stop_requested = False
@@ -337,6 +341,7 @@ class OrchestratorService:
                 job.last_point_processed,
                 job.error,
             )
+            self._prune_old_data()
 
             self._publish_event(
                 job.id,
