@@ -27,8 +27,6 @@ logger = logging.getLogger(__name__)
 MAX_MEASURING_POINTS_PER_CM = 10.0
 MAX_POPULATED_PATH_POINTS = 20000
 TOTAL_CALIBRATION_STEPS = len(FIXED_CALIBRATION_POINTS)
-MIN_ROBOT_REACH_MM = 120.0
-MAX_ROBOT_REACH_MM = 360.0
 
 
 @dataclass
@@ -53,12 +51,16 @@ class OrchestratorService:
         dms: IVAdapter,
         storage: StorageAdapter,
         mapping_path: str = "data/calibration/robot_mapping.json",
+        max_jobs: int = 0,
+        default_work_z: float = 0.0,
+        default_measuring_points_per_cm: float = 0.5,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
         self._dms = dms
         self._storage = storage
         self._mapping_path = Path(mapping_path)
+        self._max_jobs = max(0, int(max_jobs))  # 0 = unlimited
         self._started_at = time.monotonic()
         self._profiles = [
             {
@@ -264,7 +266,10 @@ class OrchestratorService:
                             if not status.ok:
                                 break
                             payload = status.payload or {}
-                            if payload.get("state") == "finished":
+                            scan_state = str(
+                                payload.get("state") or payload.get("status") or ""
+                            ).lower()
+                            if scan_state == "finished":
                                 break
                         latest = self._dms.get_latest_dataobject()
                         if latest.ok:
@@ -400,6 +405,57 @@ class OrchestratorService:
         if not arrival.ok:
             logger.warning("Return-to-start validation failed: %s", arrival.error)
 
+    # ---- Data retention ----
+
+    def _prune_image_files(self) -> None:
+        if self._max_jobs <= 0:
+            return
+
+        image_dir = getattr(self._camera_vision, "output_dir", None)
+        if image_dir is None:
+            image_dir = getattr(self._camera_vision, "_output_dir", None)
+        if image_dir is None:
+            return
+
+        image_dir_path = Path(image_dir)
+        if not image_dir_path.is_dir():
+            return
+
+        files: list[Path] = []
+        for image_file in image_dir_path.glob("capture_*.jpg"):
+            try:
+                image_file.stat()
+            except OSError as exc:
+                logger.warning(
+                    "Retention policy: could not stat image file %s - %s",
+                    image_file,
+                    exc,
+                )
+                continue
+            files.append(image_file)
+
+        files.sort(key=lambda file_path: file_path.stat().st_mtime)
+        excess = len(files) - self._max_jobs
+        if excess <= 0:
+            return
+
+        for file_path in files[:excess]:
+            try:
+                file_path.unlink()
+            except OSError as exc:
+                logger.warning(
+                    "Retention policy: could not delete image file %s - %s",
+                    file_path,
+                    exc,
+                )
+
+    def _prune_old_data(self) -> None:
+        if self._max_jobs <= 0:
+            return
+
+        self._storage.prune_jobs(self._max_jobs)
+        self._prune_image_files()
+
     # ---- Misc ----
 
     def health(self) -> dict[str, object]:
@@ -478,14 +534,6 @@ class OrchestratorService:
             coords = (waypoint.x, waypoint.y, waypoint.z, waypoint.r)
             if any(not math.isfinite(value) for value in coords):
                 raise ValueError(f"Waypoint {index} contains non-finite values")
-
-            reach = math.hypot(waypoint.x, waypoint.y)
-            if reach < MIN_ROBOT_REACH_MM or reach > MAX_ROBOT_REACH_MM:
-                raise ValueError(
-                    "Waypoint "
-                    f"{index} is outside the Dobot working radius: "
-                    f"reach={reach:.1f} mm, expected {MIN_ROBOT_REACH_MM:.0f}-{MAX_ROBOT_REACH_MM:.0f} mm"
-                )
 
         if dry_run:
             return
@@ -1108,6 +1156,14 @@ class OrchestratorService:
         return path
 
     def detect_path(self) -> DetectionResults:
+        capture = self._camera_vision.capture()
+        if capture.ok and capture.image_path:
+            self._prune_image_files()
+            detection_result = self._camera_vision.detect(capture.image_path)
+            if detection_result.ok:
+                return detection_result
+
+        # Backward-compatible path used by existing API tests and stream-only setups.
         return self._camera_vision.detect_latest()
 
     @property
