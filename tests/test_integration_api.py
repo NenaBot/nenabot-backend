@@ -104,8 +104,8 @@ class TestJobLifecycle:
         """POST /api/job with valid format (may return 409 if uncalibrated)."""
         payload = {
             "path": [
-                {"x": 640, "y": 400},
-                {"x": 660, "y": 400},
+                {"pixelX": 640, "pixelY": 400},
+                {"pixelX": 660, "pixelY": 400},
             ],
             "dryRun": True,
             "workZ": 0,
@@ -241,7 +241,7 @@ class TestJobAndScanIntegration:
     def test_jobs_endpoint_accepts_dry_run(self):
         """Jobs endpoint should accept dryRun parameter."""
         payload = {
-            "path": [{"x": 640, "y": 400}],
+            "path": [{"pixelX": 640, "pixelY": 400}],
             "dryRun": True,
         }
         response = client.post("/api/job", json=payload)
@@ -251,7 +251,7 @@ class TestJobAndScanIntegration:
     def test_jobs_endpoint_accepts_live_scan_flag(self):
         """Jobs endpoint should accept dryRun=False for live scans."""
         payload = {
-            "path": [{"x": 640, "y": 400}],
+            "path": [{"pixelX": 640, "pixelY": 400}],
             "dryRun": False,  # Would trigger IonVision scan in prod
         }
         response = client.post("/api/job", json=payload)
