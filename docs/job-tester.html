@@ -360,17 +360,17 @@
             </div>
         </div>
 
-        <!-- Calibration Status (read-only, from POST /path/detect) -->
+        <!-- Calibration Status (read-only, from GET /status) -->
         <div class="card">
             <div class="card-hdr">
                 <span>Calibration Status</span>
                 <button class="secondary" onclick="readPose()">Read Pose (debug)</button>
             </div>
             <div class="card-body">
-                <p style="font-size:11px;color:var(--dim);margin-bottom:8px;">Calibration is captured automatically
-                    when you click Detect. The robot arm must be at the starting position.</p>
-                <div id="calibInfo" style="font-size:12px; color:var(--dim);">Not calibrated — click Detect with robot
-                    at start position.</div>
+                <p style="font-size:11px;color:var(--dim);margin-bottom:8px;">Calibration is managed separately in
+                    <code>docs/calibration-tester.html</code>. This page only reads the backend calibration state.</p>
+                <div id="calibInfo" style="font-size:12px; color:var(--dim);">Not calibrated — complete the guided
+                    calibration flow before detecting or starting a job.</div>
                 <div id="poseInfo" style="margin-top:6px; font-size:12px; color:var(--dim);"></div>
             </div>
         </div>
@@ -713,7 +713,7 @@
             const calibOk = calibration?.calibrated;
             text += calibOk
                 ? '  ✓ calibrated'
-                : '  ⚠ uncalibrated (run Detect with robot at start pos)';
+                : '  ⚠ uncalibrated (complete calibration in calibration-tester.html)';
             $('pathInfo').textContent = text;
         }
 
@@ -724,7 +724,7 @@
                 return;
             }
             if (!calibration?.calibrated) {
-                log('⚠ Cannot populate path — not calibrated. Run Detect with robot arm at start position.');
+                log('⚠ Cannot populate path — not calibrated. Complete the guided calibration flow first.');
                 return;
             }
 
@@ -903,7 +903,7 @@
                 return;
             }
             if (!calibration?.calibrated) {
-                log('⚠ Cannot launch — not calibrated. Run Detect with robot arm at start position.');
+                log('⚠ Cannot launch — not calibrated. Complete the guided calibration flow first.');
                 return;
             }
 

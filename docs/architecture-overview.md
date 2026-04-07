@@ -86,6 +86,7 @@ nenabot-main/
 |- docs/
 |  |- architecture-overview.md           # This file
 |  |- database.md                        # Database schema and persistence details
+|  |- frontend-integration-diagram.md    # Frontend calibration, job, and results sequence diagrams
 |  |- vision-calibration.md              # Intrinsic profile + runtime 4-point calibration flow
 |  |- raspberry-pi-setup.md              # Raspberry Pi remote access and Cloudflare Tunnel SSH guide
 |  |- streaming.md                       # Streaming architecture and usage guide

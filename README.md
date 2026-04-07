@@ -49,6 +49,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 
 - [Architecture Overview](docs/architecture-overview.md)
 - [Database Documentation](docs/database.md)
+- [Frontend Integration](docs/frontend-integration-diagram.md)
 - [Streaming Guide](docs/streaming.md)
 - [Vision Calibration](docs/vision-calibration.md)
 - [IonVision Integration Tests](docs/ionVision.md)
