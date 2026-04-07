@@ -17,6 +17,8 @@ import time
 import httpx
 import pytest
 
+pytestmark = [pytest.mark.integration]
+
 # Backend must be running at localhost:8000
 API_BASE_URL = "http://localhost:8000"
 client = httpx.Client(base_url=API_BASE_URL, timeout=10.0)
