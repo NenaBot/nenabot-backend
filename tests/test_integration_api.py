@@ -57,8 +57,8 @@ class TestProfileEndpoints:
     """Test profile CRUD operations."""
 
     def test_list_profiles(self):
-        """GET /api/profiles should list available profiles."""
-        response = client.get("/api/profiles")
+        """GET /api/profile should list available profiles."""
+        response = client.get("/api/profile")
         assert response.status_code == 200
 
         profiles = response.json()
@@ -66,23 +66,24 @@ class TestProfileEndpoints:
         assert len(profiles) > 0  # Should have at least default profile
 
     def test_get_specific_profile(self):
-        """GET /api/profiles/{name} should return profile details."""
+        """GET /api/profile/{name} should return profile details."""
         # First get list of profiles
-        response = client.get("/api/profiles")
+        response = client.get("/api/profile")
         profiles = response.json()
         
         if len(profiles) > 0:
             profile_name = profiles[0].get("name", "default")
-            response = client.get(f"/api/profiles/{profile_name}")
+            response = client.get(f"/api/profile/{profile_name}")
             assert response.status_code == 200
             profile = response.json()
             assert "name" in profile
 
     def test_profile_schema_has_required_fields(self):
         """Profile objects should have required fields."""
-        response = client.get("/api/profiles")
+        response = client.get("/api/profile")
         profiles = response.json()
 
+        assert isinstance(profiles, list)
         for profile in profiles:
             assert "name" in profile
             # Additional fields depend on implementation
@@ -93,15 +94,15 @@ class TestJobLifecycle:
     """Test job endpoints (basic operations)."""
 
     def test_list_jobs(self):
-        """GET /api/jobs should list jobs."""
-        response = client.get("/api/jobs")
+        """GET /api/job should list jobs."""
+        response = client.get("/api/job")
         assert response.status_code == 200
 
         jobs = response.json()
         assert isinstance(jobs, list)
 
     def test_create_job_request_format(self):
-        """POST /api/jobs with valid format (may return 409 if uncalibrated)."""
+        """POST /api/job with valid format (may return 409 if uncalibrated)."""
         payload = {
             "path": [
                 {"x": 640, "y": 400},
@@ -111,7 +112,7 @@ class TestJobLifecycle:
             "workZ": 0,
             "workR": 0,
         }
-        response = client.post("/api/jobs", json=payload)
+        response = client.post("/api/job", json=payload)
         
         # Live API may return 409 if not calibrated yet (normal behavior)
         # Unit tests pre-populate calibration and get 201
@@ -119,9 +120,9 @@ class TestJobLifecycle:
         assert response.status_code in (201, 409)
 
     def test_get_latest_job_when_empty(self):
-        """GET /api/jobs/latest returns 404 or 200 depending on state."""
+        """GET /api/job/latest returns 404 or 200 depending on state."""
         # Try to get latest - may not exist
-        response = client.get("/api/jobs/latest")
+        response = client.get("/api/job/latest")
         # Either 404 (no jobs) or 200 (jobs exist)
         assert response.status_code in (200, 404)
 
@@ -130,18 +131,18 @@ class TestErrorHandling:
     """Test error responses and validation."""
 
     def test_nonexistent_job_returns_404(self):
-        """GET /api/jobs/{invalid_id} should return 404."""
-        response = client.get("/api/jobs/this-does-not-exist-xyz")
+        """GET /api/job/{invalid_id} should return 404."""
+        response = client.get("/api/job/this-does-not-exist-xyz")
         assert response.status_code == 404
 
     def test_create_job_with_malformed_path(self):
-        """POST /api/jobs with invalid path structure."""
+        """POST /api/job with invalid path structure."""
         # This test just validates the endpoint rejects bad data
         payload = {
             "path": "not-a-list",  # Should be list
             "dryRun": True,
         }
-        response = client.post("/api/jobs", json=payload)
+        response = client.post("/api/job", json=payload)
         # Should get validation error (422) or conflict (409)
         assert response.status_code in (422, 409)
 
@@ -169,8 +170,9 @@ class TestOpenAPISchema:
         required_paths = [
             "/api/health",
             "/api/status",
-            "/api/jobs",
-            "/api/profiles",
+            "/api/job",
+            "/api/profile",
+            "/api/path/detect",
         ]
 
         for path in required_paths:
@@ -215,16 +217,16 @@ class TestPathsEndpoint:
     """Test path detection workflow which uses IonVision."""
 
     def test_paths_endpoint_exists(self):
-        """POST /api/paths should exist and accept requests."""
+        """POST /api/path/detect should exist and accept requests."""
         payload = {"options": {"speed": 1}}
-        response = client.post("/api/paths", json=payload)
+        response = client.post("/api/path/detect", json=payload)
         # Should accept request (201 created or 409 conflict both OK)
         assert response.status_code in (201, 409, 400, 422)
 
     def test_paths_response_structure_when_successful(self):
         """Successful path detection should return structured response."""
         payload = {"options": {"speed": 1}}
-        response = client.post("/api/paths", json=payload)
+        response = client.post("/api/path/detect", json=payload)
 
         if response.status_code == 201:
             data = response.json()
@@ -243,7 +245,7 @@ class TestJobAndScanIntegration:
             "path": [{"x": 640, "y": 400}],
             "dryRun": True,
         }
-        response = client.post("/api/jobs", json=payload)
+        response = client.post("/api/job", json=payload)
         # Accept 201 (created) or 409 (conflict/uncalibrated)
         assert response.status_code in (201, 409)
 
@@ -253,7 +255,7 @@ class TestJobAndScanIntegration:
             "path": [{"x": 640, "y": 400}],
             "dryRun": False,  # Would trigger IonVision scan in prod
         }
-        response = client.post("/api/jobs", json=payload)
+        response = client.post("/api/job", json=payload)
         # Accept 201 (created) or 409 (conflict/uncalibrated) or 400 (missing deps)
         assert response.status_code in (201, 409, 400)
 
