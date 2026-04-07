@@ -5,6 +5,8 @@ Nenabot now uses a two-part calibration model:
 1. A precomputed intrinsic camera profile JSON.
 2. A runtime 4-point robot mapping JSON.
 
+Battery contour-detection threshold tuning is documented separately in `docs/detection-parameter-tuning.md`.
+
 ## Files
 
 | File | Purpose |

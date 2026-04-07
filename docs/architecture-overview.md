@@ -88,6 +88,7 @@ nenabot-main/
 |  |- database.md                        # Database schema and persistence details
 |  |- frontend-integration-diagram.md    # Frontend calibration, job, and results sequence diagrams
 |  |- vision-calibration.md              # Intrinsic profile + runtime 4-point calibration flow
+|  |- detection-parameter-tuning.md      # Contour detection threshold tuning workflow and presets
 |  |- raspberry-pi-setup.md              # Raspberry Pi remote access and Cloudflare Tunnel SSH guide
 |  |- streaming.md                       # Streaming architecture and usage guide
 |  |- calibration-tester.html            # Guided runtime calibration UI

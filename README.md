@@ -52,6 +52,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 - [Frontend Integration](docs/frontend-integration-diagram.md)
 - [Streaming Guide](docs/streaming.md)
 - [Vision Calibration](docs/vision-calibration.md)
+- [Detection Parameter Tuning](docs/detection-parameter-tuning.md)
 - [IonVision Integration Tests](docs/ionVision.md)
 
 ## Endpoints
