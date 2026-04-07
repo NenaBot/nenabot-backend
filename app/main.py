@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
 from app.api.routes import router
+from app.dependencies import get_orchestrator
 from app.schemas import JobEvent
 
 
@@ -31,8 +36,18 @@ def _custom_openapi(app: FastAPI) -> dict:
     return schema
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Set log level after uvicorn has configured its own logging
+    logging.getLogger("app").setLevel(logging.INFO)
+    # Run blocking startup (robot connect + homing) in a thread so the event loop stays free
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, get_orchestrator)
+    yield
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Olfactomics Orchestrator", version="0.1.0")
+    app = FastAPI(title="Olfactomics Orchestrator", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

@@ -8,10 +8,16 @@ from pydantic import BaseModel, Field
 
 
 class WaypointSchema(BaseModel):
-    x: float
-    y: float
-    z: float = 0.0
-    r: float = 0.0
+    robot_x: float = Field(alias="robotX")
+    robot_y: float = Field(alias="robotY")
+    robot_z: float = Field(0.0, alias="robotZ")
+    robot_r: float = Field(0.0, alias="robotR")
+    index: str | None = None
+    battery_nr: int | None = Field(None, alias="batteryNr")
+    corner_index: int | None = Field(None, alias="cornerIndex")
+    measurement_index: int | None = Field(None, alias="measurementIndex")
+
+    model_config = {"populate_by_name": True}
 
 
 class MeasurementSchema(BaseModel):
@@ -73,27 +79,65 @@ class Status(BaseModel):
 class Profile(BaseModel):
     name: str
     description: str | None = None
+    work_z: float = Field(0.0, alias="workZ")
+    measuring_points_per_cm: float = Field(0.5, alias="measuringPointsPerCm", gt=0.0)
 
 
 # ---- Path detection ----
 
 
 class CornerSchema(BaseModel):
-    x: float
-    y: float
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+
+    model_config = {"populate_by_name": True}
 
 
 class PathRequest(BaseModel):
     options: dict[str, Any] | None = None
 
 
+class BatteryCornersSchema(BaseModel):
+    corners: list[CornerSchema] = Field(default_factory=list)
+
+
+class PopulatedPathPointSchema(BaseModel):
+    index: str
+    battery_nr: int = Field(alias="batteryNr")
+    corner_index: int = Field(alias="cornerIndex")
+    measurement_index: int = Field(alias="measurementIndex")
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+
+    model_config = {"populate_by_name": True}
+
+
+class PathPopulateRequest(BaseModel):
+    batteries: list[BatteryCornersSchema] = Field(default_factory=list)
+    measuring_points_per_cm: float = Field(
+        alias="measuringPointsPerCm",
+        gt=0.0,
+        le=10.0,
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class PathPopulateResponse(BaseModel):
+    path: list[PopulatedPathPointSchema] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
+
+
 class PathItem(BaseModel):
     corners: list[CornerSchema] = Field(default_factory=list)
     width_mm: float = 0.0
     height_mm: float = 0.0
-    center_x: float = 0.0
-    center_y: float = 0.0
+    center_x: float = Field(0.0, alias="pixelCenterX")
+    center_y: float = Field(0.0, alias="pixelCenterY")
     confidence: float = 0.0
+
+    model_config = {"populate_by_name": True}
 
 
 class MarkerCornersSchema(BaseModel):
@@ -154,8 +198,10 @@ class RobotMoveResponse(BaseModel):
 class PixelPointSchema(BaseModel):
     """A point in canvas/pixel coordinates."""
 
-    x: float
-    y: float
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+
+    model_config = {"populate_by_name": True}
 
 
 # ---- Calibration ----
@@ -194,7 +240,17 @@ class JobEvent(BaseModel):
 
 
 class JobCreateRequest(BaseModel):
-    path: list[PixelPointSchema] = Field(default_factory=list)
+    class JobPathPointSchema(BaseModel):
+        pixel_x: float = Field(alias="pixelX")
+        pixel_y: float = Field(alias="pixelY")
+        index: str | None = None
+        battery_nr: int | None = Field(None, alias="batteryNr")
+        corner_index: int | None = Field(None, alias="cornerIndex")
+        measurement_index: int | None = Field(None, alias="measurementIndex")
+
+        model_config = {"populate_by_name": True}
+
+    path: list[JobPathPointSchema] = Field(default_factory=list)
     work_z: float = Field(0.0, alias="workZ")
     work_r: float = Field(0.0, alias="workR")
     dry_run: bool = Field(False, alias="dryRun")
