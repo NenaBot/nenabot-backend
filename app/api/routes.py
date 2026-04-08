@@ -213,7 +213,7 @@ def debug_robot_reachability(
     if robot is None:
         raise HTTPException(status_code=500, detail="Robot adapter not available")
 
-    reachability_check = getattr(robot, "_check_reachability_mm", None)
+    reachability_check = getattr(robot, "is_reachable_mm", None)
     if not callable(reachability_check):
         raise HTTPException(
             status_code=500,

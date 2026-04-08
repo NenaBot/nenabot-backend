@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import glob
 import logging
+from math import sqrt
 import os
 import re
 import sys
@@ -9,28 +10,137 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from roboticstoolbox import DHRobot, RevoluteDH
 import numpy as np
-from spatialmath import SE3
-
-deg = np.pi / 180
-
-L1 = RevoluteDH(d=0.140, a=0, alpha=0,
-                qlim=[-120*deg, 120*deg])
-
-L2 = RevoluteDH(d=0, a=0, alpha=np.pi/2,
-                qlim=[-5*deg, 90*deg])
-
-L3 = RevoluteDH(d=0, a=0.135, alpha=0,
-                qlim=[-15*deg, 90*deg])
-
-L4 = RevoluteDH(d=0, a=0.147, alpha=0,
-                qlim=[-140*deg, 140*deg])
-
-DOBOT = DHRobot([L1, L2, L3, L4], name="DobotMagician")
 
 logger = logging.getLogger(__name__)
 
+
+class DobotKinematics:
+    def __init__(self):
+        # Robot geometry (meters)
+        self.d1 = 0.140   # base height
+        self.L2 = 0.135   # first link
+        self.L3 = 0.147   # second link
+
+        # Joint limits (radians) — approximate safe values
+        deg = np.pi / 180
+        self.limits = {
+            "theta1": (-120 * deg, 120 * deg),
+            "theta2": (-5 * deg, 90 * deg),
+            "theta3": (-15 * deg, 90 * deg),
+            "theta4": (-140 * deg, 140 * deg),
+        }
+
+        # Conservative Cartesian safety envelope in millimeters.
+        # These limits intentionally reject edge cases to avoid unsafe motion.
+        self.min_x_mm = 120.0
+        self.min_z_mm = -30.0
+        self.max_z_mm = 150.0
+        self.min_radius_mm = 140.0
+        self.max_radius_mm = 300.0
+
+    def _cartesian_guardrails(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
+        radius_mm = float(np.hypot(x_mm, y_mm))
+        base_angle = float(np.arctan2(y_mm, x_mm))
+
+        theta1_min, theta1_max = self.limits["theta1"]
+        return (
+            x_mm >= self.min_x_mm
+            and self.min_z_mm <= z_mm <= self.max_z_mm
+            and self.min_radius_mm <= radius_mm <= self.max_radius_mm
+            and theta1_min <= base_angle <= theta1_max
+        )
+
+    def _ik_branch(
+        self,
+        x_m: float,
+        y_m: float,
+        z_m: float,
+        wrist_angle: float,
+        elbow_up: bool,
+    ) -> tuple[float, float, float, float] | None:
+        """Solve one IK branch and return Dobot joint-space angles when valid."""
+
+        d1, L2, L3 = self.d1, self.L2, self.L3
+
+        theta1 = np.arctan2(y_m, x_m)
+        r = np.sqrt(x_m**2 + y_m**2)
+        z_offset = z_m - d1
+
+        D = (r**2 + z_offset**2 - L2**2 - L3**2) / (2 * L2 * L3)
+        if np.abs(D) > 1:
+            return None
+
+        sign = +1 if elbow_up else -1
+        theta3 = np.arctan2(sign * np.sqrt(max(0.0, 1 - D**2)), D)
+        theta2 = np.arctan2(z_offset, r) - np.arctan2(
+            L3 * np.sin(theta3),
+            L2 + L3 * np.cos(theta3),
+        )
+
+        # Map geometric angles into Dobot-like joint convention.
+        theta2_real = theta2 + np.pi / 2
+        theta3_real = np.pi / 2 - theta3
+        theta4_real = wrist_angle - theta2_real - theta3_real
+
+        thetas = (theta1, theta2_real, theta3_real, theta4_real)
+        if self._within_limits(thetas):
+            return thetas
+        return None
+
+    def solve_ik(
+        self,
+        x_m: float,
+        y_m: float,
+        z_m: float,
+        wrist_angle: float = 0.0,
+        elbow_up: bool | None = None,
+    ) -> tuple[float, float, float, float] | None:
+        """
+        Solve IK in meters. Returns Dobot-like (theta1, theta2, theta3, theta4)
+        or None when no joint-limited solution exists.
+
+        If elbow_up is None, both elbow branches are tested.
+        """
+
+        if elbow_up is None:
+            for branch in (False, True):
+                solution = self._ik_branch(x_m, y_m, z_m, wrist_angle, branch)
+                if solution is not None:
+                    return solution
+            return None
+
+        return self._ik_branch(x_m, y_m, z_m, wrist_angle, elbow_up)
+
+    def _within_limits(self, thetas):
+        keys = ["theta1", "theta2", "theta3", "theta4"]
+        for angle, key in zip(thetas, keys):
+            low, high = self.limits[key]
+            if not (low <= angle <= high):
+                return False
+        return True
+
+    def check_reachability_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
+        """
+        Conservative reachability check for manual/sweep testing.
+
+        Returns True only when both safety guardrails and IK validation pass.
+        """
+
+        if not self._cartesian_guardrails(x_mm, y_mm, z_mm):
+            return False
+
+        x_m, y_m, z_m = x_mm / 1000.0, y_mm / 1000.0, z_mm / 1000.0
+
+        sol = self.solve_ik(x_m, y_m, z_m, wrist_angle=0.0, elbow_up=None)
+
+        if sol is not None:
+            logger.debug("Reachable point: (%.1f, %.1f, %.1f) mm", x_mm, y_mm, z_mm)
+            return True
+
+        logger.debug("Unreachable point: (%.1f, %.1f, %.1f) mm", x_mm, y_mm, z_mm)
+        return False
+    
 
 def _get_dobot_dll_type():
     if sys.platform.startswith("win"):
@@ -554,20 +664,14 @@ class RobotAdapter:
         self._api = None
         self._connected_port = None
 
-    def _check_reachability_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
-        """Return True when IK can find a joint-limited solution for a Cartesian point.
+    def is_reachable_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
+        """blahblah"""
 
-        Inputs are in millimeters to match Dobot movement commands.
-        """
-        # The DH model uses meters, while Dobot command coordinates are millimeters.
-        x_m, y_m, z_m = x_mm / 1000.0, y_mm / 1000.0, z_mm / 1000.0
-
-        target = SE3.Trans(x_m, y_m, z_m)
-        sol = DOBOT.ikine_LM(target, mask=[1, 1, 1, 0, 0, 0], joint_limits=True)
-
-        if sol.success:
-            logger.debug("Reachable point: (%.1f, %.1f, %.1f) mm", x_mm, y_mm, z_mm)
+        if(z_mm > 0 or x_mm < 0):
+            return False
+        
+        dist = sqrt(y_mm**2+x_mm**2)
+        if dist > 320 or dist < 180:
+            return False
+        else:
             return True
-
-        logger.debug("Unreachable point: (%.1f, %.1f, %.1f) mm", x_mm, y_mm, z_mm)
-        return False
