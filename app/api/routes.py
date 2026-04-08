@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import queue
+import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -37,6 +38,7 @@ from app.schemas import (
 from app.services.orchestrator import OrchestratorService
 
 router = APIRouter()
+_reachability_stop_event = threading.Event()
 
 
 @router.get("/health", response_model=Health)
@@ -205,10 +207,13 @@ def debug_robot_reachability(
     y_min: float,
     z_max: float,
     z_min: float,
+    step: float=20.0,
     r: float = 0.0,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> dict:
     """Temporary endpoint for manual robot reachability checks during development."""
+    _reachability_stop_event.clear()
+
     robot = getattr(svc, "_robot", None)
     if robot is None:
         raise HTTPException(status_code=500, detail="Robot adapter not available")
@@ -227,7 +232,6 @@ def debug_robot_reachability(
             detail="Position wait function is not available on robot adapter",
         )
 
-    step = 50.0
     x_values = _sweep_axis_values(x_min, x_max, step_mm=step)
     y_values = _sweep_axis_values(y_min, y_max, step_mm=step)
     z_values = _sweep_axis_values(z_min, z_max, step_mm=step)
@@ -238,6 +242,17 @@ def debug_robot_reachability(
     for y in y_values:
         for x in x_values:
             for z in z_values:
+                if _reachability_stop_event.is_set():
+                    return {
+                        "stoppedEarly": True,
+                        "stopReason": "stop_requested",
+                        "failedAt": None,
+                        "testedPoints": len(checks),
+                        "totalPlannedPoints": total_points,
+                        "stepMm": step,
+                        "checks": checks,
+                    }
+
                 reachable = bool(reachability_check(x, y, z))
                 item: dict = {
                     "x": x,
@@ -290,6 +305,18 @@ def debug_robot_reachability(
         "totalPlannedPoints": total_points,
         "stepMm": step,
         "checks": checks,
+    }
+
+
+@router.post("/debug/robot/reachability/stop", status_code=status.HTTP_200_OK)
+def stop_debug_robot_reachability(
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> dict:
+    _reachability_stop_event.set()
+    robot_stopped = svc.stop_job()
+    return {
+        "stopRequested": True,
+        "robotStopped": robot_stopped,
     }
 
 
