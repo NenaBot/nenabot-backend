@@ -54,7 +54,7 @@ dType.DisconnectDobot(api)
 
 # 4. Final Output for the math step
 print("\n" + "="*40)
-print("COPY AND PASTE THIS DATA TO matrix.py file")
+print("COPY AND PASTE THIS DATA TO mapping-matrix.py file")
 print("="*40)
 for p in points_list:
     print(p)
