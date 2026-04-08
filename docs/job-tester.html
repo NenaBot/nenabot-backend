@@ -311,11 +311,18 @@
                     <div class="sep"></div>
                     <button class="secondary" onclick="clearAllWaypoints()">Clear Path</button>
                     <div class="sep"></div>
+                    <button class="secondary" onclick="populatePath()">Populate Path</button>
                     <button class="secondary" onclick="testMoveToWP()">Test Move</button>
                 </div>
             </div>
             <div class="card-body">
                 <canvas id="snapCanvas" width="1280" height="720"></canvas>
+                <div class="field-row" style="margin-top:8px;">
+                    <div>
+                        <label>Measuring points per cm</label>
+                        <input id="measuringPointsPerCm" type="number" value="0.5" min="0.01" step="0.1" />
+                    </div>
+                </div>
                 <div id="pathInfo" style="margin-top:6px; font-size:12px; color:var(--dim);"></div>
             </div>
         </div>
@@ -350,7 +357,7 @@
             </div>
         </div>
 
-        <!-- Calibration Status (read-only, from POST /paths) -->
+        <!-- Calibration Status (read-only, from POST /path/detect) -->
         <div class="card">
             <div class="card-hdr">
                 <span>Calibration Status</span>
@@ -409,14 +416,14 @@
         let currentJobId = null, eventSource = null, pollTimer = null;
 
         // Path state
-        let detectedPath = [];       // [{x, y}, ...] in pixel coords
+        let detectedPath = [];       // [{x, y, index?, batteryNr?, cornerIndex?, measurementIndex?}, ...]
         let lastSnapshotImg = null;  // Image object of last detection snapshot
-        let lastSnapshotBase64 = null; // raw base64 JPEG from POST /paths (clean, no overlays)
-        let lastDetections = [];     // raw detection objects from last POST /paths
+        let lastSnapshotBase64 = null; // raw base64 JPEG from POST /path/detect (clean, no overlays)
+        let lastDetections = [];     // raw detection objects from last POST /path/detect
         let lastPixelsPerMm = null;  // scale factor (for display only)
         let lastMarkerCorners = [];  // ArUco marker corner data
 
-        // Calibration state — read-only, populated from POST /paths response
+        // Calibration state — read-only, populated from POST /path/detect response
         let calibration = null;      // {calibrated, robotStart, canvasStart, pixelsPerMm} or null
 
         // Canvas interaction
@@ -431,6 +438,39 @@
             const el = $('log');
             el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
             el.scrollTop = el.scrollHeight;
+        }
+
+        function requestSucceeded(data) {
+            if (typeof data?.ok === 'boolean') return data.ok;
+            if (typeof data?.requestSucceeded === 'boolean') return data.requestSucceeded;
+            return false;
+        }
+
+        function makeWaypoint(x, y, meta = {}) {
+            return {
+                x,
+                y,
+                index: meta.index ?? null,
+                batteryNr: meta.batteryNr ?? null,
+                cornerIndex: meta.cornerIndex ?? null,
+                measurementIndex: meta.measurementIndex ?? null,
+            };
+        }
+
+        function hasPopulationMeta(w) {
+            return w.index != null ||
+                w.batteryNr != null ||
+                w.cornerIndex != null ||
+                w.measurementIndex != null;
+        }
+
+        function toJobPathPoint(w) {
+            const point = { pixelX: w.x, pixelY: w.y };
+            if (w.index != null) point.index = w.index;
+            if (w.batteryNr != null) point.batteryNr = w.batteryNr;
+            if (w.cornerIndex != null) point.cornerIndex = w.cornerIndex;
+            if (w.measurementIndex != null) point.measurementIndex = w.measurementIndex;
+            return point;
         }
 
         /* ---- Tool selection ---- */
@@ -478,8 +518,6 @@
                 const hitRadius = 14;
 
                 if (activeTool === 'add') {
-                    const workZ = parseFloat($('workZ').value) || 0;
-                    const workR = parseFloat($('workR').value) || 0;
                     let insertAt = detectedPath.length;
                     if (detectedPath.length >= 2) {
                         let bestDist = Infinity;
@@ -490,7 +528,7 @@
                             if (d < bestDist) { bestDist = d; insertAt = i + 1; }
                         }
                     }
-                    detectedPath.splice(insertAt, 0, { x, y });
+                    detectedPath.splice(insertAt, 0, makeWaypoint(x, y));
                     log(`Added waypoint #${insertAt + 1} at (${x.toFixed(0)}, ${y.toFixed(0)})`);
                     redrawCanvas();
                     return;
@@ -547,7 +585,7 @@
             const img = $('cameraFeed');
             cameraOn = !cameraOn;
             if (cameraOn) {
-                img.src = `${api()}/streams/camera/feed`;
+                img.src = `${api()}/stream/camera/feed`;
                 img.onerror = () => { log('Camera feed error — check server / camera'); cameraOn = false; };
                 log('Camera stream started');
             } else {
@@ -561,7 +599,7 @@
             const img = $('detectionFeed');
             detectionOn = !detectionOn;
             if (detectionOn) {
-                img.src = `${api()}/streams/detection/feed`;
+                img.src = `${api()}/stream/detection/feed`;
                 img.onerror = () => { log('Detection feed error — check server / camera'); detectionOn = false; };
                 log('Detection stream started');
             } else {
@@ -575,13 +613,13 @@
         async function detectPath() {
             log('Detecting path (robot arm must be at start position)…');
             try {
-                const res = await fetch(`${api()}/paths`, {
+                const res = await fetch(`${api()}/path/detect`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ options: {} }),
                 });
                 const data = await res.json();
-                log(`Path result: requestSucceeded=${data.requestSucceeded}, ${data.detections?.length ?? 0} detections, ` +
+                log(`Path result: requestSucceeded=${requestSucceeded(data)}, ${data.detections?.length ?? 0} detections, ` +
                     `pixelsPerMm=${data.pixelsPerMm ?? '?'}, markers=${data.markerCount ?? 0}`);
 
                 lastDetections = data.detections || [];
@@ -617,8 +655,8 @@
                 const rs = calibration.robotStart;
                 const cs = calibration.canvasStart;
                 const ppm = calibration.pixelsPerMm;
-                el.textContent = `✓ Calibrated — Robot start: (${rs.x.toFixed(1)}, ${rs.y.toFixed(1)}, ${rs.z.toFixed(1)}) mm` +
-                    ` | Canvas start: (${cs.x.toFixed(0)}, ${cs.y.toFixed(0)}) px` +
+                el.textContent = `✓ Calibrated — Robot start: (${rs.robotX.toFixed(1)}, ${rs.robotY.toFixed(1)}, ${rs.robotZ.toFixed(1)}) mm` +
+                    ` | Canvas start: (${cs.pixelX.toFixed(0)}, ${cs.pixelY.toFixed(0)}) px` +
                     ` | ppm: ${ppm?.toFixed(2) ?? '?'}`;
                 el.style.color = 'var(--green)';
             } else {
@@ -627,19 +665,27 @@
             }
         }
 
-        /* Build waypoint path from detected object corners (4 per object) */
+        /* Build a draft waypoint path from detected object corners (4 per object). */
         function buildPathFromCorners() {
             detectedPath = [];
-            for (const det of lastDetections) {
+            for (let b = 0; b < lastDetections.length; b++) {
+                const det = lastDetections[b];
                 if (det.corners && det.corners.length >= 4) {
-                    for (const c of det.corners) {
-                        detectedPath.push({ x: c.x, y: c.y });
+                    for (let c = 0; c < det.corners.length; c++) {
+                        const corner = det.corners[c];
+                        detectedPath.push(
+                            makeWaypoint(corner.pixelX, corner.pixelY, {
+                                index: `b${b}-c${c}`,
+                                batteryNr: b,
+                                cornerIndex: c,
+                            })
+                        );
                     }
                 } else {
-                    detectedPath.push({ x: det.center_x, y: det.center_y });
+                    detectedPath.push(makeWaypoint(det.pixelCenterX, det.pixelCenterY));
                 }
             }
-            log(`Built path: ${detectedPath.length} waypoints from ${lastDetections.length} object(s)`);
+            log(`Built draft path: ${detectedPath.length} corner waypoints from ${lastDetections.length} object(s)`);
             updatePathInfo();
         }
 
@@ -648,17 +694,88 @@
             if (calibration?.calibrated) {
                 const cs = calibration.canvasStart;
                 const rs = calibration.robotStart;
-                text += `Start: (${cs.x.toFixed(0)}, ${cs.y.toFixed(0)})px → (${rs.x.toFixed(1)}, ${rs.y.toFixed(1)})mm  |  `;
+                text += `Start: (${cs.pixelX.toFixed(0)}, ${cs.pixelY.toFixed(0)})px → (${rs.robotX.toFixed(1)}, ${rs.robotY.toFixed(1)})mm  |  `;
             }
+            const populatedCount = detectedPath.filter(hasPopulationMeta).length;
             text += detectedPath.length
                 ? `${detectedPath.length} waypoint(s): ${detectedPath.map((w, i) => `#${i + 1}(${w.x.toFixed(0)},${w.y.toFixed(0)})`).join(' → ')}`
                 : 'No path — click Detect or use Add tool';
+
+            if (detectedPath.length) {
+                text += `  |  populated metadata on ${populatedCount}/${detectedPath.length}`;
+            }
 
             const calibOk = calibration?.calibrated;
             text += calibOk
                 ? '  ✓ calibrated'
                 : '  ⚠ uncalibrated (run Detect with robot at start pos)';
             $('pathInfo').textContent = text;
+        }
+
+        /* ---- Path population (perimeter + density) ---- */
+        async function populatePath() {
+            if (!lastDetections.length) {
+                log('⚠ No detections — run Detect first.');
+                return;
+            }
+            if (!calibration?.calibrated) {
+                log('⚠ Cannot populate path — not calibrated. Run Detect with robot arm at start position.');
+                return;
+            }
+
+            const density = parseFloat($('measuringPointsPerCm').value);
+            if (!Number.isFinite(density) || density <= 0) {
+                log('⚠ Invalid density. Set measuring points per cm > 0.');
+                return;
+            }
+
+            const batteries = lastDetections
+                .filter(det => Array.isArray(det.corners) && det.corners.length >= 2)
+                .map(det => ({
+                    corners: det.corners.map(c => ({
+                        pixelX: c.pixelX,
+                        pixelY: c.pixelY,
+                    })),
+                }));
+
+            if (!batteries.length) {
+                log('⚠ No battery corner sets available for population.');
+                return;
+            }
+
+            log(`Populating path from ${batteries.length} battery contour(s) @ ${density} points/cm…`);
+            try {
+                const res = await fetch(`${api()}/path/populate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batteries, measuringPointsPerCm: density }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    log(`Path populate error: ${err.detail || JSON.stringify(err)}`);
+                    return;
+                }
+
+                const data = await res.json();
+                const sorted = data.path || [];
+
+                log(`✓ Path populated: ${sorted.length} perimeter waypoints`);
+                log(`Preview: ${sorted.slice(0, 8).map((p, i) => `#${i + 1}[${p.index}](${p.pixelX.toFixed(0)},${p.pixelY.toFixed(0)})`).join(' → ')}`);
+
+                // Keep all metadata fields so POST /job receives population info.
+                detectedPath = sorted.map(p => makeWaypoint(p.pixelX, p.pixelY, {
+                    index: p.index ?? null,
+                    batteryNr: p.batteryNr ?? null,
+                    cornerIndex: p.cornerIndex ?? null,
+                    measurementIndex: p.measurementIndex ?? null,
+                }));
+                updatePathInfo();
+                redrawCanvas();
+
+            } catch (e) {
+                log('Path populate error: ' + e.message);
+            }
         }
 
         function clearAllWaypoints() {
@@ -686,15 +803,16 @@
             for (const det of lastDetections) {
                 if (det.corners?.length >= 4) {
                     ctx.beginPath();
-                    ctx.moveTo(det.corners[0].x, det.corners[0].y);
+                    ctx.moveTo(det.corners[0].pixelX, det.corners[0].pixelY);
                     for (let i = 1; i < det.corners.length; i++)
-                        ctx.lineTo(det.corners[i].x, det.corners[i].y);
+                        ctx.lineTo(det.corners[i].pixelX, det.corners[i].pixelY);
                     ctx.closePath();
                     ctx.stroke();
                 }
                 ctx.strokeStyle = '#00ffff55';
                 ctx.lineWidth = 1;
-                const cx = det.center_x, cy = det.center_y;
+                const cx = det.pixelCenterX;
+                const cy = det.pixelCenterY;
                 ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
                 ctx.strokeStyle = '#00ffff';
@@ -708,9 +826,9 @@
                     ctx.lineWidth = 1;
                     ctx.setLineDash([4, 4]);
                     ctx.beginPath();
-                    ctx.moveTo(mc.corners[0].x, mc.corners[0].y);
+                    ctx.moveTo(mc.corners[0].pixelX, mc.corners[0].pixelY);
                     for (let i = 1; i < mc.corners.length; i++)
-                        ctx.lineTo(mc.corners[i].x, mc.corners[i].y);
+                        ctx.lineTo(mc.corners[i].pixelX, mc.corners[i].pixelY);
                     ctx.closePath();
                     ctx.stroke();
                     ctx.setLineDash([]);
@@ -743,7 +861,8 @@
                 ctx.stroke();
 
                 // Label: index number
-                let label = `#${i + 1}`;
+                const tag = w.index ? ` [${w.index}]` : '';
+                let label = `#${i + 1}${tag}`;
                 ctx.fillStyle = '#facc15';
                 ctx.font = 'bold 11px system-ui';
                 ctx.fillText(label, w.x + 9, w.y - 5);
@@ -752,7 +871,7 @@
             // Canvas start marker (orange diamond) — from backend calibration
             const canvasStartPos = calibration?.canvasStart;
             if (canvasStartPos) {
-                const sx = canvasStartPos.x, sy = canvasStartPos.y;
+                const sx = canvasStartPos.pixelX, sy = canvasStartPos.pixelY;
                 const sz = 10;
                 ctx.fillStyle = '#ff8c00';
                 ctx.beginPath();
@@ -791,7 +910,7 @@
             try {
                 const res = await fetch(`${api()}/robot/pose`);
                 const data = await res.json();
-                if (data.requestSucceeded) {
+                if (requestSucceeded(data)) {
                     $('poseInfo').textContent = `Robot position: (${data.x.toFixed(1)}, ${data.y.toFixed(1)}, ${data.z.toFixed(1)}, ${data.r.toFixed(1)}) mm`;
                     $('poseInfo').style.color = 'var(--green)';
                     log(`Robot pose (mm): x=${data.x.toFixed(1)} y=${data.y.toFixed(1)} z=${data.z.toFixed(1)} r=${data.r.toFixed(1)}`);
@@ -820,15 +939,15 @@
             // Send just the first pixel waypoint as a 1-waypoint job-like move for testing.
             // The backend will convert it. For a quick test, use robot/move with the backend-known start.
             const rs = calibration.robotStart;
-            log(`Test Move: sending robot to start position → (${rs.x.toFixed(2)}, ${rs.y.toFixed(2)}, ${rs.z.toFixed(2)}) mm`);
+            log(`Test Move: sending robot to start position → (${rs.robotX.toFixed(2)}, ${rs.robotY.toFixed(2)}, ${rs.robotZ.toFixed(2)}) mm`);
             try {
                 const res = await fetch(`${api()}/robot/move`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ x: rs.x, y: rs.y, z: rs.z, r: rs.r }),
+                    body: JSON.stringify({ x: rs.robotX, y: rs.robotY, z: rs.robotZ, r: rs.robotR }),
                 });
                 const data = await res.json();
-                if (data.requestSucceeded) {
+                if (requestSucceeded(data)) {
                     log('  ✓ Move command sent. Check physical robot position.');
                 } else {
                     log(`  ✗ Move failed: ${data.error}`);
@@ -857,7 +976,7 @@
             $('confirmBtn').textContent = dryRun ? 'Confirm & Dry Run' : 'Confirm & Start';
             $('confirmDetail').textContent =
                 `${detectedPath.length} pixel waypoints (backend converts → robot mm)` +
-                ` | Robot start: (${rs.x.toFixed(1)}, ${rs.y.toFixed(1)}, ${rs.z.toFixed(1)}) mm` +
+                ` | Robot start: (${rs.robotX.toFixed(1)}, ${rs.robotY.toFixed(1)}, ${rs.robotZ.toFixed(1)}) mm` +
                 ` | ppm=${calibration.pixelsPerMm?.toFixed(2) ?? '?'}` +
                 ` | ${dryRun ? 'DRY RUN' : 'REAL MOVEMENT'}`;
         }
@@ -876,19 +995,26 @@
             const workZ = parseFloat($('workZ').value) || 0;
             const workR = parseFloat($('workR').value) || 0;
 
-            // Send raw pixel waypoints — backend converts to robot mm
-            const path = detectedPath.map(w => ({ x: w.x, y: w.y }));
+            // Send raw pixel waypoints (including optional populate metadata).
+            // Backend converts pixel coordinates to robot mm.
+            const path = detectedPath.map(toJobPathPoint);
 
             const body = { path, workZ, workR, dryRun };
 
-            // Send the clean camera snapshot (from POST /paths) as the base image
+            // Send the clean camera snapshot (from POST /path/detect) as the base image
             if (lastSnapshotBase64) {
                 body.imageBase64 = lastSnapshotBase64;
             }
 
-            log(`Starting ${dryRun ? 'DRY RUN' : 'REAL'} job with ${path.length} pixel waypoints…`);
+            const populatedCount = path.filter(p =>
+                p.index != null ||
+                p.batteryNr != null ||
+                p.cornerIndex != null ||
+                p.measurementIndex != null
+            ).length;
+            log(`Starting ${dryRun ? 'DRY RUN' : 'REAL'} job with ${path.length} pixel waypoints (${populatedCount} with populate metadata)…`);
             try {
-                const res = await fetch(`${api()}/jobs`, {
+                const res = await fetch(`${api()}/job`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
@@ -923,7 +1049,7 @@
         function startSSE() {
             stopSSE();
             if (!currentJobId) return;
-            const url = `${api()}/jobs/${currentJobId}/events`;
+            const url = `${api()}/job/${currentJobId}/events`;
             log(`SSE connecting → ${url}`);
             eventSource = new EventSource(url);
 
@@ -995,8 +1121,8 @@
             tbody.innerHTML += `<tr>
       <td>${m.waypointIndex}</td>
       <td>${px}</td><td>${py}</td>
-      <td>${w.x?.toFixed(1)}</td><td>${w.y?.toFixed(1)}</td>
-      <td>${w.z?.toFixed(1)}</td><td>${w.r?.toFixed(1)}</td>
+    <td>${w.robotX?.toFixed(1)}</td><td>${w.robotY?.toFixed(1)}</td>
+    <td>${w.robotZ?.toFixed(1)}</td><td>${w.robotR?.toFixed(1)}</td>
       <td>${m.simulated ? 'Yes' : 'No'}</td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${scanStr}</td>
       <td>${m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '—'}</td>
@@ -1015,7 +1141,7 @@
         async function pollJob() {
             if (!currentJobId) return;
             try {
-                const res = await fetch(`${api()}/jobs/${currentJobId}`);
+                const res = await fetch(`${api()}/job/${currentJobId}`);
                 const job = await res.json();
                 renderJobStatus(job);
                 if (['completed', 'failed', 'stopped'].includes(job.status?.state)) {
@@ -1047,8 +1173,8 @@
                 tbody.innerHTML += `<tr>
       <td>${m.waypointIndex}</td>
       <td>${px}</td><td>${py}</td>
-      <td>${w.x?.toFixed(1)}</td><td>${w.y?.toFixed(1)}</td>
-      <td>${w.z?.toFixed(1)}</td><td>${w.r?.toFixed(1)}</td>
+    <td>${w.robotX?.toFixed(1)}</td><td>${w.robotY?.toFixed(1)}</td>
+    <td>${w.robotZ?.toFixed(1)}</td><td>${w.robotR?.toFixed(1)}</td>
       <td>${m.simulated ? 'Yes' : 'No'}</td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${scanStr}</td>
       <td>${m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '—'}</td>

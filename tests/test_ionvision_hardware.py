@@ -7,7 +7,6 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
@@ -17,12 +16,9 @@ from app.adapters.ionVision import IVAdapter, IVResult
 
 pytestmark = [pytest.mark.hardware, pytest.mark.ionvision]
 
-MANUAL_TESTS_DIR = Path(__file__).resolve().parent
-REPO_ROOT = MANUAL_TESTS_DIR.parent.parent
-LOCAL_HARDWARE_CONFIG_PATHS = (
-    MANUAL_TESTS_DIR / ".ionvision-hardware.json",
-    REPO_ROOT / ".ionvision-hardware.json",
-)
+# Default connection settings — override with env vars (see below)
+_DEFAULT_BASE_URL = "http://192.168.1.109/api"
+_DEFAULT_WS_BASE_URL = "ws://192.168.1.109/socket"
 
 
 @dataclass(frozen=True)
@@ -98,38 +94,6 @@ def _coerce_float(name: str, value: Any, *, default: float) -> float:
         return float(value)
     except (TypeError, ValueError) as exc:
         raise pytest.UsageError(f"{name} must be a number, got {value!r}.") from exc
-
-
-def _setting(env_name: str, local_value: Any = None) -> Any:
-    if env_name in os.environ:
-        return os.getenv(env_name)
-    return local_value
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name, str(default))
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise pytest.UsageError(f"{name} must be an integer, got {raw!r}.") from exc
-
-
-def _env_optional_int(name: str) -> int | None:
-    raw = os.getenv(name)
-    if raw is None or raw.strip() == "":
-        return None
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise pytest.UsageError(f"{name} must be an integer, got {raw!r}.") from exc
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name, str(default))
-    try:
-        return float(raw)
-    except ValueError as exc:
-        raise pytest.UsageError(f"{name} must be a number, got {raw!r}.") from exc
 
 
 def _derive_ws_base_url(base_url: str) -> str:
@@ -383,24 +347,6 @@ async def _capture_websocket_event_for_sync_call(
         assert _event_handler not in adapter._ws._handlers.get(event_type, [])
 
 
-def _load_local_hardware_config() -> dict[str, Any]:
-    for path in LOCAL_HARDWARE_CONFIG_PATHS:
-        if not path.exists():
-            continue
-
-        try:
-            payload = json.loads(path.read_text())
-        except json.JSONDecodeError as exc:
-            raise pytest.UsageError(f"{path} is not valid JSON: {exc}") from exc
-
-        if not isinstance(payload, dict):
-            raise pytest.UsageError(f"{path} must contain a JSON object.")
-
-        return payload
-
-    return {}
-
-
 def _ensure_active_scan(
     adapter: IVAdapter,
     config: HardwareConfig,
@@ -421,120 +367,68 @@ def _ensure_active_scan(
 
 @pytest.fixture(scope="module")
 def hardware_config() -> HardwareConfig:
-    local_config = _load_local_hardware_config()
-    local_results = local_config.get("results_query", {})
-    if local_results and not isinstance(local_results, dict):
-        raise pytest.UsageError(
-            f"{LOCAL_HARDWARE_CONFIG_PATHS[0]}: results_query must be a JSON object."
-        )
-
-    run_hardware_tests = _coerce_bool(
-        "IONVISION_RUN_HARDWARE_TESTS",
-        _setting("IONVISION_RUN_HARDWARE_TESTS", bool(local_config)),
-        default=False,
-    )
-    if not run_hardware_tests:
+    if not _env_flag("IONVISION_RUN_HARDWARE_TESTS"):
         pytest.skip(
-            "Set IONVISION_RUN_HARDWARE_TESTS=1 or create "
-            f"{LOCAL_HARDWARE_CONFIG_PATHS[0]} to run against a real IonVision machine."
+            "Set IONVISION_RUN_HARDWARE_TESTS=1 to run against a real IonVision machine."
         )
 
-    base_url = str(
-        _setting(
-            "IONVISION_BASE_URL", local_config.get("base_url", "http://localhost:8080")
-        )
-    ).rstrip("/")
-    ws_base_url = str(
-        _setting("IONVISION_WS_BASE_URL", local_config.get("ws_base_url"))
-        or _derive_ws_base_url(base_url)
-    ).rstrip("/")
+    base_url = os.getenv("IONVISION_BASE_URL", _DEFAULT_BASE_URL).rstrip("/")
+    ws_base_url = (os.getenv("IONVISION_WS_BASE_URL") or _DEFAULT_WS_BASE_URL).rstrip(
+        "/"
+    )
 
     return HardwareConfig(
         base_url=base_url,
         ws_base_url=ws_base_url,
         timeout_s=_coerce_float(
             "IONVISION_REQUEST_TIMEOUT_S",
-            _setting("IONVISION_REQUEST_TIMEOUT_S", local_config.get("timeout_s")),
+            os.getenv("IONVISION_REQUEST_TIMEOUT_S"),
             default=10.0,
         ),
         allow_mutations=_coerce_bool(
             "IONVISION_ENABLE_MUTATION_TESTS",
-            _setting(
-                "IONVISION_ENABLE_MUTATION_TESTS",
-                local_config.get("allow_mutations", False),
-            ),
-            default=False,
+            os.getenv("IONVISION_ENABLE_MUTATION_TESTS"),
+            default=True,
         ),
         run_websocket_test=_coerce_bool(
             "IONVISION_RUN_WS_TEST",
-            _setting(
-                "IONVISION_RUN_WS_TEST",
-                local_config.get("run_websocket_test", bool(ws_base_url)),
-            ),
-            default=False,
+            os.getenv("IONVISION_RUN_WS_TEST"),
+            default=True,
         ),
         websocket_event_timeout_s=_coerce_float(
             "IONVISION_WS_EVENT_TIMEOUT_S",
-            _setting(
-                "IONVISION_WS_EVENT_TIMEOUT_S",
-                local_config.get("websocket_event_timeout_s"),
-            ),
+            os.getenv("IONVISION_WS_EVENT_TIMEOUT_S"),
             default=10.0,
         ),
         scan_results_processed_timeout_s=_coerce_float(
             "IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S",
-            _setting(
-                "IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S",
-                local_config.get("scan_results_processed_timeout_s"),
-            ),
+            os.getenv("IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S"),
             default=120.0,
         ),
         results_query=ResultsQuery(
             max_results=_coerce_int(
                 "IONVISION_RESULTS_MAX_RESULTS",
-                _setting(
-                    "IONVISION_RESULTS_MAX_RESULTS",
-                    local_results.get("max_results"),
-                ),
-                default=5,
+                os.getenv("IONVISION_RESULTS_MAX_RESULTS"),
+                default=100,
             ),
             page=_coerce_optional_int(
                 "IONVISION_RESULTS_PAGE",
-                _setting("IONVISION_RESULTS_PAGE", local_results.get("page")),
+                os.getenv("IONVISION_RESULTS_PAGE"),
             ),
-            search=str(
-                _setting("IONVISION_RESULTS_SEARCH", local_results.get("search", ""))
-                or ""
+            search=os.getenv("IONVISION_RESULTS_SEARCH", ""),
+            start_date=os.getenv(
+                "IONVISION_RESULTS_START_DATE", "2026-03-17T13:01:11.874Z"
             ),
-            start_date=str(
-                _setting(
-                    "IONVISION_RESULTS_START_DATE",
-                    local_results.get("start_date", ""),
-                )
-                or ""
+            end_date=os.getenv(
+                "IONVISION_RESULTS_END_DATE", "2026-03-25T13:01:11.874Z"
             ),
-            end_date=str(
-                _setting(
-                    "IONVISION_RESULTS_END_DATE",
-                    local_results.get("end_date", ""),
-                )
-                or ""
-            ),
-            sort_by=str(
-                _setting("IONVISION_RESULTS_SORT_BY", local_results.get("sort_by", ""))
-                or ""
-            ),
+            sort_by=os.getenv("IONVISION_RESULTS_SORT_BY", "date_dsc"),
             only_metadata=_coerce_bool(
                 "IONVISION_RESULTS_ONLY_METADATA",
-                _setting(
-                    "IONVISION_RESULTS_ONLY_METADATA",
-                    local_results.get("only_metadata", True),
-                ),
+                os.getenv("IONVISION_RESULTS_ONLY_METADATA"),
                 default=True,
             ),
-            ids=str(
-                _setting("IONVISION_RESULTS_IDS", local_results.get("ids", "")) or ""
-            ),
+            ids=os.getenv("IONVISION_RESULTS_IDS", ""),
         ),
     )
 

@@ -11,6 +11,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.dependencies import get_orchestrator
 from app.domain.models import Job as DomainJob
+from app.domain.models import Waypoint
 from app.schemas import (
     CalibrationResponse,
     ComponentHealth,
@@ -21,8 +22,11 @@ from app.schemas import (
     MarkerCornersSchema,
     MeasurementSchema,
     PathItem,
+    PathPopulateRequest,
+    PathPopulateResponse,
     PathRequest,
     PathResponse,
+    PopulatedPathPointSchema,
     PixelPointSchema,
     Profile,
     RobotMoveRequest,
@@ -53,13 +57,13 @@ def status_route(svc: OrchestratorService = Depends(get_orchestrator)) -> Status
     return Status(state=svc.status())
 
 
-@router.get("/jobs", response_model=list[Job])
+@router.get("/job", response_model=list[Job])
 def list_jobs(svc: OrchestratorService = Depends(get_orchestrator)) -> list[Job]:
     jobs = svc.list_jobs()
     return [_to_job(job) for job in jobs]
 
 
-@router.get("/jobs/latest", response_model=Job)
+@router.get("/job/latest", response_model=Job)
 def latest_job(svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
     job = svc.latest_job()
     if not job:
@@ -67,7 +71,7 @@ def latest_job(svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
     return _to_job(job)
 
 
-@router.get("/jobs/{job_id}", response_model=Job)
+@router.get("/job/{job_id}", response_model=Job)
 def get_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)) -> Job:
     job = svc.get_job(job_id)
     if not job:
@@ -75,7 +79,7 @@ def get_job(job_id: str, svc: OrchestratorService = Depends(get_orchestrator)) -
     return _to_job(job)
 
 
-@router.get("/jobs/{job_id}/image")
+@router.get("/job/{job_id}/image")
 def get_job_image(
     job_id: str,
     svc: OrchestratorService = Depends(get_orchestrator),
@@ -87,7 +91,7 @@ def get_job_image(
     return Response(content=img, media_type="image/jpeg")
 
 
-@router.post("/jobs", response_model=Job, status_code=status.HTTP_201_CREATED)
+@router.post("/job", response_model=Job, status_code=status.HTTP_201_CREATED)
 def create_job(
     payload: JobCreateRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
@@ -95,20 +99,33 @@ def create_job(
     if not svc.is_calibrated:
         raise HTTPException(
             status_code=409,
-            detail="Not calibrated — call POST /paths first "
+            detail="Not calibrated — call POST /path/detect first "
             "(with robot arm at starting position)",
         )
 
-    # Convert pixel waypoints → robot mm using stored calibration
-    waypoints = [
-        svc.pixel_to_robot(p.x, p.y, payload.work_z, payload.work_r)
+    pixel_points = [
+        (
+            p.pixel_x,
+            p.pixel_y,
+        )
         for p in payload.path
     ]
 
-    # Pixel coords for measurement points (one per measurement waypoint)
-    pixel_path: list[tuple[float, float]] = [(p.x, p.y) for p in payload.path]
+    robot_waypoints: list[Waypoint] = []
+    for point, (pixel_x, pixel_y) in zip(payload.path, pixel_points):
+        wp = svc.pixel_to_robot(pixel_x, pixel_y, payload.work_z, payload.work_r)
+        wp.index = point.index
+        wp.battery_nr = point.battery_nr
+        wp.corner_index = point.corner_index
+        wp.measurement_index = point.measurement_index
+        robot_waypoints.append(wp)
 
-    # Starting position for return-to-start (captured during POST /paths)
+    # Pixel coords for measurement points (one per measurement waypoint)
+    pixel_path: list[tuple[float, float]] = [
+        (pixel_x, pixel_y) for pixel_x, pixel_y in pixel_points
+    ]
+
+    # Starting position for return-to-start (captured during POST /path/detect)
     starting_wp = svc.calibration_robot_start
 
     # Decode optional snapshot image
@@ -120,7 +137,7 @@ def create_job(
             pass  # — best-effort decode
 
     job = svc.create_job(
-        path=waypoints,
+        path=robot_waypoints,
         dry_run=payload.dry_run,
         options=payload.options,
         image_bytes=image_bytes,
@@ -132,7 +149,7 @@ def create_job(
 
 
 @router.delete(
-    "/jobs/{job_id}",
+    "/job/{job_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_model=None,
 )
@@ -184,17 +201,17 @@ def robot_pose(
     )
 
 
-@router.get("/profiles", response_model=list[Profile])
+@router.get("/profile", response_model=list[Profile])
 def profiles(svc: OrchestratorService = Depends(get_orchestrator)) -> list[Profile]:
     return [Profile(**profile) for profile in svc.profiles()]
 
 
-@router.get("/profiles/default", response_model=Profile)
+@router.get("/profile/default", response_model=Profile)
 def default_profile(svc: OrchestratorService = Depends(get_orchestrator)) -> Profile:
     return Profile(**svc.default_profile())
 
 
-@router.get("/streams/camera/feed")
+@router.get("/stream/camera/feed")
 async def camera_feed(
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
@@ -205,7 +222,7 @@ async def camera_feed(
     )
 
 
-@router.get("/streams/detection/feed")
+@router.get("/stream/detection/feed")
 async def detection_feed(
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
@@ -216,8 +233,10 @@ async def detection_feed(
     )
 
 
-@router.post("/paths", response_model=PathResponse, status_code=status.HTTP_201_CREATED)
-def create_path(
+@router.post(
+    "/path/detect", response_model=PathResponse, status_code=status.HTTP_201_CREATED
+)
+def detect_path(
     payload: PathRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> PathResponse:
@@ -230,8 +249,14 @@ def create_path(
         cs = svc.calibration_canvas_start
         cal = CalibrationResponse(
             calibrated=True,
-            robot_start=WaypointSchema(x=rs.x, y=rs.y, z=rs.z, r=rs.r) if rs else None,
-            canvas_start=PixelPointSchema(x=cs[0], y=cs[1]) if cs else None,
+            robot_start=(
+                WaypointSchema(robot_x=rs.x, robot_y=rs.y, robot_z=rs.z, robot_r=rs.r)
+                if rs
+                else None
+            ),
+            canvas_start=(
+                PixelPointSchema(pixel_x=cs[0], pixel_y=cs[1]) if cs else None
+            ),
             pixels_per_mm=svc.calibration_pixels_per_mm,
         )
 
@@ -239,7 +264,7 @@ def create_path(
         request_succeeded=result.ok or cal is not None,
         detections=[
             PathItem(
-                corners=[CornerSchema(x=c.x, y=c.y) for c in d.corners],
+                corners=[CornerSchema(pixel_x=c.x, pixel_y=c.y) for c in d.corners],
                 width_mm=d.width_mm,
                 height_mm=d.height_mm,
                 center_x=d.center_x,
@@ -253,7 +278,7 @@ def create_path(
         marker_count=result.marker_count,
         marker_corners=[
             MarkerCornersSchema(
-                corners=[CornerSchema(x=c.x, y=c.y) for c in mc.corners]
+                corners=[CornerSchema(pixel_x=c.x, pixel_y=c.y) for c in mc.corners]
             )
             for mc in result.marker_corners
         ],
@@ -286,7 +311,7 @@ Multiple clients can subscribe to the same job simultaneously.
 
 
 @router.get(
-    "/jobs/{job_id}/events",
+    "/job/{job_id}/events",
     response_class=EventSourceResponse,
     summary="Stream job progress (SSE)",
     description=_SSE_DESCRIPTION,
@@ -360,20 +385,69 @@ async def job_events(
         svc.unsubscribe(job_id, q)
 
 
+@router.post(
+    "/path/populate",
+    response_model=PathPopulateResponse,
+    status_code=status.HTTP_200_OK,
+)
+def populate_path(
+    payload: PathPopulateRequest,
+    svc: OrchestratorService = Depends(get_orchestrator),
+) -> PathPopulateResponse:
+    if not svc.is_calibrated:
+        raise HTTPException(
+            status_code=409,
+            detail="Not calibrated — call POST /path/detect first "
+            "(with robot arm at starting position)",
+        )
+
+    batteries: list[list[tuple[float, float]]] = [
+        [(corner.pixel_x, corner.pixel_y) for corner in battery.corners]
+        for battery in payload.batteries
+    ]
+    try:
+        populated = svc.populate_pixel_path_from_batteries(
+            batteries,
+            payload.measuring_points_per_cm,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return PathPopulateResponse(
+        path=[PopulatedPathPointSchema(**point) for point in populated]
+    )
+
+
 def _to_job(job: DomainJob) -> Job:
     return Job(
         id=job.id,
         options=job.options,
-        path=[WaypointSchema(x=w.x, y=w.y, z=w.z, r=w.r) for w in job.path],
+        path=[
+            WaypointSchema(
+                robot_x=w.x,
+                robot_y=w.y,
+                robot_z=w.z,
+                robot_r=w.r,
+                index=w.index,
+                battery_nr=w.battery_nr,
+                corner_index=w.corner_index,
+                measurement_index=w.measurement_index,
+            )
+            for w in job.path
+        ],
         dry_run=job.dry_run,
         measurements=[
             MeasurementSchema(
                 waypoint_index=m.waypoint_index,
                 waypoint=WaypointSchema(
-                    x=m.waypoint.x,
-                    y=m.waypoint.y,
-                    z=m.waypoint.z,
-                    r=m.waypoint.r,
+                    robot_x=m.waypoint.x,
+                    robot_y=m.waypoint.y,
+                    robot_z=m.waypoint.z,
+                    robot_r=m.waypoint.r,
+                    index=m.waypoint.index,
+                    battery_nr=m.waypoint.battery_nr,
+                    corner_index=m.waypoint.corner_index,
+                    measurement_index=m.waypoint.measurement_index,
                 ),
                 pixel_x=m.pixel_x,
                 pixel_y=m.pixel_y,
