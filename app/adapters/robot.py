@@ -135,9 +135,20 @@ class RobotAdapter:
     def connect(self, port: str) -> RobotResult:
         """Connect to a Dobot on a specific serial port."""
         try:
-            _get_dobot_dll_type()
+            DobotDllType = _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
+
+        self._api = DobotDllType.load()
+        ret = DobotDllType.ConnectDobot(self._api, port, self._baud)[0]
+        if ret != 0:
+            self._api = None
+            return RobotResult(False, f"Connection failed with error code: {ret}")
+
+        DobotDllType.SetQueuedCmdClear(self._api)
+        DobotDllType.SetQueuedCmdStartExec(self._api)
+        self._connected_port = port
+        return RobotResult(True)
 
     @staticmethod
     def _discover_ports() -> list[str]:
