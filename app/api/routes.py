@@ -244,7 +244,9 @@ def debug_robot_reachability(
     y_min: float,
     z_max: float,
     z_min: float,
-    step: float=20.0,
+    step_x: float=50.0,
+    step_y: float=50.0,
+    step_z: float=10.0,
     r: float = 0.0,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> dict:
@@ -269,9 +271,9 @@ def debug_robot_reachability(
             detail="Position wait function is not available on robot adapter",
         )
 
-    x_values = _sweep_axis_values(x_min, x_max, step_mm=step)
-    y_values = _sweep_axis_values(y_min, y_max, step_mm=step)
-    z_values = _sweep_axis_values(z_min, z_max, step_mm=step)
+    x_values = _sweep_axis_values(x_min, x_max, step_mm=step_x)
+    y_values = _sweep_axis_values(y_min, y_max, step_mm=step_y)
+    z_values = _sweep_axis_values(z_min, z_max, step_mm=step_z)
 
     checks: list[dict] = []
     total_points = len(x_values) * len(y_values) * len(z_values)
@@ -286,7 +288,6 @@ def debug_robot_reachability(
                         "failedAt": None,
                         "testedPoints": len(checks),
                         "totalPlannedPoints": total_points,
-                        "stepMm": step,
                         "checks": checks,
                     }
 
@@ -327,7 +328,6 @@ def debug_robot_reachability(
                                 "failedAt": None,
                                 "testedPoints": len(checks),
                                 "totalPlannedPoints": total_points,
-                                "stepMm": step,
                                 "checks": checks,
                             }
 
@@ -350,7 +350,6 @@ def debug_robot_reachability(
                             "failedAt": {"x": x, "y": y, "z": z, "r": r},
                             "testedPoints": len(checks),
                             "totalPlannedPoints": total_points,
-                            "stepMm": step,
                             "checks": checks,
                         }
                 else:
@@ -361,7 +360,6 @@ def debug_robot_reachability(
         "stopReason": None,
         "testedPoints": len(checks),
         "totalPlannedPoints": total_points,
-        "stepMm": step,
         "checks": checks,
     }
 
