@@ -123,9 +123,7 @@ def test_connect_tries_windows_extended_com_notation(
     result = adapter.connect("COM11")
 
     assert result.ok is True
-    connect_calls = [
-        call for call in fake.calls if call[0] == "ConnectDobot"
-    ]
+    connect_calls = [call for call in fake.calls if call[0] == "ConnectDobot"]
     assert [args[1] for _, args in connect_calls] == ["COM11", "\\\\.\\COM11"]
 
 

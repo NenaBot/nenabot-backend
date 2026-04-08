@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+
 def _get_dobot_dll_type():
     if sys.platform.startswith("win"):
         from lib.dobot import DobotDllType
@@ -95,6 +96,7 @@ class RobotAdapter:
 
     def _list_candidate_ports(self) -> list[str]:
         """Best-effort serial port discovery without extra dependencies."""
+
         def _port_sort_key(port: str) -> tuple[int, str]:
             match = re.fullmatch(r"COM(\d+)", port.upper())
             if match:
@@ -257,10 +259,10 @@ class RobotAdapter:
                 "No serial ports detected (Windows: expected COMx; macOS/Linux: expected /dev/*)",
             )
         if failed_attempts:
-            attempts_summary = ", ".join(
-                f"{p}->{code}" for p, code in failed_attempts
+            attempts_summary = ", ".join(f"{p}->{code}" for p, code in failed_attempts)
+            return RobotResult(
+                False, f"No Dobot device found. Attempts: {attempts_summary}"
             )
-            return RobotResult(False, f"No Dobot device found. Attempts: {attempts_summary}")
         return RobotResult(False, "No Dobot device found")
 
     def ping(self) -> RobotResult:
@@ -537,10 +539,10 @@ class RobotAdapter:
     def is_reachable_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
         """blahblah"""
 
-        if(z_mm > 0 or z_mm < -30 or x_mm < 10):
+        if z_mm > 0 or z_mm < -30 or x_mm < 10:
             return False
-        
-        dist = sqrt(y_mm**2+x_mm**2)
+
+        dist = sqrt(y_mm**2 + x_mm**2)
         if dist > 320 or dist < 180:
             return False
         else:

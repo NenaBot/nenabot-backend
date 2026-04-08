@@ -153,9 +153,9 @@ class StorageAdapter:
                     waypoint=Waypoint(x=r["x"], y=r["y"], z=r["z"], r=r["r"]),
                     pixel_x=r["pixel_x"],
                     pixel_y=r["pixel_y"],
-                    scan_result=json.loads(r["scan_result"])
-                    if r["scan_result"]
-                    else None,
+                    scan_result=(
+                        json.loads(r["scan_result"]) if r["scan_result"] else None
+                    ),
                     simulated=bool(r["simulated"]),
                     timestamp=r["timestamp"],
                 )

@@ -244,9 +244,9 @@ def debug_robot_reachability(
     y_min: float,
     z_max: float,
     z_min: float,
-    step_x: float=50.0,
-    step_y: float=50.0,
-    step_z: float=10.0,
+    step_x: float = 50.0,
+    step_y: float = 50.0,
+    step_z: float = 10.0,
     r: float = 0.0,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> dict:
@@ -309,14 +309,16 @@ def debug_robot_reachability(
                     item["moveOk"] = move_result.ok
                     item["moveError"] = move_result.error
                     if move_result.ok:
-                        arrival, stop_requested, last_arrival_error = _wait_for_position_interruptible(
-                            wait_for_position,
-                            x,
-                            y,
-                            z,
-                            r,
-                            _reachability_stop_event,
-                            timeout_s=20.0,
+                        arrival, stop_requested, last_arrival_error = (
+                            _wait_for_position_interruptible(
+                                wait_for_position,
+                                x,
+                                y,
+                                z,
+                                r,
+                                _reachability_stop_event,
+                                timeout_s=20.0,
+                            )
                         )
                         if stop_requested:
                             stop_motion = getattr(robot, "stop", None)
@@ -339,9 +341,7 @@ def debug_robot_reachability(
                             item["moveError"] = f"did_not_reach_target: {error_message}"
                         elif not arrival.ok:
                             item["moveOk"] = False
-                            item["moveError"] = (
-                                f"did_not_reach_target: {arrival.error}"
-                            )
+                            item["moveError"] = f"did_not_reach_target: {arrival.error}"
                     checks.append(item)
                     if not item["moveOk"]:
                         return {
