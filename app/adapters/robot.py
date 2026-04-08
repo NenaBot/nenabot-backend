@@ -70,10 +70,9 @@ class RobotAdapter:
         if system == "Linux":
             return sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
         if system == "Windows":
-            # Windows COM ports are not glob-able; probe COM1–COM20
-            import serial.tools.list_ports as lp  # pyserial
-
-            return sorted(p.device for p in lp.comports())
+            # Windows COM ports are not glob-able; return common COM port names
+            # and let the Dobot DLL attempt connections.
+            return [f"COM{idx}" for idx in range(1, 21)]
         return []
 
     @property
