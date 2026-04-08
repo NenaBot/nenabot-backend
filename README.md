@@ -69,6 +69,8 @@ All endpoints are prefixed with `/api`.
 - `GET /api/robot/pose` — current end-effector position and joint angles
 - `GET /api/stream/camera/feed` — raw camera MJPEG stream
 - `GET /api/stream/detection/feed` — detection overlay MJPEG stream
+- `GET|POST /api/debug/robot/reachability` — development-only robot reachability sweep
+- `GET|POST /api/debug/robot/reachability/stop` — request stop for active reachability sweep
 - `POST /api/job` — create and run a new job
 - `POST /api/calibration` — start or advance the runtime 4-point calibration flow
 - `POST /api/robot/stop` — halt active job

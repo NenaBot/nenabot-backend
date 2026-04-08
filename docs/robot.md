@@ -58,6 +58,18 @@ arm. Returns a `PoseResult`.
 Poll `get_pose()` until the arm is within `tolerance_mm` of the target or the
 timeout expires. Used by the orchestrator for arrival validation.
 
+**`is_reachable_mm(x_mm, y_mm, z_mm)`** <br>
+Fast reachability guard used by the debug sweep endpoint before issuing motion
+commands. It applies conservative bounds to reject risky points early:
+
+- `z_mm` must be between `-30` and `0`
+- `x_mm` must be at least `10`
+- radial distance `sqrt(x_mm^2 + y_mm^2)` must be between `180` and `320`
+
+If a point is outside those limits the function returns `False`; otherwise
+`True`. This check is intentionally conservative and should be treated as a
+quick pre-filter rather than a full kinematics proof.
+
 **`wait_until_queue_empty(timeout_s)`** <br>
 Block until `GetQueuedCmdMotionFinish` reports the queue is empty.
 
@@ -67,6 +79,51 @@ if the DLL has been loaded and a connection established.
 
 **`disconnect()`** <br>
 Disconnect from the arm and release the DLL handle.
+
+## Debug Reachability API
+
+These development endpoints are implemented in [app/api/routes.py](../app/api/routes.py)
+and are intended for manual workspace validation, not production workflows.
+
+**`GET/POST /api/debug/robot/reachability`** <br>
+Runs a grid sweep through Cartesian points and reports reachability + motion
+outcome per point.
+
+Query parameters:
+
+- `x_min`, `x_max`, `y_min`, `y_max`, `z_min`, `z_max`
+- Optional grid step sizes: `step_x` (default `50`), `step_y` (default `50`),
+  `step_z` (default `10`)
+- Optional wrist rotation: `r` (default `0`)
+
+Behavior summary:
+
+- Builds inclusive X/Y/Z ranges and iterates all points
+- Uses `is_reachable_mm` before attempting movement
+- For reachable points, performs `move` then waits for arrival
+- The wait is interruptible, so stop requests are honored during in-flight
+  motion checks
+- Returns early when stop is requested or when a move/arrival fails
+
+Response includes:
+
+- `stoppedEarly`, `stopReason`, `failedAt`
+- `testedPoints`, `totalPlannedPoints`
+- `checks`: per-point records with reachability and movement outcome
+
+**`GET/POST /api/debug/robot/reachability/stop`** <br>
+Requests immediate stop of the active reachability sweep.
+
+Behavior summary:
+
+- Sets the shared reachability stop event
+- Attempts to stop robot queue execution via the adapter
+- Also calls service-level stop handling for active job contexts
+
+Response fields:
+
+- `stopRequested`: always `true` when endpoint is hit
+- `robotStopped`: `true` if robot stop or service stop succeeded
 
 ---
 
