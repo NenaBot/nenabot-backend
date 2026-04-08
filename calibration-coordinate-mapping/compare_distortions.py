@@ -38,7 +38,8 @@ save_count = 0
 
 while True:
     ret, frame = cap.read()
-    if not ret: break
+    if not ret:
+        break
 
     # 3. Create the mathematical flattened version
     undistorted = cv2.undistort(frame, mtx, dist, None, new_camera_mtx)

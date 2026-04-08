@@ -2,7 +2,6 @@
 # Make sure to follow the instructions carefully, and ensure that the Dobot arm is properly connected and recognized by your computer before running this code.
 
 import DobotDllType as dType
-import time
 
 # 1. Initialize and Connect
 api = dType.load()
