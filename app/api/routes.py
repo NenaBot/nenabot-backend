@@ -5,6 +5,7 @@ import base64
 import json
 import queue
 import threading
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -198,6 +199,42 @@ def _sweep_axis_values(start: float, end: float, step_mm: float = 20.0) -> list[
     return values
 
 
+def _wait_for_position_interruptible(
+    wait_for_position,
+    x: float,
+    y: float,
+    z: float,
+    r: float,
+    stop_event: threading.Event,
+    timeout_s: float,
+    check_interval_s: float = 0.2,
+):
+    """Wait for target pose while periodically honoring stop requests."""
+    deadline = time.monotonic() + max(timeout_s, 0.0)
+    last_error: str | None = None
+
+    while time.monotonic() <= deadline:
+        if stop_event.is_set():
+            return None, True, last_error
+
+        remaining = deadline - time.monotonic()
+        probe_timeout = max(0.0, min(check_interval_s, remaining))
+        arrival = wait_for_position(
+            x,
+            y,
+            z,
+            r,
+            tolerance_mm=1.0,
+            timeout_s=probe_timeout,
+            poll_interval_s=min(0.05, check_interval_s),
+        )
+        if arrival.ok:
+            return arrival, False, None
+        last_error = arrival.error
+
+    return None, False, last_error
+
+
 @router.get("/debug/robot/reachability")
 @router.post("/debug/robot/reachability")
 def debug_robot_reachability(
@@ -271,15 +308,36 @@ def debug_robot_reachability(
                     item["moveOk"] = move_result.ok
                     item["moveError"] = move_result.error
                     if move_result.ok:
-                        arrival = wait_for_position(
+                        arrival, stop_requested, last_arrival_error = _wait_for_position_interruptible(
+                            wait_for_position,
                             x,
                             y,
                             z,
                             r,
-                            tolerance_mm=1.0,
+                            _reachability_stop_event,
                             timeout_s=20.0,
                         )
-                        if not arrival.ok:
+                        if stop_requested:
+                            stop_motion = getattr(robot, "stop", None)
+                            if callable(stop_motion):
+                                stop_motion()
+                            return {
+                                "stoppedEarly": True,
+                                "stopReason": "stop_requested",
+                                "failedAt": None,
+                                "testedPoints": len(checks),
+                                "totalPlannedPoints": total_points,
+                                "stepMm": step,
+                                "checks": checks,
+                            }
+
+                        if arrival is None:
+                            item["moveOk"] = False
+                            error_message = (
+                                last_arrival_error or "Timeout waiting for target pose"
+                            )
+                            item["moveError"] = f"did_not_reach_target: {error_message}"
+                        elif not arrival.ok:
                             item["moveOk"] = False
                             item["moveError"] = (
                                 f"did_not_reach_target: {arrival.error}"
@@ -308,15 +366,27 @@ def debug_robot_reachability(
     }
 
 
+@router.get("/debug/robot/reachability/stop", status_code=status.HTTP_200_OK)
 @router.post("/debug/robot/reachability/stop", status_code=status.HTTP_200_OK)
 def stop_debug_robot_reachability(
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> dict:
     _reachability_stop_event.set()
-    robot_stopped = svc.stop_job()
+
+    robot_stopped = False
+    robot = getattr(svc, "_robot", None)
+    stop_motion = getattr(robot, "stop", None) if robot is not None else None
+    if callable(stop_motion):
+        try:
+            stop_result = stop_motion()
+            robot_stopped = bool(getattr(stop_result, "ok", stop_result))
+        except Exception:
+            robot_stopped = False
+
+    job_stopped = svc.stop_job()
     return {
         "stopRequested": True,
-        "robotStopped": robot_stopped,
+        "robotStopped": bool(robot_stopped or job_stopped),
     }
 
 
