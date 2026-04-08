@@ -141,21 +141,30 @@ class RobotAdapter:
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
 
-        self._api = DobotDllType.load()
-        ret = DobotDllType.ConnectDobot(self._api, port, self._baud)[0]
-        if ret == 0:
-            if hasattr(DobotDllType, "SetCmdTimeout"):
-                DobotDllType.SetCmdTimeout(
-                    self._api, int(self.COMMAND_TIMEOUT_S * 1000)
-                )
-            if hasattr(DobotDllType, "SetQueuedCmdClear"):
-                DobotDllType.SetQueuedCmdClear(self._api)
-            if hasattr(DobotDllType, "SetQueuedCmdStartExec"):
-                DobotDllType.SetQueuedCmdStartExec(self._api)
-            self._connected_port = port
-            print(f"Connected to Dobot on {port}")
-            return RobotResult(True)
-        return RobotResult(False, f"Failed to connect on {port}, error code: {ret}")
+    @staticmethod
+    def _discover_ports() -> list[str]:
+        """Return candidate serial ports for the current platform."""
+        import glob
+        import platform
+
+        system = platform.system()
+        if system == "Darwin":
+            return sorted(glob.glob("/dev/cu.usbserial-*"))
+        if system == "Linux":
+            return sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
+        if system == "Windows":
+            # Windows COM ports are not glob-able; return common COM port names
+            # and let the Dobot DLL attempt connections.
+            return [f"COM{idx}" for idx in range(1, 21)]
+        return []
+
+    @property
+    def connected(self) -> bool:
+        return self._api is not None and self._connected_port is not None
+
+    def move(self, x: float, y: float, z: float, r: float) -> RobotResult:
+        if not self.connected:
+            return RobotResult(False, "Not connected")
 
     def connect_first_available(self) -> RobotResult:
         """Auto-detect serial ports and connect to the first Dobot found."""

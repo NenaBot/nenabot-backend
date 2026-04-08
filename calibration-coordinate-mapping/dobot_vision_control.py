@@ -72,8 +72,9 @@ def pixel_to_robot_3d(u, v, thickness_offset):
     p0 = np.array([317.29, 108.47, -49.27 + thickness_offset])
     
     denom = np.dot(ray_world.flatten(), normal_world)
-    if abs(denom) < 1e-6: return None
-    
+    if abs(denom) < 1e-6:
+        return None
+
     s = np.dot((p0 - cam_pos_world.flatten()), normal_world) / denom
     target_world = cam_pos_world.flatten() + s * ray_world.flatten()
     
@@ -118,13 +119,7 @@ def on_click(event, u, v, flags, param):
             else:
                 print(f"SKIP: Physical Limit Reached ({dist:.1f}mm)")
 
-# 3. INITIALIZE DOBOT
-api = dType.load()
-dType.ConnectDobot(api, "COM5", 115200)
-dType.SetQueuedCmdClear(api)
-dType.SetPTPCommonParams(api, 100, 100)
-
-# 5. MAIN LOOP
+# 3. MAIN LOOP
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
@@ -133,7 +128,8 @@ cv2.setMouseCallback("Dobot Vision Control", on_click)
 
 while True:
     ret, frame = cap.read()
-    if not ret: break
+    if not ret:
+        break
     
     # Rectify the frame so the clicks match our math
     rectified = cv2.undistort(frame, mtx, dist)
