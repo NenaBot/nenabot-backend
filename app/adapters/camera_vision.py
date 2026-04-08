@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
@@ -223,7 +224,7 @@ class CameraVisionAdapter:
                 ok=False,
                 error="No battery contour detected",
                 pixels_per_mm=pixels_per_mm,
-                marker_count=int(len(ids)) if ids is not None else 0,
+                marker_count=len(ids) if ids is not None else 0,
                 marker_corners=aruco_corners_out,
             )
 
@@ -231,7 +232,7 @@ class CameraVisionAdapter:
             ok=True,
             detections=detections,
             pixels_per_mm=pixels_per_mm,
-            marker_count=int(len(ids)) if ids is not None else 0,
+            marker_count=len(ids) if ids is not None else 0,
             marker_corners=aruco_corners_out,
         )
 

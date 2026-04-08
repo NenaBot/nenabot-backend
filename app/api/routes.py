@@ -26,8 +26,8 @@ from app.schemas import (
     PathPopulateResponse,
     PathRequest,
     PathResponse,
-    PopulatedPathPointSchema,
     PixelPointSchema,
+    PopulatedPathPointSchema,
     Profile,
     RobotMoveRequest,
     RobotMoveResponse,
@@ -112,7 +112,7 @@ def create_job(
     ]
 
     robot_waypoints: list[Waypoint] = []
-    for point, (pixel_x, pixel_y) in zip(payload.path, pixel_points):
+    for point, (pixel_x, pixel_y) in zip(payload.path, pixel_points, strict=True):
         wp = svc.pixel_to_robot(pixel_x, pixel_y, payload.work_z, payload.work_r)
         wp.index = point.index
         wp.battery_nr = point.battery_nr
@@ -133,7 +133,7 @@ def create_job(
     if payload.image_base64:
         try:
             image_bytes = base64.b64decode(payload.image_base64)
-        except Exception:  # noqa: S110
+        except Exception:
             pass  # — best-effort decode
 
     job = svc.create_job(

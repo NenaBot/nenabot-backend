@@ -6,7 +6,6 @@ import os
 import sys
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ def _get_dobot_dll_type():
 @dataclass
 class RobotResult:
     ok: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -34,7 +33,7 @@ class PoseResult:
     j2: float = 0.0
     j3: float = 0.0
     j4: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
     def __iter__(self):
         """Backward-compatible unpacking support: pose, result = get_pose()."""
@@ -67,8 +66,7 @@ class RobotPose:
 
 
 class RobotAdapter:
-    """
-    Wrapper around Dobot DLL.
+    """Wrapper around Dobot DLL.
     Based on DobotDemoForPython/minimal_connect.py and DobotControl.py.
 
     The adapter does NOT connect automatically on construction.
@@ -82,7 +80,7 @@ class RobotAdapter:
 
     def __init__(self, baud: int = 115200) -> None:
         self._baud = baud
-        self._connected_port: Optional[str] = None
+        self._connected_port: str | None = None
         self._api = None
 
     # ---- connection helpers ----
@@ -137,7 +135,7 @@ class RobotAdapter:
     def connect(self, port: str) -> RobotResult:
         """Connect to a Dobot on a specific serial port."""
         try:
-            DobotDllType = _get_dobot_dll_type()
+            _get_dobot_dll_type()
         except Exception as exc:
             return RobotResult(False, f"Dobot DLL not available: {exc}")
 
@@ -161,10 +159,6 @@ class RobotAdapter:
     @property
     def connected(self) -> bool:
         return self._api is not None and self._connected_port is not None
-
-    def move(self, x: float, y: float, z: float, r: float) -> RobotResult:
-        if not self.connected:
-            return RobotResult(False, "Not connected")
 
     def connect_first_available(self) -> RobotResult:
         """Auto-detect serial ports and connect to the first Dobot found."""
@@ -206,7 +200,7 @@ class RobotAdapter:
     # ---- movement ----
 
     def move_to_coordinates(
-        self, coords: Tuple[float, float, float, float], wait: bool = True
+        self, coords: tuple[float, float, float, float], wait: bool = True
     ) -> RobotResult:
         """Move robot to (x, y, z, r). If wait=True, blocks until the move finishes."""
         if self._api is None:
@@ -230,15 +224,15 @@ class RobotAdapter:
         return self.move_to_coordinates((x, y, z, r), wait=wait)
 
     def execute_route(
-        self, coordinates: List[Tuple[float, float, float, float]]
+        self, coordinates: list[tuple[float, float, float, float]]
     ) -> RobotResult:
-        """
-        Execute a sequence of moves and return home afterwards.
+        """Execute a sequence of moves and return home afterwards.
 
         Parameters
         ----------
         coordinates : list of (x, y, z, r) tuples
             The waypoints the robot should visit in order.
+
         """
         for coord in coordinates:
             result = self.move_to_coordinates(coord)

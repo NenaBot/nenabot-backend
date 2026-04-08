@@ -9,11 +9,10 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from app.adapters.camera_vision import CameraVisionAdapter, DetectionResults
-from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
 from app.adapters.ionVision import IVAdapter
+from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
 from app.adapters.storage import StorageAdapter
 from app.domain.models import Job, Measurement, Waypoint
 
@@ -637,7 +636,7 @@ class OrchestratorService:
                 if edge_len == 0:
                     continue
 
-                sample_count = max(1, int(math.ceil(edge_len / step_px)))
+                sample_count = max(1, math.ceil(edge_len / step_px))
                 if len(path) + sample_count > MAX_POPULATED_PATH_POINTS:
                     raise ValueError(
                         "Requested path is too dense; reduce measuringPointsPerCm or battery count"
@@ -761,7 +760,7 @@ class OrchestratorService:
     def camera_vision(self) -> CameraVisionAdapter:
         return self._camera_vision
 
-    def latest_result(self) -> Optional[dict]:
+    def latest_result(self) -> dict | None:
         return self._storage.latest_result()
 
     # WEBSOCKET SERVICES
@@ -781,7 +780,8 @@ class OrchestratorService:
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         """The results of the previously finished scan have been
-        processed to the device storage."""
+        processed to the device storage.
+        """
         logger.info(f"Scan results have been processed: {data.get('body')}")
 
     async def _handle_scan_stopped(self, data: dict) -> None:
@@ -789,8 +789,7 @@ class OrchestratorService:
         logger.info(f"Scan has been stopped: {data.get('body')}")
 
     async def _handle_error(self, data: dict) -> None:
-        """
-        (likely not necessary handle for this project)
+        """(likely not necessary handle for this project)
         A scan has been stopped without finishing. No result data will be saved.
         """
         logger.warning(f"An error occurred: {data.get('code')}")

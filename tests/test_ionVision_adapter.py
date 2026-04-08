@@ -326,7 +326,7 @@ def test_get_results_rejects_page_numbers_below_one(
 # IVAdapter _request tests
 @respx.mock
 def test__request_returns_ivresult_on_2xx(iv_adapter: IVAdapter) -> None:
-    """Test that _request returns IVResult(ok=True, payload=parsed_json, error=None) on 2xx."""  # noqa: E501
+    """Test that _request returns IVResult(ok=True, payload=parsed_json, error=None) on 2xx."""
     payload = {"status": "ok", "version": "1.2.3"}
     respx.get("http://localhost:8080/health").mock(
         return_value=httpx.Response(200, json=payload),
@@ -341,7 +341,7 @@ def test__request_returns_ivresult_on_2xx(iv_adapter: IVAdapter) -> None:
 
 @respx.mock
 def test__request_returns_ivresult_on_non2xx(iv_adapter: IVAdapter) -> None:
-    """Test that _request returns IVResult(ok=False, payload=None, error=str) on non-2xx."""  # noqa: E501
+    """Test that _request returns IVResult(ok=False, payload=None, error=str) on non-2xx."""
     respx.get("http://localhost:8080/health").mock(
         return_value=httpx.Response(500, json={"error": "Internal error"}),
     )
@@ -355,7 +355,7 @@ def test__request_returns_ivresult_on_non2xx(iv_adapter: IVAdapter) -> None:
 
 @respx.mock
 def test__request_returns_ivresult_on_network_error(iv_adapter: IVAdapter) -> None:
-    """Test that _request returns IVResult(ok=False, payload=None, error=str) on network errors."""  # noqa: E501
+    """Test that _request returns IVResult(ok=False, payload=None, error=str) on network errors."""
     respx.get("http://localhost:8080/health").mock(
         side_effect=httpx.ConnectError("connection failed"),
     )
@@ -369,7 +369,7 @@ def test__request_returns_ivresult_on_network_error(iv_adapter: IVAdapter) -> No
 
 @respx.mock
 def test__request_json_decode_error(iv_adapter: IVAdapter) -> None:
-    """Test that _request returns IVResult(ok=False, payload=None, error=str) on JSON decode errors."""  # noqa: E501
+    """Test that _request returns IVResult(ok=False, payload=None, error=str) on JSON decode errors."""
     respx.get("http://localhost:8080/health").mock(
         return_value=httpx.Response(
             200,
@@ -409,8 +409,8 @@ def test__request_base_url_with_trailing_slashes() -> None:
 # WebSocket test cases
 def test_websocket_connect_and_disconnect_called_once(
     iv_adapter: IVAdapter,
-) -> None:  # noqa: E501
-    """Test that initialize_websocket and disconnect_websocket call the underlying WebSocketAdapter methods exactly once without parameters."""  # noqa: E501
+) -> None:
+    """Test that initialize_websocket and disconnect_websocket call the underlying WebSocketAdapter methods exactly once without parameters."""
 
     async def _exercise() -> None:
         iv_adapter._ws.connect = AsyncMock()
@@ -426,7 +426,7 @@ def test_websocket_connect_and_disconnect_called_once(
 
 def test_initialize_websocket_propagates_connect_error(
     iv_adapter: IVAdapter,
-) -> None:  # noqa: E501
+) -> None:
     """Test that initialize_websocket re-raises the same connect exception."""
 
     async def _exercise() -> RuntimeError:
@@ -445,7 +445,7 @@ def test_initialize_websocket_propagates_connect_error(
 
 def test_disconnect_websocket_propagates_disconnect_error(
     iv_adapter: IVAdapter,
-) -> None:  # noqa: E501
+) -> None:
     """Test that disconnect_websocket re-raises the same disconnect exception."""
 
     async def _exercise() -> RuntimeError:
@@ -465,7 +465,7 @@ def test_disconnect_websocket_propagates_disconnect_error(
 def test_websocket_connect_failure_resets_state(
     monkeypatch: pytest.MonkeyPatch, iv_adapter: IVAdapter
 ) -> None:
-    """Test that failed websocket connect raises and leaves no partial connected state."""  # noqa: E501
+    """Test that failed websocket connect raises and leaves no partial connected state."""
 
     async def _exercise() -> AsyncMock:
         connect_error = RuntimeError("connect failed")
@@ -499,7 +499,7 @@ def test_ws_base_url_trimmed_on_initialization() -> None:
 
 
 def test_connect_success_path(iv_adapter: IVAdapter) -> None:
-    """Test that initialize_websocket successfully calls connect on the WebSocketAdapter."""  # noqa: E501
+    """Test that initialize_websocket successfully calls connect on the WebSocketAdapter."""
 
     async def _exercise() -> None:
         iv_adapter._ws.connect = AsyncMock(return_value=None)
@@ -511,7 +511,7 @@ def test_connect_success_path(iv_adapter: IVAdapter) -> None:
 
 
 def test_disconnect_success_path(iv_adapter: IVAdapter) -> None:
-    """Test that disconnect_websocket successfully calls disconnect on the WebSocketAdapter."""  # noqa: E501
+    """Test that disconnect_websocket successfully calls disconnect on the WebSocketAdapter."""
 
     async def _exercise() -> None:
         iv_adapter._ws.disconnect = AsyncMock(return_value=None)
@@ -524,7 +524,7 @@ def test_disconnect_success_path(iv_adapter: IVAdapter) -> None:
 
 def test_on_event_delegates_to_websocket_on_with_same_args(
     iv_adapter: IVAdapter,
-) -> None:  # noqa: E501
+) -> None:
     """Test that on_event forwards event key and callback reference to ws.on."""
     event_type = "message.error"
     handler = Mock()
@@ -536,7 +536,7 @@ def test_on_event_delegates_to_websocket_on_with_same_args(
 
 
 def test_websocket_on_registers_handler_under_event_key() -> None:
-    """Test that on() stores the exact callback reference under the provided event key."""  # noqa: E501
+    """Test that on() stores the exact callback reference under the provided event key."""
     ws_adapter = WebSocketAdapter("ws://localhost:8080")
     event_type = "scan.resultsProcessed"
 
@@ -612,7 +612,7 @@ def test_websocket_listen_loop_ignores_invalid_json_and_unknown_event() -> None:
 
 def test_off_event_delegates_to_websocket_off_with_same_args(
     iv_adapter: IVAdapter,
-) -> None:  # noqa: E501
+) -> None:
     """Test that off_event forwards event key and callback reference to ws.off."""
     event_type = "scan.resultsProcessed"
     handler = Mock()
@@ -624,7 +624,7 @@ def test_off_event_delegates_to_websocket_off_with_same_args(
 
 
 def test_websocket_off_removes_registered_handler_and_stops_callbacks() -> None:
-    """Test that off() removes a registered handler so it no longer receives callbacks."""  # noqa: E501
+    """Test that off() removes a registered handler so it no longer receives callbacks."""
     ws_adapter = WebSocketAdapter("ws://localhost:8080")
     event_type = "scan.resultsProcessed"
     handler = Mock()

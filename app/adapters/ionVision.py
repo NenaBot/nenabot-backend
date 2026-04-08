@@ -1,5 +1,4 @@
-"""
-Documentation for the HTTP IonVision API can be found here:
+"""Documentation for the HTTP IonVision API can be found here:
 https://olfactomics.github.io/IonVision-API-docs/
 
 Websocket API documentation:
@@ -11,8 +10,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import httpx
 import websockets
@@ -21,8 +21,8 @@ import websockets
 @dataclass
 class IVResult:
     ok: bool
-    payload: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    payload: dict[str, Any] | None = None
+    error: str | None = None
 
 
 # Adapter for the IonVision HTTP API
@@ -32,7 +32,7 @@ class IVAdapter:
         base_url: str,
         ws_base_url: str,
         timeout_s: float = 5.0,
-        client: Optional[httpx.Client] = None,
+        client: httpx.Client | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_s
@@ -64,7 +64,7 @@ class IVAdapter:
             return IVResult(False, error=str(exc))
 
     @staticmethod
-    def _normalize_optional_string(value: Optional[str]) -> Optional[str]:
+    def _normalize_optional_string(value: str | None) -> str | None:
         if value is None:
             return None
 
@@ -72,7 +72,7 @@ class IVAdapter:
         return stripped or None
 
     @staticmethod
-    def _normalize_search_string(value: Optional[str]) -> Optional[str]:
+    def _normalize_search_string(value: str | None) -> str | None:
         if value is None:
             return None
         return value.strip()
@@ -80,9 +80,9 @@ class IVAdapter:
     @staticmethod
     def _validate_optional_int(
         name: str,
-        value: Optional[int],
+        value: int | None,
         *,
-        minimum: Optional[int] = None,
+        minimum: int | None = None,
     ) -> None:
         if value is None:
             return
@@ -92,7 +92,7 @@ class IVAdapter:
             raise ValueError(f"{name} must be greater than or equal to {minimum}")
 
     @staticmethod
-    def _validate_optional_bool(name: str, value: Optional[bool]) -> None:
+    def _validate_optional_bool(name: str, value: bool | None) -> None:
         if value is None:
             return
         if not isinstance(value, bool):
@@ -101,14 +101,14 @@ class IVAdapter:
     def _build_results_params(
         self,
         *,
-        max_results: Optional[int],
-        page: Optional[int],
-        search: Optional[str],
-        start_date: Optional[str],
-        end_date: Optional[str],
-        sort_by: Optional[str],
-        only_metadata: Optional[bool],
-        ids: Optional[str],
+        max_results: int | None,
+        page: int | None,
+        search: str | None,
+        start_date: str | None,
+        end_date: str | None,
+        sort_by: str | None,
+        only_metadata: bool | None,
+        ids: str | None,
     ) -> dict[str, Any]:
         self._validate_optional_int("max_results", max_results, minimum=0)
         self._validate_optional_int("page", page, minimum=1)
@@ -166,14 +166,14 @@ class IVAdapter:
     # results
     def get_results(
         self,
-        max_results: Optional[int] = None,
-        page: Optional[int] = None,
-        search: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        sort_by: Optional[str] = None,
-        only_metadata: Optional[bool] = None,
-        ids: Optional[str] = None,
+        max_results: int | None = None,
+        page: int | None = None,
+        search: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        sort_by: str | None = None,
+        only_metadata: bool | None = None,
+        ids: str | None = None,
     ) -> IVResult:
         """Search the scan results that are stored on the device."""
         try:
@@ -221,7 +221,7 @@ class IVAdapter:
         return self._request("GET", f"results/id/{id}/comments")
 
     def put_scan_result_commentobject(
-        self, id: str, comments: Dict[str, Any]
+        self, id: str, comments: dict[str, Any]
     ) -> IVResult:
         """Replaces the previous comments object of a scan result.
         The /results/id/{id}/comments object can first be
@@ -248,7 +248,7 @@ class IVAdapter:
         await self._ws.disconnect()
 
     def on_event(
-        self, event_type: str, handler: Callable[[Dict[str, Any]], Any]
+        self, event_type: str, handler: Callable[[dict[str, Any]], Any]
     ) -> None:
         """Register a handler for a WebSocket event.
 
@@ -257,11 +257,12 @@ class IVAdapter:
             event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
             handler: Async or sync callable that receives the full IonVision
                 message envelope with ``type``, ``time`` and ``body`` keys
+
         """
         self._ws.on(event_type, handler)
 
     def off_event(
-        self, event_type: str, handler: Callable[[Dict[str, Any]], Any]
+        self, event_type: str, handler: Callable[[dict[str, Any]], Any]
     ) -> None:
         """Unregister a handler for a WebSocket event.
 
@@ -287,10 +288,10 @@ class WebSocketAdapter:
 
     def __init__(self, base_url: str) -> None:
         self._base_url = base_url.rstrip("/")
-        self._ws: Optional[websockets.WebSocketClientProtocol] = None
+        self._ws: websockets.WebSocketClientProtocol | None = None
         self._running = False
-        self._listen_task: Optional[asyncio.Task] = None
-        self._handlers: Dict[str, List[Callable[[Dict[str, Any]], Any]]] = {}
+        self._listen_task: asyncio.Task | None = None
+        self._handlers: dict[str, list[Callable[[dict[str, Any]], Any]]] = {}
 
     async def connect(self) -> None:
         """Establish the WebSocket connection and start listening for events."""
@@ -300,7 +301,7 @@ class WebSocketAdapter:
             self._listen_task = asyncio.create_task(self._listen_loop())
         except Exception as exc:
             self._running = False
-            raise Exception(f"Failed to connect to WebSocket: {exc}")
+            raise Exception(f"Failed to connect to WebSocket: {exc}") from exc
 
     async def disconnect(self) -> None:
         """Close the WebSocket connection and stop listening."""
@@ -341,7 +342,7 @@ class WebSocketAdapter:
         finally:
             self._running = False
 
-    async def _dispatch_event(self, message: Dict[str, Any]) -> None:
+    async def _dispatch_event(self, message: dict[str, Any]) -> None:
         """Dispatch one parsed IonVision websocket message to matching handlers."""
         event_type = message.get("type")
         if not isinstance(event_type, str) or not event_type:
@@ -355,7 +356,7 @@ class WebSocketAdapter:
             except Exception as exc:
                 print(f"Handler error for {event_type}: {exc}")
 
-    def on(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
+    def on(self, event_type: str, handler: Callable[[dict[str, Any]], Any]) -> None:
         """Register a handler for an event type.
 
         Args:
@@ -376,7 +377,7 @@ class WebSocketAdapter:
             self._handlers[event_type] = []
         self._handlers[event_type].append(handler)
 
-    def off(self, event_type: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
+    def off(self, event_type: str, handler: Callable[[dict[str, Any]], Any]) -> None:
         """Unregister a handler for an event type.
 
         Args:

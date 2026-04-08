@@ -13,34 +13,50 @@ exclude = [
     ".mypy_cache",
     ".pytest_cache",
     "lib/",
+    "calibration-coordinate-mapping/",
 ]
 
-[tool.rules]
+[tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "C90", "N", "D", "ANN", "S", "A", "COM", "C4", "PIE", "Q", "RUF"]
 ignore = [
-    "ANN101",   # Missing type annotation for `self` (deprecated)
-    "ANN102",   # Missing type annotation for `cls` (deprecated)
+    "ANN003",   # Missing type annotation for **kwargs (low value for adapters)
+    "ANN201",   # Missing return type for public functions (incremental adoption)
+    "ANN202",   # Missing return type for private functions (incremental adoption)
+    "ANN204",   # Missing return type for special methods (incremental adoption)
     "D100",     # Missing docstring in public module
     "D101",     # Missing docstring in public class
     "D102",     # Missing docstring in public method
     "D103",     # Missing docstring in public function
     "D104",     # Missing docstring in public package
+    "D106",     # Missing docstring in public nested class
     "D107",     # Missing docstring in `__init__`
+    "D205",     # blank line between summary and description
     "D203",     # one-blank-line-before-class (conflicts with D211)
+    "D209",     # closing quotes style for multiline docstrings
     "D213",     # multi-line-summary-second-line (conflicts with D212)
+    "D400",     # first docstring line ending punctuation
+    "D401",     # imperative mood docstrings
+    "D413",     # blank line after last docstring section
+    "D415",     # first line terminal punctuation
+    "E501",     # line length handled pragmatically in existing code/docs/tests
     "COM812",   # Trailing comma missing (conflicts with formatter)
     "S101",     # Use of `assert` detected (needed in tests)
+    "S108",     # Temporary path usage in tests/examples
+    "S110",     # try/except/pass in cleanup code paths
     "B008",     # Function call in default argument (FastAPI Depends)
     "C901",     # Function too complex (structural, not quick-fix)
     "A002",     # Builtin variable shadowing (`id` in models)
+    "N999",     # Invalid module name (keep ionVision.py compatibility)
+    "RUF002",   # Ambiguous unicode in existing docs/comments
+    "RUF003",   # Ambiguous unicode in existing docs/comments
 ]
 
-[tool.lint.per-file-ignores]
-"tests/**" = ["ANN", "D", "S"]
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "D", "S101"]
+"app/adapters/robot.py" = ["N806"]
+"tests/test_robot_adapter.py" = ["N802"]
+"app/adapters/ionVision.py" = ["N802"]
 
 [tool.isort]
 combine-as-imports = true
 force-single-line = false
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*.py" = ["S101"]
