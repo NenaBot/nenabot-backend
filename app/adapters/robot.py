@@ -667,7 +667,7 @@ class RobotAdapter:
     def is_reachable_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
         """blahblah"""
 
-        if(z_mm > 0 or x_mm < 0):
+        if(z_mm > 0 or z_mm < -36 or x_mm < 0):
             return False
         
         dist = sqrt(y_mm**2+x_mm**2)
