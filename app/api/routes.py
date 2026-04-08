@@ -235,8 +235,8 @@ def debug_robot_reachability(
     checks: list[dict] = []
     total_points = len(x_values) * len(y_values) * len(z_values)
 
-    for x in x_values:
-        for y in y_values:
+    for y in y_values:
+        for x in x_values:
             for z in z_values:
                 reachable = bool(reachability_check(x, y, z))
                 item: dict = {
