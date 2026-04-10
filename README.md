@@ -120,7 +120,7 @@ docker run -d --name nenabot \
 ## Tests
 
 ```bash
-pytest -q
+pytest -q -m "not hardware and not integration"
 ```
 
 CI runs only unit tests. Hardware/integration tests are excluded via `-m "not hardware and not integration"` and must be run manually when connected to the devices.
