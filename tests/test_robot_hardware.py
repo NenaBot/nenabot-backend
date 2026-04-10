@@ -1,12 +1,11 @@
 import os
 import sys
 import time
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 
 from app.adapters.robot import RobotAdapter
-
 
 RUN_HARDWARE_TESTS = os.getenv("RUN_ROBOT_HARDWARE_TESTS", "0") == "1"
 

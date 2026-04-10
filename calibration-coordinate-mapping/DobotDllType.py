@@ -1,6 +1,6 @@
 from ctypes import *
-import time,  platform
-import os
+import time
+import platform
 
 def enum(**enums):
     return type("Enum", (), enums)
@@ -603,7 +603,7 @@ def gettime():
 
 
 def SetDebugEnable(api, flag=False):
-    result = api.SetDebugEnable(flag)
+    api.SetDebugEnable(flag)
 
 
 def SearchDobot(api,  maxLen=1000):
@@ -735,7 +735,7 @@ def GetQueuedCmdMotionFinish(api):
             continue
         break
 
-    if isFinish.value != None:
+    if isFinish.value is not None:
         return [isFinish.value]
     else:
         return [False]

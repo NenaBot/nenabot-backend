@@ -26,34 +26,45 @@ captured_data = [
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-cap.set(cv2.CAP_PROP_AUTOFOCUS,0) # Disable autofocus for consistent results (newly added) (0-255)
+cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)  # Disable autofocus for consistent results (0-255)
 
-print("Detecting pixels for the 4 corners...")
-# Warm up the camera — discard initial black frames
-for _ in range(30):
-    cap.read()
+found = False
+corners = None
 
-ret, frame = cap.read()
-if not ret or frame is None:
-    print("Error: Could not read from camera!")
-    exit()
-cv2.imwrite("debug_frame.jpg", frame)  # inspect what the camera actually sees
+try:
+    if not cap.isOpened():
+        print("Error: Could not open camera!")
+        raise SystemExit(1)
 
-gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-found, corners = cv2.findChessboardCorners(gray, (8, 6), None)
+    print("Detecting pixels for the 4 corners...")
+    # Warm up the camera — discard initial black frames
+    for _ in range(30):
+        cap.read()
 
-if found:
-    # 1. Draw the rainbow line and dots on the picture
-    cv2.drawChessboardCorners(frame, (8, 6), corners, found)
-    
-    # 2. Pop up a window to show you
-    cv2.imshow("Corner Check - Press ANY KEY to close", cv2.resize(frame, (960, 540)))
-    cv2.waitKey(0) # Pauses the code until you press a key on your keyboard
+    ret, frame = cap.read()
+    if not ret or frame is None:
+        print("Error: Could not read from camera!")
+        raise SystemExit(1)
+
+    cv2.imwrite("debug_frame.jpg", frame)  # inspect what the camera actually sees
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    found, corners = cv2.findChessboardCorners(gray, (8, 6), None)
+
+    if found:
+        # 1. Draw the rainbow line and dots on the picture
+        cv2.drawChessboardCorners(frame, (8, 6), corners, found)
+
+        # 2. Pop up a window to show you
+        cv2.imshow("Corner Check - Press ANY KEY to close", cv2.resize(frame, (960, 540)))
+        cv2.waitKey(0)  # Pauses the code until you press a key on your keyboard
+
+    if not found:
+        print("Error: Board not detected. Ensure the board is still taped down!")
+        raise SystemExit(1)
+finally:
+    cap.release()
     cv2.destroyAllWindows()
-
-if not found:
-    print("Error: Board not detected. Ensure the board is still taped down!")
-    exit()
 
 # Extract the specific (u, v) pixels for your 4 chosen points
 # (In an 8x6 inner corner grid, index = row * 8 + col)

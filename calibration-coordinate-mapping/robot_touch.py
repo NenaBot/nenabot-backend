@@ -2,7 +2,6 @@
 # Make sure to follow the instructions carefully, and ensure that the Dobot arm is properly connected and recognized by your computer before running this code.
 
 import DobotDllType as dType
-import time
 
 # 1. Initialize and Connect
 api = dType.load()
@@ -55,7 +54,7 @@ dType.DisconnectDobot(api)
 
 # 4. Final Output for the math step
 print("\n" + "="*40)
-print("COPY AND PASTE THIS DATA TO matrix.py file")
+print("COPY AND PASTE THIS DATA TO mapping-matrix.py file")
 print("="*40)
 for p in points_list:
     print(p)
