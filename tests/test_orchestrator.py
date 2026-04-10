@@ -1,3 +1,4 @@
+import os
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -36,7 +37,7 @@ def _make_svc(tmp_path: Path) -> OrchestratorService:
         camera_vision=camera,
         robot=robot,
         storage=StorageAdapter(db=db),
-        dms=IVAdapter(
+        ionvision=IVAdapter(
             base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
         ),
     )
@@ -113,7 +114,7 @@ def test_health_returns_component_statuses(tmp_path: Path) -> None:
     assert result["status"] in {"ok", "degraded"}
     assert result["uptime_s"] >= 0
 
-    for key in ("robot", "camera", "dms"):
+    for key in ("robot", "camera", "ionvision"):
         assert key in result
         assert result[key]["status"] in {"connected", "disconnected", "error"}
 
@@ -506,13 +507,13 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         "wait_for_position",
         return_value=PoseResult(ok=True, x=0, y=0, z=0, r=0),
     ), patch.object(
-        svc._dms, "start_new_scan", return_value=IVResult(ok=True)
+        svc._ionvision, "start_new_scan", return_value=IVResult(ok=True)
     ), patch.object(
-        svc._dms,
+        svc._ionvision,
         "get_current_scan",
         return_value=IVResult(ok=True, payload={"state": "finished"}),
     ), patch.object(
-        svc._dms,
+        svc._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
     ), patch(
@@ -550,13 +551,90 @@ def test_profiles_and_default(tmp_path: Path) -> None:
     """profiles() returns both profiles, default_profile() returns the first."""
     svc = _make_svc(tmp_path)
     profiles = svc.profiles()
-    assert len(profiles) == 2
+    assert len(profiles) == 1
     assert profiles[0]["name"] == "default"
-    assert profiles[1]["name"] == "fast"
 
     default = svc.default_profile()
     assert default["name"] == "default"
     assert "description" in default
+
+
+# ---- ORC-TC-018b: Default profile work_z ----
+
+
+def test_default_profile_work_z_defaults_to_zero(tmp_path: Path) -> None:
+    """default_profile() has workZ=0.0 when OrchestratorService is created without it."""
+    svc = _make_svc(tmp_path)
+    assert svc.default_profile()["workZ"] == 0.0
+    assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)
+
+
+def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
+    """OrchestratorService stores default profile constructor defaults in the default profile dict."""
+    db = Database(db_path=str(tmp_path / "test.db"))
+    db.init_db()
+    camera = CameraVisionAdapter()
+    camera.ping = MagicMock(
+        return_value=CaptureResult(ok=False, error="no camera in test")
+    )
+    robot = RobotAdapter()
+    robot.ping = MagicMock(return_value=RobotResult(ok=False, error="no robot in test"))
+    svc = OrchestratorService(
+        camera_vision=camera,
+        robot=robot,
+        storage=StorageAdapter(db=db),
+        ionvision=IVAdapter(
+            base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
+        ),
+        default_work_z=-35.0,
+        default_measuring_points_per_cm=1.25,
+    )
+    assert svc.default_profile()["workZ"] == -35.0
+    assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(1.25)
+
+
+def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
+    """create_orchestrator() parses default profile env vars and passes them to OrchestratorService."""
+    from app.dependencies import create_orchestrator
+
+    with patch(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        return_value=RobotResult(ok=False, error="no robot"),
+    ), patch.dict(
+        os.environ,
+        {
+            "NENABOT_DEFAULT_WORK_Z": "-42.5",
+            "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM": "0.8",
+        },
+    ):
+        svc = create_orchestrator(
+            db_path=str(tmp_path / "test.db"),
+            ionvision_base_url="http://localhost:8080",
+        )
+    assert svc.default_profile()["workZ"] == pytest.approx(-42.5)
+    assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.8)
+
+
+def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
+    """create_orchestrator() uses safe defaults when default profile env vars are invalid."""
+    from app.dependencies import create_orchestrator
+
+    with patch(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        return_value=RobotResult(ok=False, error="no robot"),
+    ), patch.dict(
+        os.environ,
+        {
+            "NENABOT_DEFAULT_WORK_Z": "not-a-number",
+            "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM": "0",
+        },
+    ):
+        svc = create_orchestrator(
+            db_path=str(tmp_path / "test.db"),
+            ionvision_base_url="http://localhost:8080",
+        )
+    assert svc.default_profile()["workZ"] == 0.0
+    assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)
 
 
 # ---- ORC-TC-019: Manual move via orchestrator ----

@@ -34,20 +34,64 @@ def _derive_ws_base_url(base_url: str) -> str:
 
 def create_orchestrator(
     db_path: str = "data/nenabot.db",
-    dms_base_url: str | None = None,
-    dms_ws_base_url: str | None = None,
+    ionvision_base_url: str | None = None,
+    ionvision_ws_base_url: str | None = None,
 ) -> OrchestratorService:
     """Create an OrchestratorService with default dependencies."""
-    dms_base_url = (
-        dms_base_url
-        or _first_env("IONVISION_BASE_URL", "NENABOT_DMS_BASE_URL")
+    ionvision_base_url = (
+        ionvision_base_url
+        or _first_env("IONVISION_BASE_URL")
         or "http://localhost:8080"
     ).rstrip("/")
-    dms_ws_base_url = (
-        dms_ws_base_url
-        or _first_env("IONVISION_WS_BASE_URL", "NENABOT_DMS_WS_BASE_URL")
-        or _derive_ws_base_url(dms_base_url)
+    ionvision_ws_base_url = (
+        ionvision_ws_base_url
+        or _first_env("IONVISION_WS_BASE_URL")
+        or _derive_ws_base_url(ionvision_base_url)
     ).rstrip("/")
+
+    max_jobs_raw = _first_env("NENABOT_MAX_JOBS")
+    try:
+        max_jobs = int(max_jobs_raw) if max_jobs_raw else 0
+    except ValueError:
+        logger.warning(
+            "NENABOT_MAX_JOBS='%s' is not a valid integer — retention disabled",
+            max_jobs_raw,
+        )
+        max_jobs = 0
+    if max_jobs < 0:
+        logger.warning(
+            "NENABOT_MAX_JOBS='%s' must be non-negative — retention disabled",
+            max_jobs_raw,
+        )
+        max_jobs = 0
+
+    default_work_z_raw = _first_env("NENABOT_DEFAULT_WORK_Z")
+    try:
+        default_work_z = float(default_work_z_raw) if default_work_z_raw else 0.0
+    except ValueError:
+        logger.warning(
+            "NENABOT_DEFAULT_WORK_Z='%s' is not a valid float — using 0.0",
+            default_work_z_raw,
+        )
+        default_work_z = 0.0
+
+    default_measuring_points_per_cm_raw = _first_env(
+        "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM"
+    )
+    try:
+        default_measuring_points_per_cm = (
+            float(default_measuring_points_per_cm_raw)
+            if default_measuring_points_per_cm_raw
+            else 0.5
+        )
+        if default_measuring_points_per_cm <= 0:
+            raise ValueError("must be > 0")
+    except ValueError:
+        logger.warning(
+            "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM='%s' is not a valid positive float — using 0.5",
+            default_measuring_points_per_cm_raw,
+        )
+        default_measuring_points_per_cm = 0.5
 
     db = Database(db_path=db_path)
     db.init_db()
@@ -67,8 +111,14 @@ def create_orchestrator(
     return OrchestratorService(
         camera_vision=CameraVisionAdapter(),
         robot=robot,
-        dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
+        ionvision=IVAdapter(
+            base_url=ionvision_base_url,
+            ws_base_url=ionvision_ws_base_url,
+        ),
         storage=StorageAdapter(db=db),
+        max_jobs=max_jobs,
+        default_work_z=default_work_z,
+        default_measuring_points_per_cm=default_measuring_points_per_cm,
     )
 
 

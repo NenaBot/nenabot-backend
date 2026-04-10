@@ -90,6 +90,11 @@ class CameraVisionAdapter:
         self._camera_streaming = False
         self._detection_streaming = False
 
+    @property
+    def output_dir(self) -> Path:
+        """Public output directory used for captured images."""
+        return self._output_dir
+
     # ---- health check ----
 
     def ping(self) -> CaptureResult:
