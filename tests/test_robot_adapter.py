@@ -117,7 +117,7 @@ def test_move_to_coordinates_rejects_unreachable_without_queueing(
     result = adapter.move_to_coordinates((5, 10, -10, 0), wait=True)
 
     assert result.ok is False
-    assert "outside reachable area" in (result.error or "")
+    assert "outside the reachable area" in (result.error or "")
     assert [name for name, _ in fake.calls] == []
 
 
