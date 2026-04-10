@@ -138,6 +138,9 @@ def create_orchestrator(
         dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
         storage=StorageAdapter(db=db),
         mapping_path=mapping_path,
+        max_jobs=max_jobs,
+        default_work_z=default_work_z,
+        default_measuring_points_per_cm=default_measuring_points_per_cm,
     )
 
 

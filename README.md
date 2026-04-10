@@ -115,18 +115,18 @@ docker run -d --name nenabot \
 
 ## UI pages
 
-| Page          | URL                                    | Description                               |
-| :------------ | :------------------------------------- | :---------------------------------------- |
-| OpenAPI docs  | `/docs`                                | Auto-generated interactive API reference  |
-| Calibration Tester | Open `docs/calibration-tester.html` locally | Guided runtime 4-point calibration |
-| Job Tester    | Open `docs/job-tester.html` locally    | Create and monitor jobs                   |
-| Job Results   | Open `docs/job-results.html` locally   | Browse jobs, view images and measurements |
-| Stream Viewer | Open `docs/stream-viewer.html` locally | Live camera / detection stream viewer     |
+| Page               | URL                                         | Description                               |
+| :----------------- | :------------------------------------------ | :---------------------------------------- |
+| OpenAPI docs       | `/docs`                                     | Auto-generated interactive API reference  |
+| Calibration Tester | Open `docs/calibration-tester.html` locally | Guided runtime 4-point calibration        |
+| Job Tester         | Open `docs/job-tester.html` locally         | Create and monitor jobs                   |
+| Job Results        | Open `docs/job-results.html` locally        | Browse jobs, view images and measurements |
+| Stream Viewer      | Open `docs/stream-viewer.html` locally      | Live camera / detection stream viewer     |
 
 ## Tests
 
 ```bash
-pytest -q
+pytest -q -m "not hardware and not integration"
 ```
 
 CI runs only unit tests. Hardware/integration tests are excluded via `-m "not hardware and not integration"` and must be run manually when connected to the devices.
@@ -137,11 +137,11 @@ CI runs only unit tests. Hardware/integration tests are excluded via `-m "not ha
 RUN_ROBOT_HARDWARE_TESTS=1 pytest -s -v tests/test_robot_hardware.py
 ```
 
-| Variable                     | Default | Description                                                                   |
-| :--------------------------- | :------ | :---------------------------------------------------------------------------- |
-| `RUN_ROBOT_HARDWARE_TESTS`   | —       | Set to `1` to enable the suite                                                |
-| `NENABOT_ENABLE_STARTUP_HOMING` | `0`  | Set to `1` to home the arm automatically during app startup after connect     |
-| `DOBOT_ENABLE_LEGACY_HOMING` | `0`     | Set to `1` to use legacy `SetHOMECmd` (only if `SetHOMECmdEx` is unavailable) |
+| Variable                        | Default | Description                                                                   |
+| :------------------------------ | :------ | :---------------------------------------------------------------------------- |
+| `RUN_ROBOT_HARDWARE_TESTS`      | —       | Set to `1` to enable the suite                                                |
+| `NENABOT_ENABLE_STARTUP_HOMING` | `0`     | Set to `1` to home the arm automatically during app startup after connect     |
+| `DOBOT_ENABLE_LEGACY_HOMING`    | `0`     | Set to `1` to use legacy `SetHOMECmd` (only if `SetHOMECmdEx` is unavailable) |
 
 For full details see [`docs/robot.md`](docs/robot.md).
 

@@ -53,6 +53,9 @@ class OrchestratorService:
         dms: IVAdapter,
         storage: StorageAdapter,
         mapping_path: str = "data/calibration/robot_mapping.json",
+        max_jobs: int = 0,
+        default_work_z: float = 0.0,
+        default_measuring_points_per_cm: float = 0.5,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
@@ -60,12 +63,16 @@ class OrchestratorService:
         self._storage = storage
         self._mapping_path = Path(mapping_path)
         self._started_at = time.monotonic()
+        self._max_jobs = max(0, int(max_jobs))
+        measuring_points_per_cm = float(default_measuring_points_per_cm)
+        if measuring_points_per_cm <= 0:
+            measuring_points_per_cm = 0.5
         self._profiles = [
             {
                 "name": "default",
                 "description": "Default inspection profile",
-                "workZ": default_work_z,
-                "measuringPointsPerCm": default_measuring_points_per_cm,
+                "workZ": float(default_work_z),
+                "measuringPointsPerCm": measuring_points_per_cm,
             }
         ]
         self._running_job_id: str | None = None
@@ -1108,7 +1115,44 @@ class OrchestratorService:
         return path
 
     def detect_path(self) -> DetectionResults:
-        return self._camera_vision.detect_latest()
+        try:
+            return self._camera_vision.detect_latest()
+        finally:
+            self._prune_image_files()
+
+    def _prune_old_data(self) -> None:
+        if self._max_jobs <= 0:
+            return
+        self._storage.prune_jobs(max_jobs=self._max_jobs)
+        self._prune_image_files()
+
+    def _prune_image_files(self) -> None:
+        if self._max_jobs <= 0:
+            return
+
+        output_dir = getattr(self._camera_vision, "_output_dir", None)
+        image_dir = Path(output_dir) if output_dir else Path("data/images")
+        if not image_dir.exists():
+            return
+
+        try:
+            captures = sorted(
+                image_dir.glob("capture_*.jpg"),
+                key=lambda path: path.stat().st_mtime,
+            )
+        except OSError:
+            logger.debug("Failed to list capture files for pruning", exc_info=True)
+            return
+
+        excess = len(captures) - self._max_jobs
+        if excess <= 0:
+            return
+
+        for path in captures[:excess]:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.debug("Failed to delete capture file %s", path, exc_info=True)
 
     @property
     def camera_vision(self) -> CameraVisionAdapter:
