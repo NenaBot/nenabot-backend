@@ -215,8 +215,8 @@ class RobotAdapter:
                 return RobotResult(
                     ok=False,
                     error=(
-                        "The target measurement point " f"x={x}, y={y}, z={z}" 
-                        " is outside the reachable area of the robot arm."
+                        f"The target measurement point x={x}, y={y}, z={z} "
+                        "is outside the reachable area of the robot arm."
                     ),
                 )
             print(f"Moving to: {coords}")
