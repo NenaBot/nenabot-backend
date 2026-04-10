@@ -682,12 +682,11 @@ class OrchestratorService:
         the result data is ready for retrieval.
 
         Args:
-        ----
             data: WebSocket message envelope containing event details
-                 (has 'type', 'time', and 'body' keys)
+                (has 'type', 'time', and 'body' keys)
         """
         # Log the processed scan result details
-        logger.info(f"Scan results have been processed: {data.get('body')}")
+        logger.info("Scan results have been processed: %s", data.get("body"))
 
     async def _handle_scan_stopped(self, data: dict) -> None:
         """Handle scan stop event.
@@ -697,12 +696,11 @@ class OrchestratorService:
         are fully processed.
 
         Args:
-        ----
             data: WebSocket message envelope containing event details
-                 (has 'type', 'time', and 'body' keys)
+                (has 'type', 'time', and 'body' keys)
         """
         # Log the scan stop event with provided reason/details
-        logger.info(f"Scan has been stopped: {data.get('body')}")
+        logger.info("Scan has been stopped: %s", data.get("body"))
 
     async def _handle_error(self, data: dict) -> None:
         """Handle DMS error event.
@@ -716,9 +714,8 @@ class OrchestratorService:
             saved in this case.
 
         Args:
-        ----
             data: WebSocket message envelope containing error details
-                 (has 'type', 'time', 'code', and other error info)
+                (has 'type', 'time', 'code', and other error info)
         """
         # Log the error with the error code from the DMS
-        logger.warning(f"An error occurred: {data.get('code')}")
+        logger.warning("An error occurred: %s", data.get("code"))
