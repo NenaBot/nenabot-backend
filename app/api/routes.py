@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import queue
-import threading
-import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -40,7 +38,6 @@ from app.schemas import (
 from app.services.orchestrator import OrchestratorService
 
 router = APIRouter()
-_reachability_stop_event = threading.Event()
 
 
 @router.get("/health", response_model=Health)
@@ -466,4 +463,3 @@ def _to_job(job: DomainJob) -> Job:
             "error": job.error,
         },
     )
-
