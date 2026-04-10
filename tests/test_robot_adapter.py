@@ -107,6 +107,20 @@ def test_move_to_coordinates_wait_and_nonwait(monkeypatch: pytest.MonkeyPatch) -
     assert [name for name, _ in fake.calls] == ["SetPTPCmdEx", "SetPTPCmd"]
 
 
+def test_move_to_coordinates_rejects_unreachable_without_queueing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_dobot(monkeypatch)
+    adapter = RobotAdapter()
+    adapter._api = object()
+
+    result = adapter.move_to_coordinates((5, 10, -10, 0), wait=True)
+
+    assert result.ok is False
+    assert "outside reachable area" in (result.error or "")
+    assert [name for name, _ in fake.calls] == []
+
+
 def test_execute_route_moves_then_home(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = RobotAdapter()
 
