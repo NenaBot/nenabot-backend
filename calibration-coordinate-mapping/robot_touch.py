@@ -1,7 +1,15 @@
 # This code is designed to be run on a PC that is connected to the Dobot arm via USB. It allows you to manually move the arm to specific points on the chessboard, and then captures the robot's coordinates for those points. The collected data will be used in the next step (mapping-matrix.py) to calculate the transformation matrix between camera space and robot space.
 # Make sure to follow the instructions carefully, and ensure that the Dobot arm is properly connected and recognized by your computer before running this code.
 
-import DobotDllType as dType
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DOBOT_LIB_DIR = REPO_ROOT / "lib" / "dobot"
+if str(DOBOT_LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(DOBOT_LIB_DIR))
+
+import Multi as dType
 
 # 1. Initialize and Connect
 api = dType.load()

@@ -4,7 +4,17 @@
 import cv2
 import numpy as np
 import json
-import DobotDllType as dType
+
+try:
+    from lib.dobot import Multi as dType
+except ModuleNotFoundError:
+    import sys
+    from pathlib import Path
+
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from lib.dobot import Multi as dType
 
 # INITIALIZE DOBOT
 import time
@@ -118,8 +128,8 @@ def on_click(event, u, v, flags, param):
                     api, dType.PTPMode.PTPMOVLXYZMode, rx, ry, rz, 0, isQueued=1
                 )
 
-                # Add a small delay/wait so you can see if it hit the spot
-                dType.SetWAITCmd(api, 500, isQueued=1)
+                # Add a small delay so you can see if it hit the spot
+                time.sleep(0.5)
 
                 dType.SetPTPCmd(
                     api, dType.PTPMode.PTPMOVJXYZMode, rx, ry, rz + 20, 0, isQueued=1
