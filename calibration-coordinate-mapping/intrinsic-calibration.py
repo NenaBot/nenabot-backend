@@ -6,7 +6,7 @@ import json
 
 # 1. Setup Parameters
 CHESSBOARD_SIZE = (8, 6)  # Inner corners for 9x7 grid
-SQUARE_SIZE = 34        # Millimeters
+SQUARE_SIZE = 34  # Millimeters
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 IMAGE_DIR = os.path.join(SCRIPT_DIR, "calibration_images")
 
@@ -15,10 +15,13 @@ criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
 # Prepare object points (0,0,0), (34,0,0), (68,0,0) ...
 objp = np.zeros((CHESSBOARD_SIZE[0] * CHESSBOARD_SIZE[1], 3), np.float32)
-objp[:, :2] = np.mgrid[0:CHESSBOARD_SIZE[0], 0:CHESSBOARD_SIZE[1]].T.reshape(-1, 2) * SQUARE_SIZE
+objp[:, :2] = (
+    np.mgrid[0 : CHESSBOARD_SIZE[0], 0 : CHESSBOARD_SIZE[1]].T.reshape(-1, 2)
+    * SQUARE_SIZE
+)
 
-objpoints = [] # 3d point in real world space
-imgpoints = [] # 2d points in image plane
+objpoints = []  # 3d point in real world space
+imgpoints = []  # 2d points in image plane
 
 # 2. Load Images
 images = glob.glob(os.path.join(IMAGE_DIR, "*.png"))
@@ -48,17 +51,21 @@ if valid_images < 10:
 print("\nRunning Calibration (Release Object Method)...")
 # iFixedPoint is the index of the corner that is 'released' last (usually a corner)
 ret, mtx, dist, rvecs, tvecs, new_objpoints = cv2.calibrateCameraRO(
-    objpoints, imgpoints, gray.shape[::-1], iFixedPoint=CHESSBOARD_SIZE[0]-1,
-    cameraMatrix=None, distCoeffs=None,
-    flags=cv2.CALIB_FIX_K3 # K3 is often unnecessary for standard lenses
+    objpoints,
+    imgpoints,
+    gray.shape[::-1],
+    iFixedPoint=CHESSBOARD_SIZE[0] - 1,
+    cameraMatrix=None,
+    distCoeffs=None,
+    flags=cv2.CALIB_FIX_K3,  # K3 is often unnecessary for standard lenses
 )
 
-# 4. Save the Results to JSON 
+# 4. Save the Results to JSON
 calibration_data = {
     "reprojection_error": ret,
     "camera_matrix": mtx.tolist(),
     "dist_coeff": dist.tolist(),
-    "resolution": [gray.shape[1], gray.shape[0]]
+    "resolution": [gray.shape[1], gray.shape[0]],
 }
 
 output_path = os.path.join(SCRIPT_DIR, "camera_params.json")

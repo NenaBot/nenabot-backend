@@ -25,7 +25,7 @@ dType.SetHOMECmd(api, temp=0, isQueued=1)
 
 # The homing sequence takes about 15 seconds to physically complete.
 # We pause the Python script here so the user can't click prematurely.
-time.sleep(15) 
+time.sleep(15)
 print("Homing Complete! System Ready.")
 
 
@@ -43,7 +43,8 @@ tvec = np.array(mapping["tvec"])
 # 2. CONFIGURATION
 # Set this to the thickness of the battery you are sampling (in mm)
 # If you are touching the board itself, set to 0
-CURRENT_THICKNESS = 0.0 
+CURRENT_THICKNESS = 0.0
+
 
 def pixel_to_robot_3d(u, v, thickness_offset):
     # Convert rvec to rotation matrix
@@ -58,28 +59,27 @@ def pixel_to_robot_3d(u, v, thickness_offset):
     cam_pos_world = -R_inv.dot(tvec)
 
     # We want to find the intersection with a plane parallel to the board
-    # but raised by 'thickness_offset'. 
+    # but raised by 'thickness_offset'.
     # In Board Space, the board is Z=0. In Robot Space, it's slanted.
     # The simplest way: Find intersection with the plane where the board lies.
-    
+
     # Calculate scale 's' to hit the plane
     # Normal of the board in robot space is the 3rd column of R_inv
     normal_world = R_inv[:, 2]
-    
+
     # Intersection formula for a point on a plane
     # We use one of your calibration points as a reference for the plane height
-    
+
     p0 = np.array([317.29, 108.47, -49.27 + thickness_offset])
-    
+
     denom = np.dot(ray_world.flatten(), normal_world)
     if abs(denom) < 1e-6:
         return None
 
     s = np.dot((p0 - cam_pos_world.flatten()), normal_world) / denom
     target_world = cam_pos_world.flatten() + s * ray_world.flatten()
-    
-    return target_world[0], target_world[1], target_world[2]
 
+    return target_world[0], target_world[1], target_world[2]
 
 
 def on_click(event, u, v, flags, param):
@@ -87,37 +87,46 @@ def on_click(event, u, v, flags, param):
         # Scale back to 1080p
         u_real = int(u * (1920 / 1280))
         v_real = int(v * (1080 / 720))
-        
+
         coords = pixel_to_robot_3d(u_real, v_real, CURRENT_THICKNESS)
         if coords:
             # Apply the "Final Polish" offsets
             rx = coords[0] + X_OFFSET
             ry = coords[1] + Y_OFFSET
-            
+
             # THE SAFETY FIX: Ignore the math's Z and force a safe, flat Z height!
             # -48.0 leaves it hovering about 2mm above the table so it won't crash.
             rz = -48.0 + CURRENT_THICKNESS  # Adjust Z if needed based on your thickness
 
-            print(f"Click: ({u_real},{v_real}) -> Robot Target: X:{rx:.2f}, Y:{ry:.2f}, Z:{rz:.2f}")
+            print(
+                f"Click: ({u_real},{v_real}) -> Robot Target: X:{rx:.2f}, Y:{ry:.2f}, Z:{rz:.2f}"
+            )
 
             # Calculate Distance from Base (Pythagoras)
             dist = np.sqrt(rx**2 + ry**2)
-            
+
             # Dobot Magician Safe Zone
             if 160 < dist < 330:
                 # IMPORTANT: Clear the queue to ensure immediate response
                 dType.SetQueuedCmdClear(api)
-                
+
                 # Move sequence
-                dType.SetPTPCmd(api, dType.PTPMode.PTPMOVJXYZMode, rx, ry, rz + 20, 0, isQueued=1)
-                dType.SetPTPCmd(api, dType.PTPMode.PTPMOVLXYZMode, rx, ry, rz, 0, isQueued=1)
-                
+                dType.SetPTPCmd(
+                    api, dType.PTPMode.PTPMOVJXYZMode, rx, ry, rz + 20, 0, isQueued=1
+                )
+                dType.SetPTPCmd(
+                    api, dType.PTPMode.PTPMOVLXYZMode, rx, ry, rz, 0, isQueued=1
+                )
+
                 # Add a small delay/wait so you can see if it hit the spot
-                dType.SetWAITCmd(api, 500, isQueued=1) 
-                
-                dType.SetPTPCmd(api, dType.PTPMode.PTPMOVJXYZMode, rx, ry, rz + 20, 0, isQueued=1)
+                dType.SetWAITCmd(api, 500, isQueued=1)
+
+                dType.SetPTPCmd(
+                    api, dType.PTPMode.PTPMOVJXYZMode, rx, ry, rz + 20, 0, isQueued=1
+                )
             else:
                 print(f"SKIP: Physical Limit Reached ({dist:.1f}mm)")
+
 
 # 3. MAIN LOOP
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -130,14 +139,22 @@ while True:
     ret, frame = cap.read()
     if not ret:
         break
-    
+
     # Rectify the frame so the clicks match our math
     rectified = cv2.undistort(frame, mtx, dist)
-    
-    cv2.putText(rectified, "CLICK TO MOVE ARM", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+
+    cv2.putText(
+        rectified,
+        "CLICK TO MOVE ARM",
+        (50, 50),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 255, 0),
+        2,
+    )
     cv2.imshow("Dobot Vision Control", cv2.resize(rectified, (1280, 720)))
-    
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+
+    if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
 dType.DisconnectDobot(api)

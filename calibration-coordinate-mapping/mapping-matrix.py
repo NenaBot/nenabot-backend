@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import json
 
-# 1. Load Intrinsic Data 
+# 1. Load Intrinsic Data
 with open("camera_params.json", "r") as f:
     calib = json.load(f)
 mtx = np.array(calib["camera_matrix"])
@@ -17,7 +17,7 @@ captured_data = [
     {"idx": [1, 0], "robot": [309.48, 122.53, -50.84]},
     {"idx": [1, 6], "robot": [319.28, -88.30, -50.35]},
     {"idx": [5, 7], "robot": [187.17, -132.45, -51.31]},
-    {"idx": [5, 0], "robot": [175.21, 121.45, -50.41]}
+    {"idx": [5, 0], "robot": [175.21, 121.45, -50.41]},
 ]
 
 # 3. Setup the Math
@@ -56,7 +56,9 @@ try:
         cv2.drawChessboardCorners(frame, (8, 6), corners, found)
 
         # 2. Pop up a window to show you
-        cv2.imshow("Corner Check - Press ANY KEY to close", cv2.resize(frame, (960, 540)))
+        cv2.imshow(
+            "Corner Check - Press ANY KEY to close", cv2.resize(frame, (960, 540))
+        )
         cv2.waitKey(0)  # Pauses the code until you press a key on your keyboard
 
     if not found:
@@ -69,7 +71,7 @@ finally:
 # Extract the specific (u, v) pixels for your 4 chosen points
 # (In an 8x6 inner corner grid, index = row * 8 + col)
 img_pts = []
-obj_pts = [] # These will be the Robot (X, Y, Z)
+obj_pts = []  # These will be the Robot (X, Y, Z)
 
 for p in captured_data:
     row, col = p["idx"]
@@ -89,7 +91,7 @@ if success:
     mapping_result = {
         "rvec": rvec.tolist(),
         "tvec": tvec.tolist(),
-        "robot_z_baseline": -42.0 # Average of your touched Z points
+        "robot_z_baseline": -42.0,  # Average of your touched Z points
     }
     with open("robot_mapping.json", "w") as f:
         json.dump(mapping_result, f, indent=4)

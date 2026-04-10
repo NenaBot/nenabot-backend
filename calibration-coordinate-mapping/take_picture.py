@@ -1,4 +1,4 @@
-# This code is designed to capture images of a chessboard pattern using a webcam for the purpose of camera calibration. It automatically detects the chessboard corners in the video feed and allows you to save images when the corners are successfully detected. The saved images will be used later for calibrating the camera to correct for lens distortion and to understand the camera's perspective (intrinsic-calibration.py). 
+# This code is designed to capture images of a chessboard pattern using a webcam for the purpose of camera calibration. It automatically detects the chessboard corners in the video feed and allows you to save images when the corners are successfully detected. The saved images will be used later for calibrating the camera to correct for lens distortion and to understand the camera's perspective (intrinsic-calibration.py).
 # Make sure to print an A3-sized chessboard pattern with 9x7 squares (8x6 inner corners) and use it during the capture process for accurate calibration results.
 
 import cv2
@@ -44,7 +44,9 @@ if cap is None:
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
-print(f"Camera opened: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
+print(
+    f"Camera opened: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}"
+)
 print("--- Chessboard Capture Started ---")
 print("Press 's' to Save an image when corners are detected.")
 print("Press 'q' to Quit.")
@@ -64,7 +66,7 @@ while True:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     # 3. Find Chessboard Corners
-    # This is the 'Automatic Detection' core 
+    # This is the 'Automatic Detection' core
     found, corners = cv2.findChessboardCorners(gray, CHESSBOARD_SIZE, None)
 
     # Copy of frame to show visual feedback
@@ -73,24 +75,38 @@ while True:
     if found:
         # 4. Draw corners so you know it's working
         cv2.drawChessboardCorners(display_frame, CHESSBOARD_SIZE, corners, found)
-        cv2.putText(display_frame, "READY TO SAVE (Press 's')", (20, 40), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(
+            display_frame,
+            "READY TO SAVE (Press 's')",
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),
+            2,
+        )
     else:
-        cv2.putText(display_frame, "Searching for board...", (20, 40), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.putText(
+            display_frame,
+            "Searching for board...",
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 0, 255),
+            2,
+        )
 
     cv2.imshow("Calibration Capture", display_frame)
 
     key = cv2.waitKey(1) & 0xFF
-    
+
     # 5. Save Logic
-    if key == ord('s') and found:
+    if key == ord("s") and found:
         count += 1
         file_name = os.path.join(SAVE_PATH, f"calib_{count:02d}.png")
-        cv2.imwrite(file_name, frame) # Save the RAW frame, not the one with lines
+        cv2.imwrite(file_name, frame)  # Save the RAW frame, not the one with lines
         print(f"Saved: {file_name}")
 
-    elif key == ord('q'):
+    elif key == ord("q"):
         break
 
 cap.release()

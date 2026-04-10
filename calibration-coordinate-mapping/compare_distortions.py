@@ -49,27 +49,37 @@ while True:
     display_raw = cv2.resize(frame, (640, 360))
     display_flat = cv2.resize(undistorted, (640, 360))
     preview = cv2.hconcat([display_raw, display_flat])
-    
-    cv2.putText(preview, "RAW (Press 's' to save)", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
-    cv2.putText(preview, "UNDISTORTED", (660, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+
+    cv2.putText(
+        preview,
+        "RAW (Press 's' to save)",
+        (20, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 0, 255),
+        2,
+    )
+    cv2.putText(
+        preview, "UNDISTORTED", (660, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+    )
 
     cv2.imshow("Preview", preview)
 
     key = cv2.waitKey(1) & 0xFF
-    
+
     # 5. Save the images when 's' is pressed
-    if key == ord('s'):
+    if key == ord("s"):
         save_count += 1
         raw_filename = f"comparison_{save_count:02d}_RAW.png"
         flat_filename = f"comparison_{save_count:02d}_FLAT.png"
-        
+
         # Saving the original 'frame' and 'undistorted' variables which are the full 1080p versions, not the resized previews.
         cv2.imwrite(raw_filename, frame)
         cv2.imwrite(flat_filename, undistorted)
-        
+
         print(f"[{save_count}] Saved successfully: {raw_filename} & {flat_filename}")
 
-    elif key == ord('q'):
+    elif key == ord("q"):
         break
 
 cap.release()
