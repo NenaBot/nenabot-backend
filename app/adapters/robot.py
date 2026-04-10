@@ -211,6 +211,14 @@ class RobotAdapter:
         try:
             DobotDllType = _get_dobot_dll_type()
             x, y, z, r = coords
+            if not self.is_reachable_mm(x, y, z):
+                return RobotResult(
+                    ok=False,
+                    error=(
+                        "The target measurement point " f"x={x}, y={y}, z={z}" 
+                        " is outside the reachable area of the robot arm."
+                    ),
+                )
             print(f"Moving to: {coords}")
             if hasattr(DobotDllType, "SetPTPCmdEx") and wait:
                 DobotDllType.SetPTPCmdEx(self._api, 1, x, y, z, r, 1)
