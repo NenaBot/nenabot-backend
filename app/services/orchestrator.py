@@ -30,17 +30,25 @@ class OrchestratorService:
         self,
         camera_vision: CameraVisionAdapter,
         robot: RobotAdapter,
-        dms: IVAdapter,
+        ionvision: IVAdapter,
         storage: StorageAdapter,
+        max_jobs: int = 0,
+        default_work_z: float = 0.0,
+        default_measuring_points_per_cm: float = 0.5,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
-        self._dms = dms
+        self._ionvision = ionvision
         self._storage = storage
+        self._max_jobs = max_jobs  # 0 = unlimited
         self._started_at = time.monotonic()
         self._profiles = [
-            {"name": "default", "description": "Default inspection profile"},
-            {"name": "fast", "description": "Faster run, lower accuracy"},
+            {
+                "name": "default",
+                "description": "Default inspection profile",
+                "workZ": default_work_z,
+                "measuringPointsPerCm": default_measuring_points_per_cm,
+            }
         ]
         self._running_job_id: str | None = None
         self._stop_requested = False
@@ -276,10 +284,10 @@ class OrchestratorService:
                     # Dwell at the waypoint for 1.5 seconds
                     time.sleep(1.5)
 
-                    # Here comes the reading of the DMS
-                    scan_start = self._dms.start_new_scan()
+                    # Here comes the reading from IonVision
+                    scan_start = self._ionvision.start_new_scan()
                     if scan_start.ok:
-                        # # --- SSE: emit scan-started event (uncomment when DMS is connected) ---
+                        # # --- SSE: emit scan-started event (uncomment when IonVision is connected) ---
                         # self._publish_event(job.id, {
                         #     "type": "job:scanning",
                         #     "job_id": job.id,
@@ -291,13 +299,13 @@ class OrchestratorService:
                         # })
                         for _ in range(120):
                             time.sleep(1.5)
-                            status = self._dms.get_current_scan()
+                            status = self._ionvision.get_current_scan()
                             if not status.ok:
                                 break
                             payload = status.payload or {}
                             if payload.get("state") == "finished":
                                 break
-                            # # --- SSE: emit scan-progress event (uncomment when DMS is connected) ---
+                            # # --- SSE: emit scan-progress event (uncomment when IonVision is connected) ---
                             # self._publish_event(job.id, {
                             #     "type": "job:scan_progress",
                             #     "job_id": job.id,
@@ -308,7 +316,7 @@ class OrchestratorService:
                             #     "scan_state": payload.get("state"),
                             #     "timestamp": datetime.now(timezone.utc).isoformat(),
                             # })
-                        latest = self._dms.get_latest_dataobject()
+                        latest = self._ionvision.get_latest_dataobject()
                         if latest.ok:
                             scan_result = latest.payload
                 else:
@@ -422,6 +430,7 @@ class OrchestratorService:
             self._storage.update_job_state(
                 job.id, job.state, job.last_point_processed, job.error
             )
+            self._prune_old_data()
 
             self._publish_event(
                 job.id,
@@ -435,6 +444,80 @@ class OrchestratorService:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             )
+
+    # ---- Data retention ----
+
+    def _prune_image_files(self) -> None:
+        """Delete the oldest ``capture_*.jpg`` files beyond *max_jobs*.
+
+        Captured JPEG files accumulate every time ``detect_path()`` is called
+        (i.e. on every ``POST /paths`` calibration request), regardless of
+        whether a job is running.  This helper is therefore called both after
+        each capture *and* at the end of every job so that the output
+        directory never grows without bound.
+
+        The ``max_jobs`` newest files (sorted by modification time) are kept;
+        everything older is removed.  A failed ``unlink`` is logged as a
+        warning and does not raise so that a transient OS error never causes
+        a calibration or job failure.
+
+        When ``max_jobs`` is 0 (unlimited) this is a no-op.
+        """
+        if self._max_jobs <= 0:
+            return
+        image_dir: Path = self._camera_vision.output_dir
+        if not image_dir.is_dir():
+            return
+        file_mtimes: list[tuple[float, Path]] = []
+        for f in image_dir.glob("capture_*.jpg"):
+            try:
+                file_mtimes.append((f.stat().st_mtime, f))
+            except OSError as exc:
+                logger.debug(
+                    "Retention policy: skipping image file %s during stat - %s",
+                    f,
+                    exc,
+                )
+        files = [f for _, f in sorted(file_mtimes, key=lambda item: item[0])]
+        excess = len(files) - self._max_jobs
+        if excess <= 0:
+            return
+        for f in files[:excess]:
+            try:
+                f.unlink()
+                logger.debug("Retention policy: deleted image file %s", f)
+            except OSError as exc:
+                logger.warning("Retention policy: could not delete %s — %s", f, exc)
+
+    def _prune_old_data(self) -> None:
+        """Remove excess jobs (DB) and captured image files (disk).
+
+        Called automatically at the end of every job execution.  When
+        ``max_jobs`` is 0 (the default) this is a no-op.
+
+        DB cleanup
+        ----------
+        The oldest jobs beyond the limit are hard-deleted.  Because the
+        ``waypoints``, ``measurements``, and ``job_images`` tables all
+        reference ``jobs`` with ``ON DELETE CASCADE``, a single
+        ``DELETE FROM jobs`` removes every related row automatically.
+
+        Disk cleanup
+        ------------
+        Delegates to :meth:`_prune_image_files`.
+        """
+        if self._max_jobs <= 0:
+            return
+
+        deleted_ids = self._storage.prune_jobs(self._max_jobs)
+        if deleted_ids:
+            logger.info(
+                "Retention policy: pruned %d old job(s) — %s",
+                len(deleted_ids),
+                deleted_ids,
+            )
+
+        self._prune_image_files()
 
     # ---- Misc ----
 
@@ -462,15 +545,15 @@ class OrchestratorService:
         except Exception as exc:
             components["camera"] = {"status": "error", "error": str(exc)}
 
-        # DMS (IonVision)
+        # IonVision
         try:
-            res = self._dms.ping()
-            components["dms"] = {
+            res = self._ionvision.ping()
+            components["ionvision"] = {
                 "status": "connected" if res.ok else "disconnected",
                 "error": res.error,
             }
         except Exception as exc:
-            components["dms"] = {"status": "error", "error": str(exc)}
+            components["ionvision"] = {"status": "error", "error": str(exc)}
 
         any_error = any(c["status"] == "error" for c in components.values())
         overall = "degraded" if any_error else "ok"
@@ -699,6 +782,10 @@ class OrchestratorService:
         if not capture.ok or not capture.image_path:
             return DetectionResults(ok=False, error=capture.error or "Capture failed")
 
+        # Prune old capture files immediately after writing a new one so the
+        # output directory never grows without bound even when no jobs are run.
+        self._prune_image_files()
+
         # Replace any previous calibration with values derived from this capture.
         self._cal_robot_start = None
         self._cal_canvas_start = None
@@ -765,19 +852,21 @@ class OrchestratorService:
         return self._storage.latest_result()
 
     # WEBSOCKET SERVICES
-    async def initialize_dms(self) -> None:
+    async def initialize_ionvision(self) -> None:
         """Initialize async WebSocket handlers, etc"""
-        await self._dms.initialize_websocket()
-        self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
-        self._dms.on_event("scan.stopped", self._handle_scan_stopped)
-
-    async def _close_dms(self) -> None:
-        """Clean up DMS connection and handlers"""
-        await self._dms.disconnect_websocket()
-        self._dms.off_event(
+        await self._ionvision.initialize_websocket()
+        self._ionvision.on_event(
             "scan.resultsProcessed", self._handle_scan_results_processed
         )
-        self._dms.off_event("scan.stopped", self._handle_scan_stopped)
+        self._ionvision.on_event("scan.stopped", self._handle_scan_stopped)
+
+    async def _close_ionvision(self) -> None:
+        """Clean up IonVision connection and handlers"""
+        await self._ionvision.disconnect_websocket()
+        self._ionvision.off_event(
+            "scan.resultsProcessed", self._handle_scan_results_processed
+        )
+        self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         """The results of the previously finished scan have been

@@ -473,6 +473,24 @@
             return point;
         }
 
+        async function loadDefaultProfile() {
+            try {
+                const res = await fetch(`${api()}/profile/default`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (typeof data.workZ === 'number') {
+                    $('workZ').value = data.workZ;
+                    log(`Default work Z loaded from profile: ${data.workZ}`);
+                }
+                if (typeof data.measuringPointsPerCm === 'number' && data.measuringPointsPerCm > 0) {
+                    $('measuringPointsPerCm').value = data.measuringPointsPerCm;
+                    log(`Default measuring points/cm loaded from profile: ${data.measuringPointsPerCm}`);
+                }
+            } catch (e) {
+                log('Could not load default profile (server may be offline)');
+            }
+        }
+
         /* ---- Tool selection ---- */
         function setTool(tool) {
             activeTool = tool;
@@ -1181,6 +1199,7 @@
     </tr>`;
             }
         }
+        loadDefaultProfile();
     </script>
 </body>
 

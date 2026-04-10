@@ -50,7 +50,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 - [Architecture Overview](docs/architecture-overview.md)
 - [Database Documentation](docs/database.md)
 - [Streaming Guide](docs/streaming.md)
-- [IonVision Integration Tests](docs/ionVision.md)
+- [IonVision Integration](docs/ionVision.md)
 
 ## Endpoints
 
@@ -74,6 +74,32 @@ All endpoints are prefixed with `/api`.
 - `POST /api/path/detect` — capture image, detect batteries, and calibrate
 - `POST /api/path/populate` — generate perimeter measurement points
 - `DELETE /api/job/{id}`
+
+## Configuration
+
+The following environment variables control nenabot's runtime behaviour.
+
+| Variable                                  | Default                 | Description                                                                                                                                                                                                                                                                                                                                                                                                               |
+| :---------------------------------------- | :---------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `IONVISION_BASE_URL`                      | `http://localhost:8080` | HTTP base URL of the IonVision DMS device                                                                                                                                                                                                                                                                                                                                                                                 |
+| `IONVISION_WS_BASE_URL`                   | derived from HTTP URL   | WebSocket base URL of the IonVision DMS device                                                                                                                                                                                                                                                                                                                                                                            |
+| `NENABOT_MAX_JOBS`                        | _(unset — unlimited)_   | Maximum number of jobs to retain. When set to a positive integer, the oldest jobs beyond this limit are automatically deleted at the end of every job execution. Both the database records (job, waypoints, measurements, snapshot image) and the captured JPEG files in `data/images/` are cleaned up. Set this to a small number (e.g. `10`) on memory-constrained devices to prevent unbounded disk and SQLite growth. |
+| `NENABOT_DEFAULT_WORK_Z`                  | `0.0`                   | Default Z coordinate (mm) for the default inspection profile. Pre-filled in the job tester UI on page load. Negative values lower the arm below the calibration plane (e.g. `-35`).                                                                                                                                                                                                                                       |
+| `NENABOT_DEFAULT_MEASURING_POINTS_PER_CM` | `0.5`                   | Default path population density for the default inspection profile (measuring points per cm). Pre-filled in the job tester UI on page load. Must be greater than `0`.                                                                                                                                                                                                                                                     |
+
+See `.env.example` for a reference file with all variables.
+
+Example Docker run with job retention, a default work Z, and default measuring points per cm:
+
+```bash
+docker run -d --name nenabot \
+  -p 8000:8000 \
+  -v nenabot-data:/app/data \
+  -e NENABOT_MAX_JOBS=10 \
+  -e NENABOT_DEFAULT_WORK_Z=-35 \
+  -e NENABOT_DEFAULT_MEASURING_POINTS_PER_CM=0.8 \
+  nenabot
+```
 
 ## Hardware integration notes
 
