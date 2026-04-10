@@ -61,7 +61,7 @@ class IVAdapter:
         ----
             method: HTTP method (GET, POST, PUT, DELETE, etc.)
             endpoint: API endpoint path (appended to base_url)
-            **kwargs: Additional arguments passed to httpx.request()
+            **kwargs: Additional arguments passed to httpx.Client.request()
 
         Returns:
         -------
