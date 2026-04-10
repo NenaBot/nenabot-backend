@@ -80,6 +80,11 @@ class RobotAdapter:
     COMMAND_TIMEOUT_S = 20.0
     HOMING_TIMEOUT_S = 60.0
     LEGACY_HOMING_ENV = "DOBOT_ENABLE_LEGACY_HOMING"
+    MAX_REACH_RADIUS_MM = 320
+    MIN_REACH_RADIUS_MM = 180
+    MIN_Z_HEIGHT_MM = -30
+    MAX_Z_HEIGHT_MM = 0
+    MIN_X_POSITION_MM = 10
 
     def __init__(self, baud: int = 115200) -> None:
         self._baud = baud
@@ -463,11 +468,15 @@ class RobotAdapter:
     def is_reachable_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
         """Check if arm is allowed/capable of reaching a coordinate point"""
 
-        if z_mm > 0 or z_mm < -30 or x_mm < 10:
+        if (
+            z_mm > self.MAX_Z_HEIGHT_MM
+            or z_mm < self.MIN_Z_HEIGHT_MM
+            or x_mm < self.MIN_X_POSITION_MM
+        ):
             return False
 
         dist = sqrt(y_mm**2 + x_mm**2)
-        if dist > 320 or dist < 180:
+        if dist > self.MAX_REACH_RADIUS_MM or dist < self.MIN_REACH_RADIUS_MM:
             return False
         else:
             return True
