@@ -213,7 +213,8 @@ class RobotAdapter:
             return RobotResult(
                 ok=False,
                 error=(
-                    "The target measurement point " f"x={x}, y={y}, z={z}"
+                    "The target measurement point "
+                    f"x={x}, y={y}, z={z}"
                     " is outside the reachable area of the robot arm."
                 ),
             )
