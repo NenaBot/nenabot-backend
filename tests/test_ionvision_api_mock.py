@@ -155,7 +155,7 @@ def ionvision_client(tmp_path: Path):
     orchestrator = OrchestratorService(
         camera_vision=fake_camera,
         robot=fake_robot,
-        dms=fake_dms,
+        ionvision=fake_dms,
         storage=StorageAdapter(db=db),
     )
 
@@ -191,7 +191,7 @@ def test_health_reports_mock_ionvision_connected(ionvision_client) -> None:
     assert response.status_code == 200
     health = response.json()
     assert health["status"] == "ok"
-    assert health["dms"]["status"] == "connected"
+    assert health["ionvision"]["status"] == "connected"
     assert fake_dms.ping_calls == 1
 
 
