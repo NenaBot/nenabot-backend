@@ -237,6 +237,19 @@ class IVAdapter:
         return self._request("GET", "currentParameter")
     
     def evaluate_scan_data(self, data:dict) -> float:
+        """Evaluate scan payload and return an average intensity score.
+
+        The function expects a websocket-style message envelope containing
+        ``body.measurementData.ucv`` and ``body.measurementData.intensityTop``.
+        It uses only UCV entries in the inclusive range [-1.0, 1.0], maps those
+        indexes to ``intensityTop``, keeps the 3 highest numeric intensity values,
+        and returns their arithmetic mean.
+
+        Returns:
+            float: Average of the top 3 mapped intensity values.
+            False: If the payload structure is invalid or fewer than 3 usable
+                intensity values are available.
+        """
         # Get ucv list
         body = data.get("body", {})
         if not isinstance(body, dict):
