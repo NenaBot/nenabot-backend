@@ -44,7 +44,7 @@ Evaluate IonVision websocket payload data and compute a scan score.
 
 Evaluation steps:
 
-1. Read `measurementData.ucv` and `measurementData.intensityTop`.
+1. Read `body.measurementData.ucv` and `body.measurementData.intensityTop`.
 2. Keep indexes where UCV is numeric and in the inclusive range [-1.0, 1.0].
 3. Map those indexes to numeric intensity values.
 4. Sort descending and keep only the 3 highest values.
