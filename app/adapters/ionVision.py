@@ -251,7 +251,7 @@ class IVAdapter:
                 usable intensity values are available.
         """
         if not isinstance(data, dict):
-            return False
+            return None
 
         # Get ucv list
         body = data.get("body", {})
