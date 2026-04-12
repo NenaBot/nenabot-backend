@@ -360,12 +360,23 @@ def test_evaluate_scan_data_returns_false_when_less_than_three_values(
     assert result is False
 
 
+@pytest.mark.parametrize("data", [None, "not-a-dict", []])
+def test_evaluate_scan_data_returns_false_on_non_dict_top_level_payload(
+    iv_adapter: IVAdapter,
+    data: object,
+) -> None:
+    """Function returns False when the top-level payload is not a dictionary."""
+    result = iv_adapter.evaluate_scan_data(data)
+
+    assert result is False
+
+
+@pytest.mark.parametrize("data", [{"body": "not-a-dict"}])
 def test_evaluate_scan_data_returns_false_on_invalid_payload_shape(
     iv_adapter: IVAdapter,
+    data: dict[str, object],
 ) -> None:
     """Function returns False when payload structure is missing expected dict/list nodes."""
-    data = {"body": "not-a-dict"}
-
     result = iv_adapter.evaluate_scan_data(data)
 
     assert result is False
