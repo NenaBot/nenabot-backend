@@ -323,6 +323,54 @@ def test_get_results_rejects_page_numbers_below_one(
     iv_adapter._request.assert_not_called()
 
 
+def test_evaluate_scan_data_returns_average_of_top_three_valid_intensities(
+    iv_adapter: IVAdapter,
+) -> None:
+    """Average is computed from the 3 highest intensities mapped by valid UCV indexes."""
+    data = {
+        "body": {
+            "measurementData": {
+                "ucv": [0.0, -0.2, 2.3, 0.8, -1.0, "bad"],
+                "intensityTop": [10.0, 3.0, 100.0, 9.0, 12.0, 999.0],
+            }
+        }
+    }
+
+    result = iv_adapter.evaluate_scan_data(data)
+
+    # Valid UCV indexes are 0,1,3,4 => intensities 10,3,9,12; top 3 are 12,10,9.
+    assert result == pytest.approx((12.0 + 10.0 + 9.0) / 3.0)
+
+
+def test_evaluate_scan_data_returns_false_when_less_than_three_values(
+    iv_adapter: IVAdapter,
+) -> None:
+    """Function returns False when fewer than 3 mapped numeric intensity values exist."""
+    data = {
+        "body": {
+            "measurementData": {
+                "ucv": [0.2, 1.5, -2.0],
+                "intensityTop": [8.0, 9.0, 10.0],
+            }
+        }
+    }
+
+    result = iv_adapter.evaluate_scan_data(data)
+
+    assert result is False
+
+
+def test_evaluate_scan_data_returns_false_on_invalid_payload_shape(
+    iv_adapter: IVAdapter,
+) -> None:
+    """Function returns False when payload structure is missing expected dict/list nodes."""
+    data = {"body": "not-a-dict"}
+
+    result = iv_adapter.evaluate_scan_data(data)
+
+    assert result is False
+
+
 # IVAdapter _request tests
 @respx.mock
 def test__request_returns_ivresult_on_2xx(iv_adapter: IVAdapter) -> None:
