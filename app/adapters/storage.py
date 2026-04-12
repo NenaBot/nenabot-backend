@@ -47,9 +47,23 @@ class StorageAdapter:
         if job.path:
             self._db.executemany(
                 "INSERT INTO waypoints "
-                "(job_id, seq, x, y, z, r) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                [(job.id, i, w.x, w.y, w.z, w.r) for i, w in enumerate(job.path)],
+                "(job_id, seq, x, y, z, r, index_label, battery_nr, corner_index, measurement_index) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        job.id,
+                        i,
+                        w.x,
+                        w.y,
+                        w.z,
+                        w.r,
+                        w.index,
+                        w.battery_nr,
+                        w.corner_index,
+                        w.measurement_index,
+                    )
+                    for i, w in enumerate(job.path)
+                ],
             )
         self._db.commit()
 
@@ -84,7 +98,9 @@ class StorageAdapter:
         return [self._row_to_job(r) for r in rows]
 
     def latest_job(self) -> Job | None:
-        row = self._db.fetchone("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1")
+        row = self._db.fetchone(
+            "SELECT * FROM jobs ORDER BY created_at DESC, updated_at DESC, rowid DESC LIMIT 1"
+        )
         if not row:
             return None
         return self._row_to_job(row)
@@ -93,6 +109,48 @@ class StorageAdapter:
         cur = self._db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         self._db.commit()
         return cur.rowcount > 0
+
+    def prune_jobs(self, max_jobs: int) -> list[str]:
+        """Delete the oldest jobs so that at most *max_jobs* remain.
+
+        Jobs are ordered by ``created_at`` ascending; the oldest ones are
+        removed first.  Cascade constraints on the ``waypoints``,
+        ``measurements``, and ``job_images`` tables ensure all child rows
+        are deleted automatically.
+
+        Parameters
+        ----------
+        max_jobs:
+            Maximum number of jobs to retain.  Values ≤ 0 are a no-op.
+
+        Returns
+        -------
+        list[str]
+            IDs of the jobs that were deleted.
+        """
+        if max_jobs <= 0:
+            return []
+        count_row = self._db.fetchone("SELECT COUNT(*) AS n FROM jobs")
+        total_jobs = int(count_row["n"]) if count_row else 0
+        excess = total_jobs - max_jobs
+        if excess <= 0:
+            return []
+
+        oldest_rows = self._db.fetchall(
+            "SELECT id FROM jobs ORDER BY created_at ASC LIMIT ?",
+            (excess,),
+        )
+        to_delete = [r["id"] for r in oldest_rows]
+        if not to_delete:
+            return []
+
+        placeholders = ",".join("?" for _ in to_delete)
+        self._db.execute(
+            f"DELETE FROM jobs WHERE id IN ({placeholders})",
+            tuple(to_delete),
+        )
+        self._db.commit()
+        return to_delete
 
     # ---- Measurements ----
 
@@ -170,7 +228,19 @@ class StorageAdapter:
         wp_rows = self._db.fetchall(
             "SELECT * FROM waypoints WHERE job_id = ? ORDER BY seq ASC", (job_id,)
         )
-        path = [Waypoint(x=w["x"], y=w["y"], z=w["z"], r=w["r"]) for w in wp_rows]
+        path = [
+            Waypoint(
+                x=w["x"],
+                y=w["y"],
+                z=w["z"],
+                r=w["r"],
+                index=w["index_label"],
+                battery_nr=w["battery_nr"],
+                corner_index=w["corner_index"],
+                measurement_index=w["measurement_index"],
+            )
+            for w in wp_rows
+        ]
 
         # Measurements
         measurements = self.get_measurements(job_id)

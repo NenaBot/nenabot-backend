@@ -1,3 +1,4 @@
+import os
 import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -8,6 +9,7 @@ from app.adapters.camera_vision import (
     CameraVisionAdapter,
     CaptureResult,
     Corner,
+    DetectionResult,
     DetectionResults,
     MarkerCorners,
 )
@@ -35,7 +37,7 @@ def _make_svc(tmp_path: Path) -> OrchestratorService:
         camera_vision=camera,
         robot=robot,
         storage=StorageAdapter(db=db),
-        dms=IVAdapter(
+        ionvision=IVAdapter(
             base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
         ),
     )
@@ -112,7 +114,7 @@ def test_health_returns_component_statuses(tmp_path: Path) -> None:
     assert result["status"] in {"ok", "degraded"}
     assert result["uptime_s"] >= 0
 
-    for key in ("robot", "camera", "dms"):
+    for key in ("robot", "camera", "ionvision"):
         assert key in result
         assert result[key]["status"] in {"connected", "disconnected", "error"}
 
@@ -224,6 +226,173 @@ def test_is_calibrated_property(tmp_path: Path) -> None:
     assert svc.is_calibrated is True
 
 
+# ---- ORC-TC-013: sort_pixel_path_from_canvas_start orders_by_start_distance ----
+
+
+def test_sort_pixel_path_from_canvas_start_orders_by_start_distance(
+    tmp_path: Path,
+) -> None:
+    """sort_pixel_path_from_canvas_start should order waypoints by distance from the canvas start and return sorted waypoints only."""
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+
+    waypoints = [
+        (700.0, 400.0),
+        (642.0, 401.0),
+        (650.0, 400.0),
+    ]
+
+    sorted_points = svc.sort_pixel_path_from_canvas_start(waypoints)
+    assert sorted_points == [
+        (642.0, 401.0),
+        (650.0, 400.0),
+        (700.0, 400.0),
+    ]
+    assert (640.0, 400.0) not in sorted_points
+
+
+def test_sort_pixel_path_from_canvas_start_raises_when_uncalibrated(
+    tmp_path: Path,
+) -> None:
+    """sort_pixel_path_from_canvas_start should raise without canvas start calibration."""
+    svc = _make_svc(tmp_path)
+    with pytest.raises(RuntimeError, match="Not calibrated"):
+        svc.sort_pixel_path_from_canvas_start([(1.0, 2.0)])
+
+
+def test_populate_pixel_path_from_batteries_generates_perimeter_points(
+    tmp_path: Path,
+) -> None:
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+    svc._cal_pixels_per_mm = 2.0
+
+    path = svc.populate_pixel_path_from_batteries(
+        batteries=[
+            [
+                (650.0, 390.0),
+                (690.0, 390.0),
+                (690.0, 430.0),
+                (650.0, 430.0),
+            ]
+        ],
+        measuring_points_per_cm=0.5,
+    )
+
+    assert len(path) == 4
+    assert path[0]["index"] == "0-0-0"
+    assert path[0]["batteryNr"] == 0
+    assert path[0]["cornerIndex"] == 0
+    assert path[0]["measurementIndex"] == 0
+    assert path[0]["pixelX"] == pytest.approx(650.0)
+    assert path[0]["pixelY"] == pytest.approx(390.0)
+
+
+def test_populate_pixel_path_from_batteries_orders_batteries_by_start_distance(
+    tmp_path: Path,
+) -> None:
+    svc = _make_svc(tmp_path)
+    svc._cal_canvas_start = (640.0, 400.0)
+    svc._cal_pixels_per_mm = 2.0
+
+    path = svc.populate_pixel_path_from_batteries(
+        batteries=[
+            [
+                (900.0, 500.0),
+                (940.0, 500.0),
+                (940.0, 540.0),
+                (900.0, 540.0),
+            ],
+            [
+                (650.0, 390.0),
+                (690.0, 390.0),
+                (690.0, 430.0),
+                (650.0, 430.0),
+            ],
+        ],
+        measuring_points_per_cm=0.5,
+    )
+
+    assert path
+    assert path[0]["batteryNr"] == 0
+    assert path[0]["pixelX"] == pytest.approx(650.0)
+    assert path[0]["pixelY"] == pytest.approx(390.0)
+    assert any(point["batteryNr"] == 1 for point in path)
+
+
+def test_detect_path_keeps_detection_order(tmp_path: Path) -> None:
+    """detect_path() should keep detector output order unchanged."""
+    svc = _make_svc(tmp_path)
+
+    image_path = tmp_path / "capture.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    marker = MarkerCorners(
+        corners=[
+            Corner(x=10.0, y=10.0),
+            Corner(x=20.0, y=10.0),
+            Corner(x=20.0, y=20.0),
+            Corner(x=10.0, y=20.0),
+        ]
+    )
+
+    detections = [
+        DetectionResult(
+            corners=[],
+            width_mm=50.0,
+            height_mm=50.0,
+            center_x=700.0,
+            center_y=400.0,
+            confidence=0.9,
+        ),
+        DetectionResult(
+            corners=[],
+            width_mm=50.0,
+            height_mm=50.0,
+            center_x=642.0,
+            center_y=401.0,
+            confidence=0.9,
+        ),
+        DetectionResult(
+            corners=[],
+            width_mm=50.0,
+            height_mm=50.0,
+            center_x=650.0,
+            center_y=400.0,
+            confidence=0.9,
+        ),
+    ]
+    with patch.object(
+        svc._camera_vision,
+        "capture",
+        return_value=CaptureResult(ok=True, image_path=str(image_path)),
+    ), patch.object(
+        svc._camera_vision,
+        "detect",
+        return_value=DetectionResults(
+            ok=True,
+            detections=detections,
+            pixels_per_mm=2.0,
+            marker_count=1,
+            marker_corners=[marker],
+            error=None,
+        ),
+    ), patch.object(
+        svc._robot,
+        "get_pose",
+        return_value=PoseResult(ok=True, x=100.0, y=200.0, z=0.0, r=0.0),
+    ):
+        result = svc.detect_path()
+
+    assert result.ok is True
+    assert len(result.detections) == 3
+    assert result.detections[0].center_x == 700.0
+    assert result.detections[0].center_y == 400.0
+    assert result.detections[1].center_x == 642.0
+    assert result.detections[1].center_y == 401.0
+    assert result.detections[2].center_x == 650.0
+    assert result.detections[2].center_y == 400.0
+
+
 def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
     tmp_path: Path,
 ) -> None:
@@ -232,7 +401,6 @@ def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
     svc._cal_robot_start = Waypoint(x=100.0, y=200.0, z=0.0, r=0.0)
     svc._cal_canvas_start = (640.0, 400.0)
     svc._cal_pixels_per_mm = 2.0
-
     image_path = tmp_path / "capture.jpg"
     image_path.write_bytes(b"fake-jpeg")
     marker = MarkerCorners(
@@ -264,10 +432,10 @@ def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
         "get_pose",
         return_value=PoseResult(ok=True, x=0.0, y=0.0, z=0.0, r=0.0),
     ):
-        result = svc.detect_path()
+        origin_result = svc.detect_path()
 
-    assert result.ok is False
-    assert "origin" in (result.error or "").lower()
+    assert origin_result.ok is False
+    assert "origin" in (origin_result.error or "").lower()
     assert svc.calibration_robot_start is None
     assert svc.is_calibrated is False
 
@@ -339,13 +507,13 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         "wait_for_position",
         return_value=PoseResult(ok=True, x=0, y=0, z=0, r=0),
     ), patch.object(
-        svc._dms, "start_new_scan", return_value=IVResult(ok=True)
+        svc._ionvision, "start_new_scan", return_value=IVResult(ok=True)
     ), patch.object(
-        svc._dms,
+        svc._ionvision,
         "get_current_scan",
         return_value=IVResult(ok=True, payload={"state": "finished"}),
     ), patch.object(
-        svc._dms,
+        svc._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
     ), patch(
@@ -383,13 +551,90 @@ def test_profiles_and_default(tmp_path: Path) -> None:
     """profiles() returns both profiles, default_profile() returns the first."""
     svc = _make_svc(tmp_path)
     profiles = svc.profiles()
-    assert len(profiles) == 2
+    assert len(profiles) == 1
     assert profiles[0]["name"] == "default"
-    assert profiles[1]["name"] == "fast"
 
     default = svc.default_profile()
     assert default["name"] == "default"
     assert "description" in default
+
+
+# ---- ORC-TC-018b: Default profile work_z ----
+
+
+def test_default_profile_work_z_defaults_to_zero(tmp_path: Path) -> None:
+    """default_profile() has workZ=0.0 when OrchestratorService is created without it."""
+    svc = _make_svc(tmp_path)
+    assert svc.default_profile()["workZ"] == 0.0
+    assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)
+
+
+def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
+    """OrchestratorService stores default profile constructor defaults in the default profile dict."""
+    db = Database(db_path=str(tmp_path / "test.db"))
+    db.init_db()
+    camera = CameraVisionAdapter()
+    camera.ping = MagicMock(
+        return_value=CaptureResult(ok=False, error="no camera in test")
+    )
+    robot = RobotAdapter()
+    robot.ping = MagicMock(return_value=RobotResult(ok=False, error="no robot in test"))
+    svc = OrchestratorService(
+        camera_vision=camera,
+        robot=robot,
+        storage=StorageAdapter(db=db),
+        ionvision=IVAdapter(
+            base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
+        ),
+        default_work_z=-35.0,
+        default_measuring_points_per_cm=1.25,
+    )
+    assert svc.default_profile()["workZ"] == -35.0
+    assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(1.25)
+
+
+def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
+    """create_orchestrator() parses default profile env vars and passes them to OrchestratorService."""
+    from app.dependencies import create_orchestrator
+
+    with patch(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        return_value=RobotResult(ok=False, error="no robot"),
+    ), patch.dict(
+        os.environ,
+        {
+            "NENABOT_DEFAULT_WORK_Z": "-42.5",
+            "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM": "0.8",
+        },
+    ):
+        svc = create_orchestrator(
+            db_path=str(tmp_path / "test.db"),
+            ionvision_base_url="http://localhost:8080",
+        )
+    assert svc.default_profile()["workZ"] == pytest.approx(-42.5)
+    assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.8)
+
+
+def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
+    """create_orchestrator() uses safe defaults when default profile env vars are invalid."""
+    from app.dependencies import create_orchestrator
+
+    with patch(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        return_value=RobotResult(ok=False, error="no robot"),
+    ), patch.dict(
+        os.environ,
+        {
+            "NENABOT_DEFAULT_WORK_Z": "not-a-number",
+            "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM": "0",
+        },
+    ):
+        svc = create_orchestrator(
+            db_path=str(tmp_path / "test.db"),
+            ionvision_base_url="http://localhost:8080",
+        )
+    assert svc.default_profile()["workZ"] == 0.0
+    assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)
 
 
 # ---- ORC-TC-019: Manual move via orchestrator ----

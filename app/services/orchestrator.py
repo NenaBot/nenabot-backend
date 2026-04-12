@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
 import queue
 import threading
 import time
@@ -18,23 +19,36 @@ from app.domain.models import Job, Measurement, Waypoint
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
+
+MAX_MEASURING_POINTS_PER_CM = 10.0
+MAX_POPULATED_PATH_POINTS = 20000
+
 
 class OrchestratorService:
     def __init__(
         self,
         camera_vision: CameraVisionAdapter,
         robot: RobotAdapter,
-        dms: IVAdapter,
+        ionvision: IVAdapter,
         storage: StorageAdapter,
+        max_jobs: int = 0,
+        default_work_z: float = 0.0,
+        default_measuring_points_per_cm: float = 0.5,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
-        self._dms = dms
+        self._ionvision = ionvision
         self._storage = storage
+        self._max_jobs = max_jobs  # 0 = unlimited
         self._started_at = time.monotonic()
         self._profiles = [
-            {"name": "default", "description": "Default inspection profile"},
-            {"name": "fast", "description": "Faster run, lower accuracy"},
+            {
+                "name": "default",
+                "description": "Default inspection profile",
+                "workZ": default_work_z,
+                "measuringPointsPerCm": default_measuring_points_per_cm,
+            }
         ]
         self._running_job_id: str | None = None
         self._stop_requested = False
@@ -270,10 +284,10 @@ class OrchestratorService:
                     # Dwell at the waypoint for 1.5 seconds
                     time.sleep(1.5)
 
-                    # Here comes the reading of the DMS
-                    scan_start = self._dms.start_new_scan()
+                    # Here comes the reading from IonVision
+                    scan_start = self._ionvision.start_new_scan()
                     if scan_start.ok:
-                        # # --- SSE: emit scan-started event (uncomment when DMS is connected) ---
+                        # # --- SSE: emit scan-started event (uncomment when IonVision is connected) ---
                         # self._publish_event(job.id, {
                         #     "type": "job:scanning",
                         #     "job_id": job.id,
@@ -285,13 +299,13 @@ class OrchestratorService:
                         # })
                         for _ in range(120):
                             time.sleep(1.5)
-                            status = self._dms.get_current_scan()
+                            status = self._ionvision.get_current_scan()
                             if not status.ok:
                                 break
                             payload = status.payload or {}
                             if payload.get("state") == "finished":
                                 break
-                            # # --- SSE: emit scan-progress event (uncomment when DMS is connected) ---
+                            # # --- SSE: emit scan-progress event (uncomment when IonVision is connected) ---
                             # self._publish_event(job.id, {
                             #     "type": "job:scan_progress",
                             #     "job_id": job.id,
@@ -302,7 +316,7 @@ class OrchestratorService:
                             #     "scan_state": payload.get("state"),
                             #     "timestamp": datetime.now(timezone.utc).isoformat(),
                             # })
-                        latest = self._dms.get_latest_dataobject()
+                        latest = self._ionvision.get_latest_dataobject()
                         if latest.ok:
                             scan_result = latest.payload
                 else:
@@ -416,6 +430,7 @@ class OrchestratorService:
             self._storage.update_job_state(
                 job.id, job.state, job.last_point_processed, job.error
             )
+            self._prune_old_data()
 
             self._publish_event(
                 job.id,
@@ -429,6 +444,80 @@ class OrchestratorService:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             )
+
+    # ---- Data retention ----
+
+    def _prune_image_files(self) -> None:
+        """Delete the oldest ``capture_*.jpg`` files beyond *max_jobs*.
+
+        Captured JPEG files accumulate every time ``detect_path()`` is called
+        (i.e. on every ``POST /paths`` calibration request), regardless of
+        whether a job is running.  This helper is therefore called both after
+        each capture *and* at the end of every job so that the output
+        directory never grows without bound.
+
+        The ``max_jobs`` newest files (sorted by modification time) are kept;
+        everything older is removed.  A failed ``unlink`` is logged as a
+        warning and does not raise so that a transient OS error never causes
+        a calibration or job failure.
+
+        When ``max_jobs`` is 0 (unlimited) this is a no-op.
+        """
+        if self._max_jobs <= 0:
+            return
+        image_dir: Path = self._camera_vision.output_dir
+        if not image_dir.is_dir():
+            return
+        file_mtimes: list[tuple[float, Path]] = []
+        for f in image_dir.glob("capture_*.jpg"):
+            try:
+                file_mtimes.append((f.stat().st_mtime, f))
+            except OSError as exc:
+                logger.debug(
+                    "Retention policy: skipping image file %s during stat - %s",
+                    f,
+                    exc,
+                )
+        files = [f for _, f in sorted(file_mtimes, key=lambda item: item[0])]
+        excess = len(files) - self._max_jobs
+        if excess <= 0:
+            return
+        for f in files[:excess]:
+            try:
+                f.unlink()
+                logger.debug("Retention policy: deleted image file %s", f)
+            except OSError as exc:
+                logger.warning("Retention policy: could not delete %s — %s", f, exc)
+
+    def _prune_old_data(self) -> None:
+        """Remove excess jobs (DB) and captured image files (disk).
+
+        Called automatically at the end of every job execution.  When
+        ``max_jobs`` is 0 (the default) this is a no-op.
+
+        DB cleanup
+        ----------
+        The oldest jobs beyond the limit are hard-deleted.  Because the
+        ``waypoints``, ``measurements``, and ``job_images`` tables all
+        reference ``jobs`` with ``ON DELETE CASCADE``, a single
+        ``DELETE FROM jobs`` removes every related row automatically.
+
+        Disk cleanup
+        ------------
+        Delegates to :meth:`_prune_image_files`.
+        """
+        if self._max_jobs <= 0:
+            return
+
+        deleted_ids = self._storage.prune_jobs(self._max_jobs)
+        if deleted_ids:
+            logger.info(
+                "Retention policy: pruned %d old job(s) — %s",
+                len(deleted_ids),
+                deleted_ids,
+            )
+
+        self._prune_image_files()
 
     # ---- Misc ----
 
@@ -456,15 +545,15 @@ class OrchestratorService:
         except Exception as exc:
             components["camera"] = {"status": "error", "error": str(exc)}
 
-        # DMS (IonVision)
+        # IonVision
         try:
-            res = self._dms.ping()
-            components["dms"] = {
+            res = self._ionvision.ping()
+            components["ionvision"] = {
                 "status": "connected" if res.ok else "disconnected",
                 "error": res.error,
             }
         except Exception as exc:
-            components["dms"] = {"status": "error", "error": str(exc)}
+            components["ionvision"] = {"status": "error", "error": str(exc)}
 
         any_error = any(c["status"] == "error" for c in components.values())
         overall = "degraded" if any_error else "ok"
@@ -538,6 +627,121 @@ class OrchestratorService:
     def calibration_pixels_per_mm(self) -> float | None:
         return self._cal_pixels_per_mm
 
+    def sort_pixel_path_from_canvas_start(
+        self,
+        waypoints: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        """Order waypoints by direct distance to the calibrated canvas start."""
+        if self._cal_canvas_start is None:
+            raise RuntimeError(
+                "Not calibrated — call POST /path/detect first "
+                "(with robot arm at starting position)"
+            )
+
+        if not waypoints:
+            return []
+
+        start = self._cal_canvas_start
+        return sorted(
+            waypoints,
+            key=lambda p: math.hypot(p[0] - start[0], p[1] - start[1]),
+        )
+
+    def _normalize_corners_clockwise_start_nearest(
+        self,
+        corners: list[tuple[float, float]],
+        start: tuple[float, float],
+    ) -> list[tuple[float, float]]:
+        """Return corners ordered clockwise and rotated to start nearest to canvas start."""
+        if len(corners) < 2:
+            return list(corners)
+
+        cx = sum(x for x, _ in corners) / len(corners)
+        cy = sum(y for _, y in corners) / len(corners)
+
+        # Ascending angle yields clockwise order in image coordinates (Y grows down).
+        ordered = sorted(corners, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+
+        nearest_idx = min(
+            range(len(ordered)),
+            key=lambda i: math.hypot(
+                ordered[i][0] - start[0],
+                ordered[i][1] - start[1],
+            ),
+        )
+        return ordered[nearest_idx:] + ordered[:nearest_idx]
+
+    def populate_pixel_path_from_batteries(
+        self,
+        batteries: list[list[tuple[float, float]]],
+        measuring_points_per_cm: float,
+    ) -> list[dict[str, float | int | str]]:
+        """Generate perimeter measurement points for frontend-provided battery corners."""
+        if self._cal_canvas_start is None or self._cal_pixels_per_mm is None:
+            raise RuntimeError(
+                "Not calibrated — call POST /path/detect first "
+                "(with robot arm at starting position)"
+            )
+        if measuring_points_per_cm <= 0:
+            raise ValueError("measuring_points_per_cm must be > 0")
+        if measuring_points_per_cm > MAX_MEASURING_POINTS_PER_CM:
+            raise ValueError(
+                f"measuring_points_per_cm must be <= {MAX_MEASURING_POINTS_PER_CM}"
+            )
+
+        canvas_start = self._cal_canvas_start
+        step_px = (10.0 / measuring_points_per_cm) * self._cal_pixels_per_mm
+
+        ordered_batteries: list[tuple[float, list[tuple[float, float]]]] = []
+        for corners in batteries:
+            clean = [(float(x), float(y)) for x, y in corners]
+            if len(clean) < 2:
+                continue
+
+            normalized = self._normalize_corners_clockwise_start_nearest(
+                clean,
+                canvas_start,
+            )
+            nearest_dist = min(
+                math.hypot(px - canvas_start[0], py - canvas_start[1])
+                for px, py in normalized
+            )
+            ordered_batteries.append((nearest_dist, normalized))
+
+        ordered_batteries.sort(key=lambda item: item[0])
+
+        path: list[dict[str, float | int | str]] = []
+        for battery_nr, (_, corners) in enumerate(ordered_batteries):
+            corner_count = len(corners)
+            for corner_idx in range(corner_count):
+                x1, y1 = corners[corner_idx]
+                x2, y2 = corners[(corner_idx + 1) % corner_count]
+                edge_len = math.hypot(x2 - x1, y2 - y1)
+                if edge_len == 0:
+                    continue
+
+                sample_count = max(1, int(math.ceil(edge_len / step_px)))
+                if len(path) + sample_count > MAX_POPULATED_PATH_POINTS:
+                    raise ValueError(
+                        "Requested path is too dense; reduce measuringPointsPerCm or battery count"
+                    )
+                for measurement_idx in range(sample_count):
+                    t = measurement_idx / sample_count
+                    px = x1 + (x2 - x1) * t
+                    py = y1 + (y2 - y1) * t
+                    path.append(
+                        {
+                            "index": f"{battery_nr}-{corner_idx}-{measurement_idx}",
+                            "batteryNr": battery_nr,
+                            "cornerIndex": corner_idx,
+                            "measurementIndex": measurement_idx,
+                            "pixelX": px,
+                            "pixelY": py,
+                        }
+                    )
+
+        return path
+
     def pixel_to_robot(
         self, px: float, py: float, work_z: float, work_r: float
     ) -> Waypoint:
@@ -577,6 +781,10 @@ class OrchestratorService:
         capture = self._camera_vision.capture()
         if not capture.ok or not capture.image_path:
             return DetectionResults(ok=False, error=capture.error or "Capture failed")
+
+        # Prune old capture files immediately after writing a new one so the
+        # output directory never grows without bound even when no jobs are run.
+        self._prune_image_files()
 
         # Replace any previous calibration with values derived from this capture.
         self._cal_robot_start = None
@@ -630,6 +838,8 @@ class OrchestratorService:
             messages.append(msg)
             logger.warning("Calibration: no ArUco markers — canvas start not set")
 
+        # Keep detector output order unchanged so frontend receives initial values as-is.
+
         result.error = "; ".join(dict.fromkeys(msg for msg in messages if msg)) or None
 
         return result
@@ -642,37 +852,31 @@ class OrchestratorService:
         return self._storage.latest_result()
 
     # WEBSOCKET SERVICES
-    # Handle real-time events from the DMS (Device Management System) via WebSocket
-
-    async def initialize_dms(self) -> None:
+    async def initialize_ionvision(self) -> None:
         """Initialize DMS WebSocket connection and register event handlers.
 
         Establishes the WebSocket connection to the DMS and registers handlers
         for scan lifecycle events. Must be called before any scan operations
         to enable real-time event monitoring.
         """
-        # Connect to the DMS WebSocket API
-        await self._dms.initialize_websocket()
+        await self._ionvision.initialize_websocket()
+        self._ionvision.on_event(
+            "scan.resultsProcessed", self._handle_scan_results_processed
+        )
+        self._ionvision.on_event("scan.stopped", self._handle_scan_stopped)
 
-        # Register handlers for scan completion and stop events
-        self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
-        self._dms.on_event("scan.stopped", self._handle_scan_stopped)
-
-    async def _close_dms(self) -> None:
+    async def _close_ionvision(self) -> None:
         """Clean up DMS WebSocket connection and unregister event handlers.
 
         Gracefully closes the WebSocket connection and removes all registered
         event handlers. Should be called during orchestrator shutdown to
         prevent resource leaks.
         """
-        # Disconnect from WebSocket
-        await self._dms.disconnect_websocket()
-
-        # Unregister event handlers
-        self._dms.off_event(
+        await self._ionvision.disconnect_websocket()
+        self._ionvision.off_event(
             "scan.resultsProcessed", self._handle_scan_results_processed
         )
-        self._dms.off_event("scan.stopped", self._handle_scan_stopped)
+        self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         """Handle scan results processing completion event.
