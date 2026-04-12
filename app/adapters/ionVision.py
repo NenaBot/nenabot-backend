@@ -250,6 +250,9 @@ class IVAdapter:
                 ``None`` if the payload structure is invalid or fewer than 3
                 usable intensity values are available.
         """
+        if not isinstance(data, dict):
+            return False
+
         # Get ucv list
         body = data.get("body", {})
         if not isinstance(body, dict):
