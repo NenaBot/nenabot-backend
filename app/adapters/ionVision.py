@@ -235,6 +235,49 @@ class IVAdapter:
         To access other parameter related functionality, use the /parameter/* endpoints.
         """
         return self._request("GET", "currentParameter")
+    
+    def evaluate_scan_data(self, data:dict) -> float:
+        # Get ucv list
+        body = data.get("body", {})
+        if not isinstance(body, dict):
+            return False
+        measurementData = body.get("measurementData", {})
+        if  not isinstance(measurementData, dict):
+            return False
+        
+        ucv = measurementData.get("ucv", [])
+        intensityTop = measurementData.get("intensityTop", [])
+        if  not isinstance(ucv, list) or not isinstance(intensityTop, list):
+            return False
+
+        
+        # Get indexes of valid ucv values (numbers between -1 and 1)
+        valid_indexes = [
+            i
+            for i, value in enumerate(ucv)
+            if isinstance(value, (int, float)) and -1.0 <= float(value) <= 1.0
+        ]
+
+        # map the ucv values to their corresponding intensity values and take only
+        # the 3 highest values
+        valid_intensity_values = sorted(
+            (
+                float(intensityTop[i])
+                for i in valid_indexes
+                if i < len(intensityTop)
+                and isinstance(intensityTop[i], (int, float))
+            ),
+            reverse=True,
+        )[:3]
+
+        if len(valid_intensity_values) != 3:
+            return False
+
+        return sum(valid_intensity_values) / len(valid_intensity_values)
+
+        
+
+
 
     # WEBSCOKET EVENT HANDLING #
     async def initialize_websocket(self) -> None:
