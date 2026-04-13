@@ -333,20 +333,22 @@ def test_ucv_valid_range_bounds_are_ordered() -> None:
 def test_evaluate_scan_data_returns_average_of_top_three_valid_intensities(
     iv_adapter: IVAdapter,
 ) -> None:
-    """Average is computed from the 3 highest intensities mapped by valid UCV indexes."""
+    """Average is computed from top 3 intensities mapped by configured UCV bounds."""
+    lower, upper = IVAdapter.UCV_VALID_RANGE
+    midpoint = (lower + upper) / 2
     data = {
         "body": {
             "measurementData": {
-                "ucv": [0.0, -0.2, 2.3, 0.8, -1.0, "bad"],
-                "intensityTop": [10.0, 3.0, 100.0, 9.0, 12.0, 999.0],
+                "ucv": [lower, midpoint, upper, upper + 0.1, "bad"],
+                "intensityTop": [10.0, 3.0, 9.0, 100.0, 999.0],
             }
         }
     }
 
     result = iv_adapter.evaluate_scan_data(data)
 
-    # Valid UCV indexes are 0,1,3,4 => intensities 10,3,9,12; top 3 are 12,10,9.
-    assert result == pytest.approx((12.0 + 10.0 + 9.0) / 3.0)
+    # Valid UCV indexes are 0,1,2; top 3 mapped intensities are 10, 9, 3.
+    assert result == pytest.approx((10.0 + 9.0 + 3.0) / 3.0)
 
 
 def test_evaluate_scan_data_returns_none_when_less_than_three_values(
