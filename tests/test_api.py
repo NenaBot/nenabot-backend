@@ -232,6 +232,23 @@ def test_real_job_creation_allows_wide_reach_waypoints(calibrated_bundle) -> Non
     assert response.status_code == 201
 
 
+def test_job_creation_rejects_empty_path_with_422(calibrated_bundle) -> None:
+    client = calibrated_bundle["client"]
+
+    response = client.post(
+        "/api/job",
+        json={
+            "path": [],
+            "dryRun": True,
+            "workZ": 0,
+            "workR": 0,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "path is empty" in response.json()["detail"].lower()
+
+
 def test_calibration_flow_endpoint_writes_mapping_and_updates_status(
     uncalibrated_bundle,
 ) -> None:
