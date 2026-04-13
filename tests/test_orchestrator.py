@@ -340,7 +340,9 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         service._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
-    ), patch("time.sleep"):
+    ), patch(
+        "time.sleep"
+    ):
         service.run_job(job.id)
         assert service._job_thread is not None
         service._job_thread.join(timeout=10)
