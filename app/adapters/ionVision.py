@@ -27,6 +27,8 @@ class IVResult:
 
 # Adapter for the IonVision HTTP API
 class IVAdapter:
+    UCV_VALID_RANGE = (0, 2)
+
     def __init__(
         self,
         base_url: str,
@@ -272,7 +274,7 @@ class IVAdapter:
             for i, value in enumerate(ucv)
             if not isinstance(value, bool)
             and isinstance(value, (int, float))
-            and -1.0 <= float(value) <= 1.0
+            and self.UCV_VALID_RANGE[0] <= float(value) <= self.UCV_VALID_RANGE[1]
         ]
 
         # map the ucv values to their corresponding intensity values and take only
