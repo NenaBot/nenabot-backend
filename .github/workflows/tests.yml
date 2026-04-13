@@ -28,6 +28,17 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgomp1 \
+            libqt5serialport5 \
+            libqt5core5a \
+            libqt5network5 \
+            libv4l-dev \
+            v4l-utils
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
