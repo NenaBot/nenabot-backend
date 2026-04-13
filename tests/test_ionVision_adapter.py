@@ -323,6 +323,13 @@ def test_get_results_rejects_page_numbers_below_one(
     iv_adapter._request.assert_not_called()
 
 
+def test_ucv_valid_range_bounds_are_ordered() -> None:
+    """Guardrail: lower UCV bound should be strictly lower than upper bound."""
+    lower, upper = IVAdapter.UCV_VALID_RANGE
+
+    assert lower < upper
+
+
 def test_evaluate_scan_data_returns_average_of_top_three_valid_intensities(
     iv_adapter: IVAdapter,
 ) -> None:
