@@ -386,6 +386,64 @@ class IVAdapter:
         """
         return self._request("GET", "currentParameter")
 
+    def evaluate_scan_data(self, data: dict) -> Optional[float]:
+        """Evaluate scan payload and return an average intensity score.
+
+        The function expects a websocket-style message envelope containing
+        ``body.measurementData.ucv`` and ``body.measurementData.intensityTop``.
+        It uses only UCV entries in the inclusive range [-1.0, 1.0], maps those
+        indexes to ``intensityTop``, keeps the 3 highest numeric intensity values,
+        and returns their arithmetic mean.
+
+        Returns:
+            Optional[float]: Average of the top 3 mapped intensity values, or
+                ``None`` if the payload structure is invalid or fewer than 3
+                usable intensity values are available.
+        """
+        if not isinstance(data, dict):
+            return None
+
+        # Get ucv list
+        body = data.get("body", {})
+        if not isinstance(body, dict):
+            return None
+        measurementData = body.get("measurementData", {})
+        if not isinstance(measurementData, dict):
+            return None
+
+        ucv = measurementData.get("ucv", [])
+        intensityTop = measurementData.get("intensityTop", [])
+        if not isinstance(ucv, list) or not isinstance(intensityTop, list):
+            return None
+
+        # Get indexes of valid ucv values (numbers between -1 and 1)
+        valid_indexes = [
+            i
+            for i, value in enumerate(ucv)
+            if not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and -1.0 <= float(value) <= 1.0
+        ]
+
+        # map the ucv values to their corresponding intensity values and take only
+        # the 3 highest values
+        valid_intensity_values = sorted(
+            (
+                float(intensityTop[i])
+                for i in valid_indexes
+                if i < len(intensityTop)
+                and not isinstance(intensityTop[i], bool)
+                and isinstance(intensityTop[i], (int, float))
+            ),
+            reverse=True,
+        )[:3]
+
+        if len(valid_intensity_values) != 3:
+            return None
+
+        return sum(valid_intensity_values) / len(valid_intensity_values)
+
+    # WEBSCOKET EVENT HANDLING #
     async def initialize_websocket(self) -> None:
         """Initialize WebSocket connection for event streaming.
 
