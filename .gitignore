@@ -6,3 +6,4 @@ __pycache__
 /data/calibration/robot_mapping.json
 .DS_Store
 *.egg-info/
+.env
