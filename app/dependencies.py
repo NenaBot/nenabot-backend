@@ -43,21 +43,26 @@ def _derive_ws_base_url(base_url: str) -> str:
 
 def create_orchestrator(
     db_path: str = "data/nenabot.db",
-    dms_base_url: str | None = None,
-    dms_ws_base_url: str | None = None,
+    ionvision_base_url: str | None = None,
+    ionvision_ws_base_url: str | None = None,
     intrinsics_path: str | None = None,
     mapping_path: str | None = None,
+    *,
+    dms_base_url: str | None = None,
+    dms_ws_base_url: str | None = None,
 ) -> OrchestratorService:
     """Create an OrchestratorService with default dependencies."""
-    dms_base_url = (
-        dms_base_url
+    ionvision_base_url = (
+        ionvision_base_url
+        or dms_base_url
         or _first_env("IONVISION_BASE_URL", "NENABOT_DMS_BASE_URL")
         or "http://localhost:8080"
     ).rstrip("/")
-    dms_ws_base_url = (
-        dms_ws_base_url
+    ionvision_ws_base_url = (
+        ionvision_ws_base_url
+        or dms_ws_base_url
         or _first_env("IONVISION_WS_BASE_URL", "NENABOT_DMS_WS_BASE_URL")
-        or _derive_ws_base_url(dms_base_url)
+        or _derive_ws_base_url(ionvision_base_url)
     ).rstrip("/")
     intrinsics_path = (
         intrinsics_path
@@ -80,6 +85,12 @@ def create_orchestrator(
     except ValueError:
         logger.warning(
             "NENABOT_MAX_JOBS='%s' is not a valid integer — retention disabled",
+            max_jobs_raw,
+        )
+        max_jobs = 0
+    if max_jobs < 0:
+        logger.warning(
+            "NENABOT_MAX_JOBS='%s' must be non-negative — retention disabled",
             max_jobs_raw,
         )
         max_jobs = 0
@@ -135,7 +146,10 @@ def create_orchestrator(
     return OrchestratorService(
         camera_vision=CameraVisionAdapter(intrinsics_path=intrinsics_path),
         robot=robot,
-        dms=IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url),
+        ionvision=IVAdapter(
+            base_url=ionvision_base_url,
+            ws_base_url=ionvision_ws_base_url,
+        ),
         storage=StorageAdapter(db=db),
         mapping_path=mapping_path,
         max_jobs=max_jobs,

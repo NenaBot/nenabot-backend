@@ -127,6 +127,14 @@ class CameraVisionAdapter:
         self._checkerboard_status_cache: dict[str, bool | str | None] | None = None
         self._checkerboard_status_cached_at = 0.0
 
+        # Streaming state
+        self._camera_streaming = False
+        self._detection_streaming = False
+
+    @property
+    def output_dir(self) -> Path:
+        return self._output_dir
+
     # ---- intrinsics ----
 
     def _load_intrinsics(self) -> None:
@@ -313,6 +321,8 @@ class CameraVisionAdapter:
         if self._capture_error:
             return CaptureResult(False, error=self._capture_error)
         return CaptureResult(True)
+
+    # ---- health check ----
 
     def ping(self) -> CaptureResult:
         try:

@@ -47,7 +47,7 @@ def health(svc: OrchestratorService = Depends(get_orchestrator)) -> Health:
         uptime_s=data["uptime_s"],
         robot=ComponentHealth(**data["robot"]),
         camera=ComponentHealth(**data["camera"]),
-        dms=ComponentHealth(**data["dms"]),
+        ionvision=ComponentHealth(**data["ionvision"]),
     )
 
 

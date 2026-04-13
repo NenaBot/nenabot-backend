@@ -50,7 +50,7 @@ class OrchestratorService:
         self,
         camera_vision: CameraVisionAdapter,
         robot: RobotAdapter,
-        dms: IVAdapter,
+        ionvision: IVAdapter,
         storage: StorageAdapter,
         mapping_path: str = "data/calibration/robot_mapping.json",
         max_jobs: int = 0,
@@ -59,7 +59,7 @@ class OrchestratorService:
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
-        self._dms = dms
+        self._ionvision = ionvision
         self._storage = storage
         self._mapping_path = Path(mapping_path)
         self._started_at = time.monotonic()
@@ -263,17 +263,17 @@ class OrchestratorService:
                         )
 
                     time.sleep(1.5)
-                    scan_start = self._dms.start_new_scan()
+                    scan_start = self._ionvision.start_new_scan()
                     if scan_start.ok:
                         for _ in range(120):
                             time.sleep(1.5)
-                            status = self._dms.get_current_scan()
+                            status = self._ionvision.get_current_scan()
                             if not status.ok:
                                 break
                             payload = status.payload or {}
                             if payload.get("state") == "finished":
                                 break
-                        latest = self._dms.get_latest_dataobject()
+                        latest = self._ionvision.get_latest_dataobject()
                         if latest.ok:
                             scan_result = latest.payload
                 else:
@@ -431,13 +431,13 @@ class OrchestratorService:
             components["camera"] = {"status": "error", "error": str(exc)}
 
         try:
-            result = self._dms.ping()
-            components["dms"] = {
-                "status": "connected" if result.ok else "disconnected",
-                "error": result.error,
+            res = self._ionvision.ping()
+            components["ionvision"] = {
+                "status": "connected" if res.ok else "disconnected",
+                "error": res.error,
             }
         except Exception as exc:
-            components["dms"] = {"status": "error", "error": str(exc)}
+            components["ionvision"] = {"status": "error", "error": str(exc)}
 
         overall = (
             "degraded"
@@ -1163,17 +1163,19 @@ class OrchestratorService:
 
     # ---- WEBSOCKET SERVICES ----
 
-    async def initialize_dms(self) -> None:
-        await self._dms.initialize_websocket()
-        self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
-        self._dms.on_event("scan.stopped", self._handle_scan_stopped)
-
-    async def _close_dms(self) -> None:
-        await self._dms.disconnect_websocket()
-        self._dms.off_event(
+    async def initialize_ionvision(self) -> None:
+        await self._ionvision.initialize_websocket()
+        self._ionvision.on_event(
             "scan.resultsProcessed", self._handle_scan_results_processed
         )
-        self._dms.off_event("scan.stopped", self._handle_scan_stopped)
+        self._ionvision.on_event("scan.stopped", self._handle_scan_stopped)
+
+    async def _close_ionvision(self) -> None:
+        await self._ionvision.disconnect_websocket()
+        self._ionvision.off_event(
+            "scan.resultsProcessed", self._handle_scan_results_processed
+        )
+        self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         logger.info("Scan results have been processed: %s", data.get("body"))
