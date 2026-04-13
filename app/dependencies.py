@@ -165,23 +165,27 @@ def _ensure_mock_calibration_files(intrinsics_path: str, mapping_path: str) -> N
 
 def create_orchestrator(
     db_path: str = "data/nenabot.db",
-    dms_base_url: str | None = None,
-    dms_ws_base_url: str | None = None,
+    ionvision_base_url: str | None = None,
+    ionvision_ws_base_url: str | None = None,
     intrinsics_path: str | None = None,
     mapping_path: str | None = None,
+    *,
+    dms_base_url: str | None = None,
+    dms_ws_base_url: str | None = None,
 ) -> OrchestratorService:
     """Create an OrchestratorService with default dependencies."""
     mock_mode_enabled = _env_flag("NENABOT_MOCK_MODE", default=False)
-
-    dms_base_url = (
-        dms_base_url
+    ionvision_base_url = (
+        ionvision_base_url
+        or dms_base_url
         or _first_env("IONVISION_BASE_URL", "NENABOT_DMS_BASE_URL")
         or "http://localhost:8080"
     ).rstrip("/")
-    dms_ws_base_url = (
-        dms_ws_base_url
+    ionvision_ws_base_url = (
+        ionvision_ws_base_url
+        or dms_ws_base_url
         or _first_env("IONVISION_WS_BASE_URL", "NENABOT_DMS_WS_BASE_URL")
-        or _derive_ws_base_url(dms_base_url)
+        or _derive_ws_base_url(ionvision_base_url)
     ).rstrip("/")
     intrinsics_path = (
         intrinsics_path
@@ -245,14 +249,20 @@ def create_orchestrator(
         )
         camera = MockCameraVisionAdapter(intrinsics_path=intrinsics_path)
         robot = MockRobotAdapter()
-        dms = MockIVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url)
+        ionvision = MockIVAdapter(
+            base_url=ionvision_base_url,
+            ws_base_url=ionvision_ws_base_url,
+        )
         storage = InMemoryStorageAdapter()
     else:
         db = Database(db_path=db_path)
         db.init_db()
         camera = CameraVisionAdapter(intrinsics_path=intrinsics_path)
         robot = RobotAdapter()
-        dms = IVAdapter(base_url=dms_base_url, ws_base_url=dms_ws_base_url)
+        ionvision = IVAdapter(
+            base_url=ionvision_base_url,
+            ws_base_url=ionvision_ws_base_url,
+        )
         storage = StorageAdapter(db=db)
 
     result = robot.connect_first_available()
@@ -274,7 +284,7 @@ def create_orchestrator(
     return OrchestratorService(
         camera_vision=camera,
         robot=robot,
-        dms=dms,
+        ionvision=ionvision,
         storage=storage,
         mapping_path=mapping_path,
         max_jobs=max_jobs,

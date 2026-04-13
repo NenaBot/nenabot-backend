@@ -206,6 +206,10 @@ class MockCameraVisionAdapter:
         return self._checkerboard_square_mm
 
     @property
+    def output_dir(self) -> Path:
+        return self._output_dir
+
+    @property
     def camera_matrix(self) -> np.ndarray:
         return self._camera_matrix
 

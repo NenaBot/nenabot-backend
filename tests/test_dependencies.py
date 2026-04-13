@@ -67,36 +67,36 @@ def test_create_orchestrator_uses_mock_adapters_when_mock_mode_enabled(
 
     assert isinstance(orchestrator._camera_vision, MockCameraVisionAdapter)
     assert isinstance(orchestrator._robot, MockRobotAdapter)
-    assert isinstance(orchestrator._dms, MockIVAdapter)
+    assert isinstance(orchestrator._ionvision, MockIVAdapter)
     assert isinstance(orchestrator._storage, InMemoryStorageAdapter)
     database_ctor.assert_not_called()
 
     health = orchestrator.health()
     assert health["robot"]["status"] == "connected"
     assert health["camera"]["status"] == "connected"
-    assert health["dms"]["status"] == "connected"
+    assert health["ionvision"]["status"] == "connected"
     assert orchestrator.is_calibrated is True
 
-    dms = orchestrator._dms
-    ping_payload = dms.ping().payload or {}
+    ionvision = orchestrator._ionvision
+    ping_payload = ionvision.ping().payload or {}
     assert "parameter" in ping_payload
     assert "id" in ping_payload["parameter"]
     assert "name" in ping_payload["parameter"]
 
-    start_payload = dms.start_new_scan().payload or {}
+    start_payload = ionvision.start_new_scan().payload or {}
     assert "message" in start_payload
 
-    current_scan_payload = dms.get_current_scan().payload or {}
+    current_scan_payload = ionvision.get_current_scan().payload or {}
     assert "progress" in current_scan_payload
     assert "information" in current_scan_payload
     assert "state" in current_scan_payload
 
     # Mock scan should quickly move to finished and produce latest dataobject payload.
     time.sleep(1.1)
-    finished_scan_payload = dms.get_current_scan().payload or {}
+    finished_scan_payload = ionvision.get_current_scan().payload or {}
     assert finished_scan_payload.get("state") == "finished"
 
-    latest_payload = dms.get_latest_dataobject().payload or {}
+    latest_payload = ionvision.get_latest_dataobject().payload or {}
     assert "Id" in latest_payload
     assert "FinishTime" in latest_payload
     assert "results" in latest_payload

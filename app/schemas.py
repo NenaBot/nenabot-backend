@@ -59,7 +59,7 @@ class Health(BaseModel):
     uptime_s: float = Field(0.0, alias="uptimeSeconds")
     robot: ComponentHealth
     camera: ComponentHealth
-    dms: ComponentHealth
+    ionvision: ComponentHealth
 
     model_config = {"populate_by_name": True}
 

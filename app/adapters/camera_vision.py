@@ -208,6 +208,10 @@ class CameraVisionAdapter:
                 setattr(cfg, key, value)
         return self._sanitize_detection_calibration(cfg)
 
+    @property
+    def output_dir(self) -> Path:
+        return self._output_dir
+
     # ---- intrinsics ----
 
     def _load_intrinsics(self) -> None:
@@ -394,6 +398,8 @@ class CameraVisionAdapter:
         if self._capture_error:
             return CaptureResult(False, error=self._capture_error)
         return CaptureResult(True)
+
+    # ---- health check ----
 
     def ping(self) -> CaptureResult:
         try:
