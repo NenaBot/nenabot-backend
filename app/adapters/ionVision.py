@@ -243,9 +243,10 @@ class IVAdapter:
 
         The function expects a websocket-style message envelope containing
         ``body.measurementData.ucv`` and ``body.measurementData.intensityTop``.
-        It uses only UCV entries in the inclusive range [-1.0, 1.0], maps those
-        indexes to ``intensityTop``, keeps the 3 highest numeric intensity values,
-        and returns their arithmetic mean.
+        It uses only UCV entries in the inclusive range defined by
+        ``UCV_VALID_RANGE``, maps those indexes to
+        ``intensityTop``, keeps the 3 highest numeric intensity values, and
+        returns their arithmetic mean.
 
         Returns:
             Optional[float]: Average of the top 3 mapped intensity values, or
@@ -268,7 +269,7 @@ class IVAdapter:
         if not isinstance(ucv, list) or not isinstance(intensityTop, list):
             return None
 
-        # Get indexes of valid ucv values (numbers between -1 and 1)
+        # Get indexes of valid ucv values in the configured valid range.
         valid_indexes = [
             i
             for i, value in enumerate(ucv)
