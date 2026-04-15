@@ -45,7 +45,7 @@ Evaluate IonVision websocket payload data and compute a scan score.
 Evaluation steps:
 
 1. Read `body.measurementData.ucv` and `body.measurementData.intensityTop`.
-2. Keep indexes where UCV is numeric and in the inclusive range [-1.0, 1.0].
+2. Keep indexes where UCV is numeric and inside `IVAdapter.UCV_VALID_RANGE` (inclusive).
 3. Map those indexes to numeric intensity values.
 4. Sort descending and keep only the 3 highest values.
 5. Return the arithmetic mean of those 3 values.
@@ -53,7 +53,7 @@ Evaluation steps:
 Return behavior:
 
 - `float`: Average of the top 3 intensity values.
-- `False`: Invalid payload shape or fewer than 3 valid values.
+- `None`: Invalid payload shape or fewer than 3 valid values.
 
 ## Core WebSocket Methods
 
