@@ -42,8 +42,26 @@ async def lifespan(app: FastAPI):
     logging.getLogger("app").setLevel(logging.INFO)
     # Run blocking startup (robot connect + optional homing) in a thread.
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, get_orchestrator)
-    yield
+    orchestrator = await loop.run_in_executor(None, get_orchestrator)
+
+    try:
+        await orchestrator.initialize_ionvision()
+    except Exception:
+        logging.getLogger("app").warning(
+            "IonVision websocket initialization failed; continuing without event stream",
+            exc_info=True,
+        )
+
+    try:
+        yield
+    finally:
+        try:
+            await orchestrator.close_ionvision()
+        except Exception:
+            logging.getLogger("app").warning(
+                "IonVision websocket shutdown failed",
+                exc_info=True,
+            )
 
 
 def create_app() -> FastAPI:

@@ -88,6 +88,9 @@ class OrchestratorService:
 
         self._job_subscribers: dict[str, list[queue.Queue]] = {}
         self._subscribers_lock = threading.Lock()
+        self._ionvision_ws_initialized = False
+        self._scan_results_processed_event = threading.Event()
+        self._scan_stopped_event = threading.Event()
 
     # ---- Job CRUD (DB-backed) ----
 
@@ -263,8 +266,11 @@ class OrchestratorService:
                         )
 
                     time.sleep(1.5)
+                    self._scan_results_processed_event.clear()
+                    self._scan_stopped_event.clear()
                     scan_start = self._ionvision.start_new_scan()
                     if scan_start.ok:
+                        scan_finished = False
                         for _ in range(120):
                             time.sleep(1.5)
                             status = self._ionvision.get_current_scan()
@@ -272,10 +278,23 @@ class OrchestratorService:
                                 break
                             payload = status.payload or {}
                             if payload.get("state") == "finished":
+                                scan_finished = True
                                 break
-                        latest = self._ionvision.get_latest_dataobject()
-                        if latest.ok:
-                            scan_result = latest.payload
+
+                        if scan_finished:
+                            self._wait_for_scan_results_processed(timeout_s=45.0)
+                            scan_result = self._poll_latest_dataobject(timeout_s=30.0)
+                        else:
+                            logger.warning(
+                                "IonVision scan did not reach finished state for waypoint %d",
+                                index + 1,
+                            )
+                    else:
+                        logger.warning(
+                            "IonVision scan did not start for waypoint %d: %s",
+                            index + 1,
+                            scan_start.error,
+                        )
                 else:
                     time.sleep(0.3)
 
@@ -406,6 +425,38 @@ class OrchestratorService:
         )
         if not arrival.ok:
             logger.warning("Return-to-start validation failed: %s", arrival.error)
+
+    def _wait_for_scan_results_processed(self, timeout_s: float) -> bool:
+        if not self._ionvision_ws_initialized:
+            return False
+
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._scan_stopped_event.is_set():
+                logger.warning(
+                    "IonVision reported scan.stopped before results processing"
+                )
+                return False
+            if self._scan_results_processed_event.wait(timeout=0.25):
+                return True
+
+        logger.warning(
+            "Timed out waiting for IonVision scan.resultsProcessed after scan.finished"
+        )
+        return False
+
+    def _poll_latest_dataobject(self, timeout_s: float) -> dict | None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            latest = self._ionvision.get_latest_dataobject()
+            if latest.ok:
+                return latest.payload
+            if self._stop_requested:
+                return None
+            time.sleep(0.5)
+
+        logger.warning("Timed out waiting for IonVision latest scan data object")
+        return None
 
     # ---- Misc ----
 
@@ -1169,19 +1220,27 @@ class OrchestratorService:
             "scan.resultsProcessed", self._handle_scan_results_processed
         )
         self._ionvision.on_event("scan.stopped", self._handle_scan_stopped)
+        self._ionvision_ws_initialized = True
 
     async def _close_ionvision(self) -> None:
-        await self._ionvision.disconnect_websocket()
-        self._ionvision.off_event(
-            "scan.resultsProcessed", self._handle_scan_results_processed
-        )
-        self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
+        if self._ionvision_ws_initialized:
+            await self._ionvision.disconnect_websocket()
+            self._ionvision.off_event(
+                "scan.resultsProcessed", self._handle_scan_results_processed
+            )
+            self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
+            self._ionvision_ws_initialized = False
+
+    async def close_ionvision(self) -> None:
+        await self._close_ionvision()
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         logger.info("Scan results have been processed: %s", data.get("body"))
+        self._scan_results_processed_event.set()
 
     async def _handle_scan_stopped(self, data: dict) -> None:
         logger.info("Scan has been stopped: %s", data.get("body"))
+        self._scan_stopped_event.set()
 
     async def _handle_error(self, data: dict) -> None:
         logger.warning("An error occurred: %s", data.get("code"))
