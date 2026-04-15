@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,6 +12,9 @@ from fastapi.openapi.utils import get_openapi
 from app.api.routes import router
 from app.dependencies import get_orchestrator
 from app.schemas import JobEvent
+
+logger = logging.getLogger("app")
+request_logger = logging.getLogger("app.request")
 
 
 def _custom_openapi(app: FastAPI) -> dict:
@@ -66,6 +70,38 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Olfactomics Orchestrator", version="0.1.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def log_request_timing(request, call_next):
+        start = time.perf_counter()
+        method = request.method
+        path = request.url.path
+        query = request.url.query
+        full_path = f"{path}?{query}" if query else path
+
+        request_logger.info("REQ start method=%s path=%s", method, full_path)
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_ms = (time.perf_counter() - start) * 1000
+            request_logger.exception(
+                "REQ error method=%s path=%s duration_ms=%.2f",
+                method,
+                full_path,
+                duration_ms,
+            )
+            raise
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        request_logger.info(
+            "REQ done method=%s path=%s status=%d duration_ms=%.2f",
+            method,
+            full_path,
+            response.status_code,
+            duration_ms,
+        )
+        return response
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

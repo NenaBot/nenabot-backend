@@ -112,10 +112,23 @@ class OrchestratorService:
 
     def _publish_event(self, job_id: str, event: dict) -> None:
         with self._subscribers_lock:
-            for subscriber in self._job_subscribers.get(job_id, []):
+            subscribers = self._job_subscribers.get(job_id, [])
+            logger.info(
+                "SSE publish job_id=%s type=%s state=%s subscribers=%d",
+                job_id,
+                event.get("type"),
+                event.get("state"),
+                len(subscribers),
+            )
+            for subscriber in subscribers:
                 try:
                     subscriber.put_nowait(event)
                 except queue.Full:
+                    logger.warning(
+                        "SSE subscriber queue full job_id=%s type=%s",
+                        job_id,
+                        event.get("type"),
+                    )
                     pass
 
     def create_job(
@@ -1115,6 +1128,13 @@ class OrchestratorService:
                 f"measuring_points_per_cm must be <= {MAX_MEASURING_POINTS_PER_CM}"
             )
 
+        logger.info(
+            "Populate start batteries=%d measuring_points_per_cm=%.3f calibrated=%s",
+            len(batteries),
+            measuring_points_per_cm,
+            self.is_calibrated,
+        )
+
         step_mm = 10.0 / measuring_points_per_cm
         ordered_batteries: list[tuple[float, list[tuple[float, float]]]] = []
 
@@ -1162,6 +1182,14 @@ class OrchestratorService:
                             "pixelY": pixel_y,
                         }
                     )
+
+        logger.info(
+            "Populate success batteries_in=%d batteries_used=%d points_out=%d step_mm=%.3f",
+            len(batteries),
+            len(ordered_batteries),
+            len(path),
+            step_mm,
+        )
 
         return path
 
