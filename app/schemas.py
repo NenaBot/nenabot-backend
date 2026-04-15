@@ -88,6 +88,8 @@ class Profile(BaseModel):
     description: str | None = None
     work_z: float = Field(0.0, alias="workZ")
     measuring_points_per_cm: float = Field(0.5, alias="measuringPointsPerCm", gt=0.0)
+    measurement_threshold: float = Field(120, alias="threshold", ge=0, le=255)
+
 
 
 class CornerSchema(BaseModel):

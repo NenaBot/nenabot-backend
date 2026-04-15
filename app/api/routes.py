@@ -7,7 +7,7 @@ import logging
 import queue
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import get_orchestrator
@@ -261,13 +261,23 @@ def calibration(
     return CalibrationFlowResponse(**svc.calibration_action(payload.action))
 
 
-async def _job_events_stream(job_id: str, svc: OrchestratorService):
+async def _job_events_stream(
+    job_id: str,
+    svc: OrchestratorService,
+    *,
+    client: str | None = None,
+):
     job = svc.get_job(job_id)
     if not job:
-        logger.warning("SSE stream requested for missing job job_id=%s", job_id)
+        logger.warning(
+            "SSE stream requested for missing job job_id=%s client=%s",
+            job_id,
+            client,
+        )
         return
 
     subscriber = svc.subscribe(job_id)
+    logger.info("SSE subscribed job_id=%s client=%s", job_id, client)
     try:
         snapshot = {
             "type": "job:snapshot",
@@ -285,9 +295,23 @@ async def _job_events_stream(job_id: str, svc: OrchestratorService):
             job.last_point_processed,
             len(job.path),
         )
-        yield _format_sse("job:snapshot", snapshot)
+        snapshot_frame = _format_sse("job:snapshot", snapshot)
+        logger.info(
+            "SSE frame bytes=%d event=%s job_id=%s client=%s",
+            len(snapshot_frame),
+            "job:snapshot",
+            job_id,
+            client,
+        )
+        yield snapshot_frame
 
         if job.state in ("completed", "failed", "stopped"):
+            logger.info(
+                "SSE stream closing immediately job_id=%s state=%s client=%s",
+                job_id,
+                job.state,
+                client,
+            )
             return
 
         while True:
@@ -320,17 +344,26 @@ async def _job_events_stream(job_id: str, svc: OrchestratorService):
                 payload.get("lastPointProcessed"),
                 payload.get("totalPoints"),
             )
-            yield _format_sse(event_type, payload)
+            event_frame = _format_sse(event_type, payload)
+            logger.info(
+                "SSE frame bytes=%d event=%s job_id=%s client=%s",
+                len(event_frame),
+                event_type,
+                payload.get("jobId"),
+                client,
+            )
+            yield event_frame
             if event.get("state") in ("completed", "failed", "stopped"):
                 logger.info(
-                    "SSE stream closing on terminal state job_id=%s state=%s",
+                    "SSE stream closing on terminal state job_id=%s state=%s client=%s",
                     job_id,
                     event.get("state"),
+                    client,
                 )
                 return
     finally:
         svc.unsubscribe(job_id, subscriber)
-        logger.info("SSE unsubscribed job_id=%s", job_id)
+        logger.info("SSE unsubscribed job_id=%s client=%s", job_id, client)
 
 
 @router.get(
@@ -350,12 +383,20 @@ async def _job_events_stream(job_id: str, svc: OrchestratorService):
 )
 async def job_events(
     job_id: str,
+    request: Request,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
+    client_host = request.client.host if request.client else "unknown"
+    client_port = request.client.port if request.client else "unknown"
+    client = f"{client_host}:{client_port}"
+
     if not svc.get_job(job_id):
+        logger.warning("SSE connect rejected missing job job_id=%s client=%s", job_id, client)
         raise HTTPException(status_code=404, detail="Job not found")
+
+    logger.info("SSE connect accepted job_id=%s client=%s", job_id, client)
     return StreamingResponse(
-        _job_events_stream(job_id, svc),
+        _job_events_stream(job_id, svc, client=client),
         media_type="text/event-stream",
     )
 

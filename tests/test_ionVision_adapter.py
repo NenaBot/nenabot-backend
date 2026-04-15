@@ -374,6 +374,41 @@ def test_evaluate_scan_data_returns_none_when_less_than_three_values(
     assert result.error is not None
 
 
+def test_evaluate_scan_data_supports_capitalized_dataobject_keys(
+    iv_adapter: IVAdapter,
+) -> None:
+    """Evaluation accepts IonVision dataobject shape (MeasurementData/Ucv/IntensityTop)."""
+    data = {
+        "MeasurementData": {
+            "Ucv": [-1.0, 0.5, 1.0, 2.0, 3.0],
+            "IntensityTop": [100.0, 2.0, 5.0, 4.0, 1000.0],
+        }
+    }
+
+    result = iv_adapter.evaluate_scan_data(data)
+
+    assert result.ok is True
+    assert result.payload is not None
+    # Valid UCV indexes are 1,2,3; mapped intensities are 2,5,4.
+    assert result.payload["intensity_average"] == pytest.approx((5.0 + 4.0 + 2.0) / 3.0)
+
+
+def test_evaluate_scan_data_supports_direct_measurement_data_payload(
+    iv_adapter: IVAdapter,
+) -> None:
+    """Evaluation also accepts a bare measurement-data dict input."""
+    data = {
+        "ucv": [0.0, 0.5, 1.0],
+        "intensityTop": [1.0, 2.0, 3.0],
+    }
+
+    result = iv_adapter.evaluate_scan_data(data)
+
+    assert result.ok is True
+    assert result.payload is not None
+    assert result.payload["intensity_average"] == pytest.approx(2.0)
+
+
 @pytest.mark.parametrize("data", [None, "not-a-dict", []])
 def test_evaluate_scan_data_returns_none_on_non_dict_top_level_payload(
     iv_adapter: IVAdapter,

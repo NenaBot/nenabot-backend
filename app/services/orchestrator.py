@@ -24,6 +24,16 @@ from app.domain.models import Job, Measurement, Waypoint
 
 logger = logging.getLogger(__name__)
 
+
+def _format_payload_for_log(payload: object, limit: int = 3000) -> str:
+    try:
+        rendered = json.dumps(payload, separators=(",", ":"), default=str)
+    except Exception:
+        rendered = repr(payload)
+    if len(rendered) > limit:
+        return f"{rendered[:limit]}...<truncated {len(rendered) - limit} chars>"
+    return rendered
+
 MAX_MEASURING_POINTS_PER_CM = 10.0
 MAX_POPULATED_PATH_POINTS = 20000
 TOTAL_CALIBRATION_STEPS = len(FIXED_CALIBRATION_POINTS)
@@ -281,25 +291,68 @@ class OrchestratorService:
                     time.sleep(1.5)
                     self._scan_results_processed_event.clear()
                     self._scan_stopped_event.clear()
+                    logger.info(
+                        "Job %s waypoint=%d starting IonVision scan",
+                        job.id,
+                        index + 1,
+                    )
                     scan_start = self._ionvision.start_new_scan()
                     if scan_start.ok:
-                        scan_finished = False
-                        for _ in range(120):
-                            time.sleep(1.5)
-                            status = self._ionvision.get_current_scan()
-                            if not status.ok:
-                                break
-                            payload = status.payload or {}
-                            if payload.get("state") == "finished":
-                                scan_finished = True
-                                break
-
-                        if scan_finished:
-                            self._wait_for_scan_results_processed(timeout_s=45.0)
+                        logger.info(
+                            "Job %s waypoint=%d IonVision scan start accepted payload=%s",
+                            job.id,
+                            index + 1,
+                            _format_payload_for_log(scan_start.payload),
+                        )
+                        if self._wait_for_scan_results_processed(timeout_s=45.0):
+                            logger.info(
+                                "Job %s waypoint=%d polling IonVision latest data object",
+                                job.id,
+                                index + 1,
+                            )
                             scan_result = self._poll_latest_dataobject(timeout_s=30.0)
+                            if scan_result is not None:
+                                logger.info(
+                                    "Job %s waypoint=%d IonVision latest payload=%s",
+                                    job.id,
+                                    index + 1,
+                                    _format_payload_for_log(scan_result),
+                                )
+                                evaluation = self._ionvision.evaluate_scan_data(
+                                    scan_result
+                                )
+                                if evaluation.ok and evaluation.payload is not None:
+                                    if isinstance(scan_result, dict):
+                                        scan_result = dict(scan_result)
+                                        scan_result["evaluation"] = evaluation.payload
+                                    else:
+                                        scan_result = {
+                                            "raw": scan_result,
+                                            "evaluation": evaluation.payload,
+                                        }
+
+                                    logger.info(
+                                        "Job %s waypoint=%d IonVision payload evaluated intensity_average=%s",
+                                        job.id,
+                                        index + 1,
+                                        evaluation.payload.get("intensity_average"),
+                                    )
+                                else:
+                                    logger.warning(
+                                        "Job %s waypoint=%d IonVision payload evaluation failed: %s",
+                                        job.id,
+                                        index + 1,
+                                        evaluation.error,
+                                    )
+                            else:
+                                logger.warning(
+                                    "Job %s waypoint=%d IonVision latest payload unavailable after scan.resultsProcessed",
+                                    job.id,
+                                    index + 1,
+                                )
                         else:
                             logger.warning(
-                                "IonVision scan did not reach finished state for waypoint %d",
+                                "IonVision scan did not report scan.resultsProcessed for waypoint %d",
                                 index + 1,
                             )
                     else:
@@ -357,6 +410,13 @@ class OrchestratorService:
                         },
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
+                )
+
+                logger.info(
+                    "Job %s waypoint=%d completed scan_result_present=%s",
+                    job.id,
+                    index + 1,
+                    scan_result is not None,
                 )
 
             if job.state == "running":
@@ -441,34 +501,82 @@ class OrchestratorService:
 
     def _wait_for_scan_results_processed(self, timeout_s: float) -> bool:
         if not self._ionvision_ws_initialized:
+            logger.warning(
+                "Cannot wait for IonVision scan.resultsProcessed because websocket is not initialized"
+            )
             return False
 
+        started_at = time.monotonic()
+        logger.info(
+            "Waiting for IonVision scan.resultsProcessed timeout_s=%.2f",
+            timeout_s,
+        )
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             if self._scan_stopped_event.is_set():
+                elapsed = time.monotonic() - started_at
                 logger.warning(
-                    "IonVision reported scan.stopped before results processing"
+                    "IonVision reported scan.stopped before results processing elapsed_s=%.3f",
+                    elapsed,
                 )
                 return False
             if self._scan_results_processed_event.wait(timeout=0.25):
+                elapsed = time.monotonic() - started_at
+                logger.info(
+                    "IonVision scan.resultsProcessed received elapsed_s=%.3f",
+                    elapsed,
+                )
                 return True
 
+        elapsed = time.monotonic() - started_at
         logger.warning(
-            "Timed out waiting for IonVision scan.resultsProcessed after scan.finished"
+            "Timed out waiting for IonVision scan.resultsProcessed elapsed_s=%.3f",
+            elapsed,
         )
         return False
 
     def _poll_latest_dataobject(self, timeout_s: float) -> dict | None:
+        logger.info(
+            "Polling IonVision latest data object timeout_s=%.2f",
+            timeout_s,
+        )
+        started_at = time.monotonic()
         deadline = time.monotonic() + timeout_s
+        attempt = 0
+        last_error: str | None = None
         while time.monotonic() < deadline:
+            attempt += 1
             latest = self._ionvision.get_latest_dataobject()
             if latest.ok:
+                elapsed = time.monotonic() - started_at
+                logger.info(
+                    "IonVision latest data object received attempt=%d elapsed_s=%.3f payload=%s",
+                    attempt,
+                    elapsed,
+                    _format_payload_for_log(latest.payload),
+                )
                 return latest.payload
+            last_error = latest.error
+            logger.debug(
+                "IonVision latest data object pending attempt=%d error=%s",
+                attempt,
+                latest.error,
+            )
             if self._stop_requested:
+                elapsed = time.monotonic() - started_at
+                logger.warning(
+                    "Stopped waiting for IonVision latest data object due to stop request elapsed_s=%.3f",
+                    elapsed,
+                )
                 return None
             time.sleep(0.5)
 
-        logger.warning("Timed out waiting for IonVision latest scan data object")
+        elapsed = time.monotonic() - started_at
+        logger.warning(
+            "Timed out waiting for IonVision latest scan data object elapsed_s=%.3f last_error=%s",
+            elapsed,
+            last_error,
+        )
         return None
 
     # ---- Misc ----
@@ -1249,12 +1357,16 @@ class OrchestratorService:
         for scan lifecycle events. Must be called before any scan operations
         to enable real-time event monitoring.
         """
+        logger.info("Initializing IonVision websocket services")
         await self._ionvision.initialize_websocket()
         self._ionvision.on_event(
             "scan.resultsProcessed", self._handle_scan_results_processed
         )
         self._ionvision.on_event("scan.stopped", self._handle_scan_stopped)
         self._ionvision_ws_initialized = True
+        logger.info(
+            "IonVision websocket services ready handlers=[scan.resultsProcessed, scan.stopped]"
+        )
 
     async def _close_ionvision(self) -> None:
         """Clean up DMS WebSocket connection and unregister event handlers.
@@ -1264,12 +1376,14 @@ class OrchestratorService:
         prevent resource leaks.
         """
         if self._ionvision_ws_initialized:
+            logger.info("Closing IonVision websocket services")
             await self._ionvision.disconnect_websocket()
             self._ionvision.off_event(
                 "scan.resultsProcessed", self._handle_scan_results_processed
             )
             self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
             self._ionvision_ws_initialized = False
+            logger.info("IonVision websocket services closed")
 
     async def close_ionvision(self) -> None:
         await self._close_ionvision()
@@ -1285,7 +1399,10 @@ class OrchestratorService:
             data: WebSocket message envelope containing event details
                 (has 'type', 'time', and 'body' keys)
         """
-        logger.info("Scan results have been processed: %s", data.get("body"))
+        logger.info(
+            "IonVision event scan.resultsProcessed payload=%s",
+            _format_payload_for_log(data),
+        )
         self._scan_results_processed_event.set()
 
     async def _handle_scan_stopped(self, data: dict) -> None:
@@ -1299,7 +1416,10 @@ class OrchestratorService:
             data: WebSocket message envelope containing event details
                 (has 'type', 'time', and 'body' keys)
         """
-        logger.info("Scan has been stopped: %s", data.get("body"))
+        logger.info(
+            "IonVision event scan.stopped payload=%s",
+            _format_payload_for_log(data),
+        )
         self._scan_stopped_event.set()
 
     async def _handle_error(self, data: dict) -> None:

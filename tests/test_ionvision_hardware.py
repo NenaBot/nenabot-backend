@@ -108,15 +108,8 @@ def _assert_ok(result: IVResult, action: str, config: HardwareConfig) -> None:
     assert result.ok, f"{action} failed against {config.base_url}: {result.error}"
 
 
-def _assert_ok_or_skip_if_unavailable(
-    result: IVResult,
-    action: str,
-    config: HardwareConfig,
-) -> None:
-    if result.ok:
-        return
-
-    error = (result.error or "").lower()
+def _is_unavailable_error(error: str | None) -> bool:
+    normalized = (error or "").lower()
     unavailable_markers = (
         "404",
         "not found",
@@ -126,7 +119,18 @@ def _assert_ok_or_skip_if_unavailable(
         "no detection",
         "no data",
     )
-    if any(marker in error for marker in unavailable_markers):
+    return any(marker in normalized for marker in unavailable_markers)
+
+
+def _assert_ok_or_skip_if_unavailable(
+    result: IVResult,
+    action: str,
+    config: HardwareConfig,
+) -> None:
+    if result.ok:
+        return
+
+    if _is_unavailable_error(result.error):
         pytest.skip(f"{action} is unavailable on this machine: {result.error}")
 
     _assert_ok(result, action, config)
@@ -221,6 +225,22 @@ def _scan_looks_active(payload: Any) -> bool:
     return bool(payload.get("scanId") and status != "stopped")
 
 
+def _scan_looks_finished(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+
+    status = str(payload.get("status", "")).lower()
+    state = str(payload.get("state", "")).lower()
+
+    if state in {"finished", "completed", "done"}:
+        return True
+
+    if status in {"finished", "completed", "done"}:
+        return True
+
+    return bool(payload.get("scanId") and state == "finished")
+
+
 def _scan_has_identifier(payload: Any) -> bool:
     return isinstance(payload, dict) and any(
         value not in (None, "")
@@ -251,6 +271,74 @@ def _poll_for_active_scan(
             return last_result
         time.sleep(interval_s)
         last_result = adapter.get_current_scan()
+
+
+async def _wait_for_finished_scan(
+    adapter: IVAdapter,
+    config: HardwareConfig,
+    *,
+    timeout_s: float,
+    interval_s: float = 1.0,
+) -> IVResult:
+    deadline = time.monotonic() + timeout_s
+    last_result = await asyncio.to_thread(adapter.get_current_scan)
+
+    while True:
+        if not last_result.ok:
+            # Some IonVision firmwares stop exposing /currentScan immediately
+            # after scan completion; treat that as terminal once we have entered
+            # the scan lifecycle for this test.
+            if _is_unavailable_error(last_result.error):
+                return IVResult(
+                    ok=True,
+                    payload={
+                        "state": "finished",
+                        "status": "finished",
+                        "_source": "currentScan unavailable",
+                        "_error": last_result.error,
+                    },
+                )
+
+            _assert_ok(
+                last_result,
+                "GET /currentScan while waiting for scan completion",
+                config,
+            )
+
+        if _scan_looks_finished(last_result.payload):
+            return last_result
+        if time.monotonic() >= deadline:
+            return last_result
+        await asyncio.sleep(interval_s)
+        last_result = await asyncio.to_thread(adapter.get_current_scan)
+
+
+async def _wait_for_latest_dataobject(
+    adapter: IVAdapter,
+    config: HardwareConfig,
+    *,
+    timeout_s: float,
+    interval_s: float = 1.0,
+) -> IVResult:
+    deadline = time.monotonic() + timeout_s
+    last_result = await asyncio.to_thread(adapter.get_latest_dataobject)
+
+    while True:
+        if last_result.ok and _has_stored_results(last_result.payload):
+            return last_result
+        if time.monotonic() >= deadline:
+            _assert_ok(
+                last_result,
+                "GET /results/latest after scan.resultsProcessed",
+                config,
+            )
+            assert _has_stored_results(last_result.payload), (
+                "GET /results/latest did not return a stored result after the scan "
+                f"completed: {last_result.payload}"
+            )
+            return last_result
+        await asyncio.sleep(interval_s)
+        last_result = await asyncio.to_thread(adapter.get_latest_dataobject)
 
 
 def _comment_object(payload: Any) -> dict[str, Any]:
@@ -795,7 +883,7 @@ def test_websocket_scan_results_processed_event(
     adapter: IVAdapter,
     hardware_config: HardwareConfig,
 ) -> None:
-    """Run a full scan and verify the websocket emits scan.resultsProcessed."""
+    """Run a full scan, wait for completion, and verify scan.resultsProcessed."""
     if not hardware_config.allow_mutations:
         pytest.skip(
             "Set IONVISION_ENABLE_MUTATION_TESTS=1 to allow scan completion "
@@ -829,12 +917,34 @@ def test_websocket_scan_results_processed_event(
             )
             owned_scan_started = True
 
+            finished_scan = await _wait_for_finished_scan(
+                adapter,
+                hardware_config,
+                timeout_s=hardware_config.scan_results_processed_timeout_s,
+            )
+            _assert_ok(
+                finished_scan,
+                "GET /currentScan after scan finished",
+                hardware_config,
+            )
+            _print_payload("currentScan finished payload", finished_scan.payload)
+            assert _scan_looks_finished(finished_scan.payload), (
+                "GET /currentScan never reported a finished scan after POST /currentScan: "
+                f"{finished_scan.payload}"
+            )
+
             event_payload = await _wait_for_websocket_event(
                 event_queue,
                 event_type="scan.resultsProcessed",
                 timeout_s=hardware_config.scan_results_processed_timeout_s,
-                action_description="POST /currentScan",
+                action_description="waiting for scan completion",
             )
+            latest_result = await _wait_for_latest_dataobject(
+                adapter,
+                hardware_config,
+                timeout_s=hardware_config.scan_results_processed_timeout_s,
+            )
+            _print_payload("results/latest after processing payload", latest_result.payload)
             return started, event_payload
         except AssertionError:
             if owned_scan_started:
