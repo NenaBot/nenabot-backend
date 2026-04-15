@@ -123,6 +123,24 @@ def create_orchestrator(
         )
         default_measuring_points_per_cm = 0.5
 
+    default_measurement_threshold_raw = _first_env(
+        "NENABOT_DEFAULT_MEASUREMENT_THRESHOLD"
+    )
+    try:
+        default_measurement_threshold = (
+            float(default_measurement_threshold_raw)
+            if default_measurement_threshold_raw
+            else 120.0
+        )
+        if not (0.0 <= default_measurement_threshold <= 255.0):
+            raise ValueError("must be between 0 and 255")
+    except ValueError:
+        logger.warning(
+            "NENABOT_DEFAULT_MEASUREMENT_THRESHOLD='%s' is not a valid float in [0,255] — using 120.0",
+            default_measurement_threshold_raw,
+        )
+        default_measurement_threshold = 120.0
+
     db = Database(db_path=db_path)
     db.init_db()
 
@@ -155,6 +173,7 @@ def create_orchestrator(
         max_jobs=max_jobs,
         default_work_z=default_work_z,
         default_measuring_points_per_cm=default_measuring_points_per_cm,
+        default_measurement_threshold=default_measurement_threshold,
     )
 
 

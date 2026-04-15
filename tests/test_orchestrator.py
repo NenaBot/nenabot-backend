@@ -513,6 +513,7 @@ def test_default_profile_work_z_defaults_to_zero(tmp_path: Path) -> None:
     service, _, _ = _make_svc(tmp_path)
     assert service.default_profile()["workZ"] == 0.0
     assert service.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)
+    assert service.default_profile()["threshold"] == pytest.approx(120.0)
 
 
 def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
@@ -534,9 +535,11 @@ def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
         ),
         default_work_z=-35.0,
         default_measuring_points_per_cm=1.25,
+        default_measurement_threshold=140.0,
     )
     assert svc.default_profile()["workZ"] == -35.0
     assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(1.25)
+    assert svc.default_profile()["threshold"] == pytest.approx(140.0)
 
 
 def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
@@ -550,6 +553,7 @@ def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
         {
             "NENABOT_DEFAULT_WORK_Z": "-42.5",
             "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM": "0.8",
+            "NENABOT_DEFAULT_MEASUREMENT_THRESHOLD": "135.5",
         },
     ):
         svc = create_orchestrator(
@@ -558,6 +562,7 @@ def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
         )
     assert svc.default_profile()["workZ"] == pytest.approx(-42.5)
     assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.8)
+    assert svc.default_profile()["threshold"] == pytest.approx(135.5)
 
 
 def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
@@ -571,6 +576,7 @@ def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
         {
             "NENABOT_DEFAULT_WORK_Z": "not-a-number",
             "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM": "0",
+            "NENABOT_DEFAULT_MEASUREMENT_THRESHOLD": "999",
         },
     ):
         svc = create_orchestrator(
@@ -579,6 +585,7 @@ def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
         )
     assert svc.default_profile()["workZ"] == 0.0
     assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)
+    assert svc.default_profile()["threshold"] == pytest.approx(120.0)
 
 
 def test_move_robot_delegates_to_adapter(tmp_path: Path) -> None:
