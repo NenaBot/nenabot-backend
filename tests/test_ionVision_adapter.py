@@ -348,13 +348,17 @@ def test_evaluate_scan_data_returns_average_of_top_three_valid_intensities(
     result = iv_adapter.evaluate_scan_data(data)
 
     # Valid UCV indexes are 0,1,2; top 3 mapped intensities are 10, 9, 3.
-    assert result == pytest.approx((10.0 + 9.0 + 3.0) / 3.0)
+    assert result.ok is True
+    assert result.payload is not None
+    assert result.payload["intensity_average"] == pytest.approx(
+        (10.0 + 9.0 + 3.0) / 3.0
+    )
 
 
 def test_evaluate_scan_data_returns_none_when_less_than_three_values(
     iv_adapter: IVAdapter,
 ) -> None:
-    """Function returns None when fewer than 3 mapped numeric intensity values exist."""
+    """Function returns IVResult with ok=False when fewer than 3 mapped numeric intensity values exist."""
     data = {
         "body": {
             "measurementData": {
@@ -366,7 +370,8 @@ def test_evaluate_scan_data_returns_none_when_less_than_three_values(
 
     result = iv_adapter.evaluate_scan_data(data)
 
-    assert result is None
+    assert result.ok is False
+    assert result.error is not None
 
 
 @pytest.mark.parametrize("data", [None, "not-a-dict", []])
@@ -374,10 +379,11 @@ def test_evaluate_scan_data_returns_none_on_non_dict_top_level_payload(
     iv_adapter: IVAdapter,
     data: object,
 ) -> None:
-    """Function returns None when the top-level payload is not a dictionary."""
+    """Function returns IVResult with ok=False when the top-level payload is not a dictionary."""
     result = iv_adapter.evaluate_scan_data(data)
 
-    assert result is None
+    assert result.ok is False
+    assert result.error is not None
 
 
 @pytest.mark.parametrize("data", [{"body": "not-a-dict"}])
@@ -385,10 +391,11 @@ def test_evaluate_scan_data_returns_none_on_invalid_payload_shape(
     iv_adapter: IVAdapter,
     data: dict[str, object],
 ) -> None:
-    """Function returns None when payload structure is missing expected dict/list nodes."""
+    """Function returns IVResult with ok=False when payload structure is missing expected dict/list nodes."""
     result = iv_adapter.evaluate_scan_data(data)
 
-    assert result is None
+    assert result.ok is False
+    assert result.error is not None
 
 
 # IVAdapter _request tests

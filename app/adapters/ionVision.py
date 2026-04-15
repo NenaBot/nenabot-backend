@@ -238,7 +238,7 @@ class IVAdapter:
         """
         return self._request("GET", "currentParameter")
 
-    def evaluate_scan_data(self, data: dict) -> Optional[float]:
+    def evaluate_scan_data(self, data: dict) -> IVResult:
         """Evaluate scan payload and return an average intensity score.
 
         The function expects a websocket-style message envelope containing
@@ -246,28 +246,30 @@ class IVAdapter:
         It uses only UCV entries in the inclusive range defined by
         ``UCV_VALID_RANGE``, maps those indexes to
         ``intensityTop``, keeps the 3 highest numeric intensity values, and
-        returns their arithmetic mean.
+        returns their arithmetic mean wrapped in an IVResult.
 
         Returns:
-            Optional[float]: Average of the top 3 mapped intensity values, or
-                ``None`` if the payload structure is invalid or fewer than 3
-                usable intensity values are available.
+            IVResult: ok=True with payload containing ``intensity_average`` on
+                success, or ok=False with error if payload is invalid or has
+                insufficient usable values.
         """
         if not isinstance(data, dict):
-            return None
+            return IVResult(ok=False, error="Payload is not a dictionary")
 
         # Get ucv list
         body = data.get("body", {})
         if not isinstance(body, dict):
-            return None
+            return IVResult(ok=False, error="Missing or invalid 'body' in payload")
         measurementData = body.get("measurementData", {})
         if not isinstance(measurementData, dict):
-            return None
+            return IVResult(
+                ok=False, error="Missing or invalid 'measurementData' in body"
+            )
 
         ucv = measurementData.get("ucv", [])
         intensityTop = measurementData.get("intensityTop", [])
         if not isinstance(ucv, list) or not isinstance(intensityTop, list):
-            return None
+            return IVResult(ok=False, error="'ucv' or 'intensityTop' is not a list")
 
         # Get indexes of valid ucv values in the configured valid range.
         valid_indexes = [
@@ -292,9 +294,13 @@ class IVAdapter:
         )[:3]
 
         if len(valid_intensity_values) != 3:
-            return None
+            return IVResult(
+                ok=False,
+                error=f"Fewer than 3 valid intensity values found (got {len(valid_intensity_values)})",
+            )
 
-        return sum(valid_intensity_values) / len(valid_intensity_values)
+        intensity_average = sum(valid_intensity_values) / len(valid_intensity_values)
+        return IVResult(ok=True, payload={"intensity_average": intensity_average})
 
     # WEBSCOKET EVENT HANDLING #
     async def initialize_websocket(self) -> None:
