@@ -65,6 +65,7 @@ class OrchestratorService:
         max_jobs: int = 0,
         default_work_z: float = 0.0,
         default_measuring_points_per_cm: float = 0.5,
+        default_measurement_threshold: float = 120.0,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
@@ -76,12 +77,16 @@ class OrchestratorService:
         measuring_points_per_cm = float(default_measuring_points_per_cm)
         if measuring_points_per_cm <= 0:
             measuring_points_per_cm = 0.5
+        measurement_threshold = float(default_measurement_threshold)
+        if not (0.0 <= measurement_threshold <= 255.0):
+            measurement_threshold = 120.0
         self._profiles = [
             {
                 "name": "default",
                 "description": "Default inspection profile",
                 "workZ": float(default_work_z),
                 "measuringPointsPerCm": measuring_points_per_cm,
+                "threshold": measurement_threshold,
             }
         ]
         self._running_job_id: str | None = None
