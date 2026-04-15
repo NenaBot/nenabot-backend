@@ -391,7 +391,9 @@ async def job_events(
     client = f"{client_host}:{client_port}"
 
     if not svc.get_job(job_id):
-        logger.warning("SSE connect rejected missing job job_id=%s client=%s", job_id, client)
+        logger.warning(
+            "SSE connect rejected missing job job_id=%s client=%s", job_id, client
+        )
         raise HTTPException(status_code=404, detail="Job not found")
 
     logger.info("SSE connect accepted job_id=%s client=%s", job_id, client)

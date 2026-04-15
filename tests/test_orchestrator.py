@@ -313,7 +313,9 @@ def test_job_fails_on_robot_move_error(tmp_path: Path) -> None:
     assert "Robot move failed" in (db_job.error or "")
 
 
-def test_job_waits_for_scan_results_processed_before_next_waypoint(tmp_path: Path) -> None:
+def test_job_waits_for_scan_results_processed_before_next_waypoint(
+    tmp_path: Path,
+) -> None:
     service, _, _ = _make_svc(tmp_path)
     job = service.create_job(
         path=[Waypoint(x=1, y=2), Waypoint(x=3, y=4)],
@@ -364,15 +366,15 @@ def test_job_waits_for_scan_results_processed_before_next_waypoint(tmp_path: Pat
 
         assert first_scan_started.wait(timeout=2), "First scan did not start"
         assert len(move_calls) == 1
-        assert not second_scan_started.is_set(), (
-            "Second waypoint started before scan.resultsProcessed was observed"
-        )
+        assert (
+            not second_scan_started.is_set()
+        ), "Second waypoint started before scan.resultsProcessed was observed"
 
         service._scan_results_processed_event.set()
 
-        assert second_scan_started.wait(timeout=2), (
-            "Second scan did not start after scan.resultsProcessed"
-        )
+        assert second_scan_started.wait(
+            timeout=2
+        ), "Second scan did not start after scan.resultsProcessed"
         assert len(move_calls) == 2
 
         service._scan_results_processed_event.set()

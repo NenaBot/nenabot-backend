@@ -34,6 +34,7 @@ def _format_payload_for_log(payload: object, limit: int = 3000) -> str:
         return f"{rendered[:limit]}...<truncated {len(rendered) - limit} chars>"
     return rendered
 
+
 MAX_MEASURING_POINTS_PER_CM = 10.0
 MAX_POPULATED_PATH_POINTS = 20000
 TOTAL_CALIBRATION_STEPS = len(FIXED_CALIBRATION_POINTS)

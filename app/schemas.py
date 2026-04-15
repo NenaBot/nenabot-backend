@@ -91,7 +91,6 @@ class Profile(BaseModel):
     measurement_threshold: float = Field(120, alias="threshold", ge=0, le=255)
 
 
-
 class CornerSchema(BaseModel):
     pixel_x: float = Field(alias="pixelX")
     pixel_y: float = Field(alias="pixelY")

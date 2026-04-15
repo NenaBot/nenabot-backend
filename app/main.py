@@ -26,7 +26,9 @@ def _configure_app_logging() -> None:
 
     def _is_access_formatter(handler: logging.Handler) -> bool:
         formatter = getattr(handler, "formatter", None)
-        return formatter is not None and formatter.__class__.__name__ == "AccessFormatter"
+        return (
+            formatter is not None and formatter.__class__.__name__ == "AccessFormatter"
+        )
 
     selected_handlers: list[logging.Handler] = []
     if uvicorn_error_logger.handlers:

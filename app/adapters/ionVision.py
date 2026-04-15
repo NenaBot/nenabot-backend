@@ -52,6 +52,7 @@ class IVAdapter:
         timeout_s: HTTP request timeout in seconds (default: 5.0)
         client: Optional pre-configured httpx.Client instance (creates new one if not provided)
     """
+
     UCV_VALID_RANGE = (0, 2)
 
     def __init__(
@@ -657,10 +658,14 @@ class WebSocketAdapter:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.warning("IonVision websocket listen loop error: %s", e, exc_info=True)
+            logger.warning(
+                "IonVision websocket listen loop error: %s", e, exc_info=True
+            )
         finally:
             self._running = False
-            logger.info("IonVision websocket listen loop stopped url=%s", self._base_url)
+            logger.info(
+                "IonVision websocket listen loop stopped url=%s", self._base_url
+            )
 
     async def _dispatch_event(self, message: Dict[str, Any]) -> None:
         """Dispatch a parsed IonVision WebSocket message to matching handlers.

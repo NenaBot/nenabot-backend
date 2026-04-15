@@ -944,7 +944,9 @@ def test_websocket_scan_results_processed_event(
                 hardware_config,
                 timeout_s=hardware_config.scan_results_processed_timeout_s,
             )
-            _print_payload("results/latest after processing payload", latest_result.payload)
+            _print_payload(
+                "results/latest after processing payload", latest_result.payload
+            )
             return started, event_payload
         except AssertionError:
             if owned_scan_started:
