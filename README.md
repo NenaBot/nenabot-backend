@@ -49,6 +49,7 @@ For the full system architecture (layer breakdown, folder tree, and dependency d
 
 - [Architecture Overview](docs/architecture-overview.md)
 - [Database Documentation](docs/database.md)
+- [Frontend Integration](docs/frontend-integration-diagram.md)
 - [Streaming Guide](docs/streaming.md)
 - [Vision Calibration](docs/vision-calibration.md)
 - [IonVision Integration Tests](docs/ionVision.md)
@@ -77,6 +78,32 @@ All endpoints are prefixed with `/api`.
 - `POST /api/path/populate` — generate perimeter measurement points
 - `DELETE /api/job/{id}`
 
+## Configuration
+
+The following environment variables control nenabot's runtime behaviour.
+
+| Variable                                  | Default                 | Description                                                                                                                                                                                                                                                                                                                                                                                                               |
+| :---------------------------------------- | :---------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `IONVISION_BASE_URL`                      | `http://localhost:8080` | HTTP base URL of the IonVision DMS device                                                                                                                                                                                                                                                                                                                                                                                 |
+| `IONVISION_WS_BASE_URL`                   | derived from HTTP URL   | WebSocket base URL of the IonVision DMS device                                                                                                                                                                                                                                                                                                                                                                            |
+| `NENABOT_MAX_JOBS`                        | _(unset — unlimited)_   | Maximum number of jobs to retain. When set to a positive integer, the oldest jobs beyond this limit are automatically deleted at the end of every job execution. Both the database records (job, waypoints, measurements, snapshot image) and the captured JPEG files in `data/images/` are cleaned up. Set this to a small number (e.g. `10`) on memory-constrained devices to prevent unbounded disk and SQLite growth. |
+| `NENABOT_DEFAULT_WORK_Z`                  | `0.0`                   | Default Z coordinate (mm) for the default inspection profile. Pre-filled in the job tester UI on page load. Negative values lower the arm below the calibration plane (e.g. `-35`).                                                                                                                                                                                                                                       |
+| `NENABOT_DEFAULT_MEASURING_POINTS_PER_CM` | `0.5`                   | Default path population density for the default inspection profile (measuring points per cm). Pre-filled in the job tester UI on page load. Must be greater than `0`.                                                                                                                                                                                                                                                     |
+
+See `.env.example` for a reference file with all variables.
+
+Example Docker run with job retention, a default work Z, and default measuring points per cm:
+
+```bash
+docker run -d --name nenabot \
+  -p 8000:8000 \
+  -v nenabot-data:/app/data \
+  -e NENABOT_MAX_JOBS=10 \
+  -e NENABOT_DEFAULT_WORK_Z=-35 \
+  -e NENABOT_DEFAULT_MEASURING_POINTS_PER_CM=0.8 \
+  nenabot
+```
+
 ## Hardware integration notes
 
 - **Dobot**: `app/adapters/robot.py` wraps `DobotDllTypeMulti`. Supports both automated job execution and manual control via `POST /api/robot/move` and `GET /api/robot/pose` for calibration testing.
@@ -88,18 +115,18 @@ All endpoints are prefixed with `/api`.
 
 ## UI pages
 
-| Page          | URL                                    | Description                               |
-| :------------ | :------------------------------------- | :---------------------------------------- |
-| OpenAPI docs  | `/docs`                                | Auto-generated interactive API reference  |
-| Calibration Tester | Open `docs/calibration-tester.html` locally | Guided runtime 4-point calibration |
-| Job Tester    | Open `docs/job-tester.html` locally    | Create and monitor jobs                   |
-| Job Results   | Open `docs/job-results.html` locally   | Browse jobs, view images and measurements |
-| Stream Viewer | Open `docs/stream-viewer.html` locally | Live camera / detection stream viewer     |
+| Page               | URL                                         | Description                               |
+| :----------------- | :------------------------------------------ | :---------------------------------------- |
+| OpenAPI docs       | `/docs`                                     | Auto-generated interactive API reference  |
+| Calibration Tester | Open `docs/calibration-tester.html` locally | Guided runtime 4-point calibration        |
+| Job Tester         | Open `docs/job-tester.html` locally         | Create and monitor jobs                   |
+| Job Results        | Open `docs/job-results.html` locally        | Browse jobs, view images and measurements |
+| Stream Viewer      | Open `docs/stream-viewer.html` locally      | Live camera / detection stream viewer     |
 
 ## Tests
 
 ```bash
-pytest -q
+pytest -q -m "not hardware and not integration"
 ```
 
 CI runs only unit tests. Hardware/integration tests are excluded via `-m "not hardware and not integration"` and must be run manually when connected to the devices.
@@ -110,11 +137,11 @@ CI runs only unit tests. Hardware/integration tests are excluded via `-m "not ha
 RUN_ROBOT_HARDWARE_TESTS=1 pytest -s -v tests/test_robot_hardware.py
 ```
 
-| Variable                     | Default | Description                                                                   |
-| :--------------------------- | :------ | :---------------------------------------------------------------------------- |
-| `RUN_ROBOT_HARDWARE_TESTS`   | —       | Set to `1` to enable the suite                                                |
-| `NENABOT_ENABLE_STARTUP_HOMING` | `0`  | Set to `1` to home the arm automatically during app startup after connect     |
-| `DOBOT_ENABLE_LEGACY_HOMING` | `0`     | Set to `1` to use legacy `SetHOMECmd` (only if `SetHOMECmdEx` is unavailable) |
+| Variable                        | Default | Description                                                                   |
+| :------------------------------ | :------ | :---------------------------------------------------------------------------- |
+| `RUN_ROBOT_HARDWARE_TESTS`      | —       | Set to `1` to enable the suite                                                |
+| `NENABOT_ENABLE_STARTUP_HOMING` | `0`     | Set to `1` to home the arm automatically during app startup after connect     |
+| `DOBOT_ENABLE_LEGACY_HOMING`    | `0`     | Set to `1` to use legacy `SetHOMECmd` (only if `SetHOMECmdEx` is unavailable) |
 
 For full details see [`docs/robot.md`](docs/robot.md).
 

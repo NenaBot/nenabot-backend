@@ -57,7 +57,7 @@ Notes about current behavior:
     - `GET /api/robot/pose` — read current end-effector position and joint angles
     - `POST /api/robot/stop` — halt active job and stop robot motion
 - Runtime calibration state is stored in `data/calibration/robot_mapping.json` and surfaced through `GET /api/status`.
-- Some API/internal fields still use legacy `dms` naming (for example `Health.dms`), while adapter naming is now IonVision/IV.
+- API and internal component naming uses `ionvision` consistently for the IonVision adapter; legacy `dms` env aliases are still accepted by the dependency factory.
 
 ## 4. Folder structure (commented tree)
 
@@ -86,6 +86,7 @@ nenabot-main/
 |- docs/
 |  |- architecture-overview.md           # This file
 |  |- database.md                        # Database schema and persistence details
+|  |- frontend-integration-diagram.md    # Frontend calibration, job, and results sequence diagrams
 |  |- vision-calibration.md              # Intrinsic profile + runtime 4-point calibration flow
 |  |- raspberry-pi-setup.md              # Raspberry Pi remote access and Cloudflare Tunnel SSH guide
 |  |- streaming.md                       # Streaming architecture and usage guide

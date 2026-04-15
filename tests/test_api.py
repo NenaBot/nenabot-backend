@@ -25,7 +25,7 @@ from tests.calibration_helpers import (
 )
 
 
-def _make_bundle(tmp_path: Path, calibrated: bool) -> dict:
+def _make_bundle(tmp_path: Path, calibrated: bool) -> dict[str, object]:
     intrinsics_path = write_intrinsics(tmp_path / "camera_intrinsics.json")
     mapping_path = tmp_path / "robot_mapping.json"
     if calibrated:
@@ -39,11 +39,11 @@ def _make_bundle(tmp_path: Path, calibrated: bool) -> dict:
         return_value=RobotResult(ok=False, error="no robot in test"),
     ), patch(
         "app.adapters.ionVision.IVAdapter.ping",
-        return_value=IVResult(ok=False, error="no dms in test"),
+        return_value=IVResult(ok=False, error="no ionvision in test"),
     ):
         service = create_orchestrator(
             db_path=str(tmp_path / "test.db"),
-            dms_base_url="http://localhost:8080",
+            ionvision_base_url="http://localhost:8080",
             intrinsics_path=str(intrinsics_path),
             mapping_path=str(mapping_path),
         )
@@ -103,8 +103,9 @@ def test_health_and_status(calibrated_bundle) -> None:
     assert health.status_code == 200
     body = health.json()
     assert body["status"] == "ok"
+    assert body["uptimeSeconds"] >= 0
     assert "camera" in body
-    assert "dms" in body
+    assert "ionvision" in body
     assert "robot" in body
 
     status = client.get("/api/status")
@@ -174,7 +175,6 @@ def test_path_detect_returns_detection_payload(calibrated_bundle) -> None:
     payload = response.json()
     assert payload["requestSucceeded"] is True
     assert len(payload["detections"]) == 1
-    assert "calibration" not in payload
     assert payload["image_base64"] == "ZmFrZS1pbWFnZQ=="
 
 
@@ -214,7 +214,9 @@ def test_real_job_creation_requires_ready_robot(calibrated_bundle) -> None:
     assert "robot not ready" in response.json()["detail"].lower()
 
 
-def test_real_job_creation_rejects_unreachable_waypoints(calibrated_bundle) -> None:
+def test_real_job_creation_rejects_unreachable_waypoints_with_422(
+    calibrated_bundle,
+) -> None:
     client = calibrated_bundle["client"]
     service = calibrated_bundle["service"]
     service._robot.ping = MagicMock(return_value=RobotResult(ok=True))
@@ -229,8 +231,25 @@ def test_real_job_creation_rejects_unreachable_waypoints(calibrated_bundle) -> N
         },
     )
 
-    assert response.status_code == 409
+    assert response.status_code == 422
     assert "working radius" in response.json()["detail"].lower()
+
+
+def test_job_creation_rejects_empty_path_with_422(calibrated_bundle) -> None:
+    client = calibrated_bundle["client"]
+
+    response = client.post(
+        "/api/job",
+        json={
+            "path": [],
+            "dryRun": True,
+            "workZ": 0,
+            "workR": 0,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "path is empty" in response.json()["detail"].lower()
 
 
 def test_calibration_flow_endpoint_writes_mapping_and_updates_status(
@@ -322,6 +341,24 @@ def test_job_sse_events(calibrated_bundle) -> None:
     assert any(event["type"] == "job:waypoint_completed" for event in events)
 
 
+def test_job_image_endpoint_returns_404_when_missing_image(calibrated_bundle) -> None:
+    client = calibrated_bundle["client"]
+    response = client.post(
+        "/api/job",
+        json={
+            "path": [{"pixelX": 150.0, "pixelY": 150.0}],
+            "dryRun": True,
+            "workZ": 0,
+            "workR": 0,
+        },
+    )
+    assert response.status_code == 201
+    job_id = response.json()["id"]
+
+    image = client.get(f"/api/job/{job_id}/image")
+    assert image.status_code == 404
+
+
 def test_path_populate_requires_calibration(uncalibrated_bundle) -> None:
     client = uncalibrated_bundle["client"]
     response = client.post(
@@ -357,3 +394,41 @@ def test_path_populate_generates_perimeter_points(calibrated_bundle) -> None:
     payload = response.json()
     assert payload["path"]
     assert payload["path"][0]["index"] == "0-0-0"
+    assert payload["path"][0]["batteryNr"] == 0
+    assert payload["path"][0]["cornerIndex"] == 0
+    assert payload["path"][0]["measurementIndex"] == 0
+
+
+def test_job_creation_accepts_populated_path_shape(calibrated_bundle) -> None:
+    client = calibrated_bundle["client"]
+    populate = client.post(
+        "/api/path/populate",
+        json={
+            "measuringPointsPerCm": 0.5,
+            "batteries": [
+                {
+                    "corners": [
+                        {"pixelX": 100.0, "pixelY": 100.0},
+                        {"pixelX": 200.0, "pixelY": 100.0},
+                        {"pixelX": 200.0, "pixelY": 200.0},
+                        {"pixelX": 100.0, "pixelY": 200.0},
+                    ]
+                }
+            ],
+        },
+    )
+    assert populate.status_code == 200
+    populated_path = populate.json()["path"]
+    assert populated_path
+
+    response = client.post(
+        "/api/job",
+        json={"path": populated_path[:2], "dryRun": True, "workZ": 0, "workR": 0},
+    )
+    assert response.status_code == 201
+    job = response.json()
+    assert job["path"]
+    assert "index" in job["path"][0]
+    assert "batteryNr" in job["path"][0]
+    assert "cornerIndex" in job["path"][0]
+    assert "measurementIndex" in job["path"][0]

@@ -50,19 +50,30 @@ class OrchestratorService:
         self,
         camera_vision: CameraVisionAdapter,
         robot: RobotAdapter,
-        dms: IVAdapter,
+        ionvision: IVAdapter,
         storage: StorageAdapter,
         mapping_path: str = "data/calibration/robot_mapping.json",
+        max_jobs: int = 0,
+        default_work_z: float = 0.0,
+        default_measuring_points_per_cm: float = 0.5,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
-        self._dms = dms
+        self._ionvision = ionvision
         self._storage = storage
         self._mapping_path = Path(mapping_path)
         self._started_at = time.monotonic()
+        self._max_jobs = max(0, int(max_jobs))
+        measuring_points_per_cm = float(default_measuring_points_per_cm)
+        if measuring_points_per_cm <= 0:
+            measuring_points_per_cm = 0.5
         self._profiles = [
-            {"name": "default", "description": "Default inspection profile"},
-            {"name": "fast", "description": "Faster run, lower accuracy"},
+            {
+                "name": "default",
+                "description": "Default inspection profile",
+                "workZ": float(default_work_z),
+                "measuringPointsPerCm": measuring_points_per_cm,
+            }
         ]
         self._running_job_id: str | None = None
         self._stop_requested = False
@@ -77,6 +88,9 @@ class OrchestratorService:
 
         self._job_subscribers: dict[str, list[queue.Queue]] = {}
         self._subscribers_lock = threading.Lock()
+        self._ionvision_ws_initialized = False
+        self._scan_results_processed_event = threading.Event()
+        self._scan_stopped_event = threading.Event()
 
     # ---- Job CRUD (DB-backed) ----
 
@@ -98,10 +112,23 @@ class OrchestratorService:
 
     def _publish_event(self, job_id: str, event: dict) -> None:
         with self._subscribers_lock:
-            for subscriber in self._job_subscribers.get(job_id, []):
+            subscribers = self._job_subscribers.get(job_id, [])
+            logger.info(
+                "SSE publish job_id=%s type=%s state=%s subscribers=%d",
+                job_id,
+                event.get("type"),
+                event.get("state"),
+                len(subscribers),
+            )
+            for subscriber in subscribers:
                 try:
                     subscriber.put_nowait(event)
                 except queue.Full:
+                    logger.warning(
+                        "SSE subscriber queue full job_id=%s type=%s",
+                        job_id,
+                        event.get("type"),
+                    )
                     pass
 
     def create_job(
@@ -252,19 +279,35 @@ class OrchestratorService:
                         )
 
                     time.sleep(1.5)
-                    scan_start = self._dms.start_new_scan()
+                    self._scan_results_processed_event.clear()
+                    self._scan_stopped_event.clear()
+                    scan_start = self._ionvision.start_new_scan()
                     if scan_start.ok:
+                        scan_finished = False
                         for _ in range(120):
                             time.sleep(1.5)
-                            status = self._dms.get_current_scan()
+                            status = self._ionvision.get_current_scan()
                             if not status.ok:
                                 break
                             payload = status.payload or {}
                             if payload.get("state") == "finished":
+                                scan_finished = True
                                 break
-                        latest = self._dms.get_latest_dataobject()
-                        if latest.ok:
-                            scan_result = latest.payload
+
+                        if scan_finished:
+                            self._wait_for_scan_results_processed(timeout_s=45.0)
+                            scan_result = self._poll_latest_dataobject(timeout_s=30.0)
+                        else:
+                            logger.warning(
+                                "IonVision scan did not reach finished state for waypoint %d",
+                                index + 1,
+                            )
+                    else:
+                        logger.warning(
+                            "IonVision scan did not start for waypoint %d: %s",
+                            index + 1,
+                            scan_start.error,
+                        )
                 else:
                     time.sleep(0.3)
 
@@ -337,6 +380,7 @@ class OrchestratorService:
                 job.last_point_processed,
                 job.error,
             )
+            self._prune_old_data()
 
             self._publish_event(
                 job.id,
@@ -395,6 +439,38 @@ class OrchestratorService:
         if not arrival.ok:
             logger.warning("Return-to-start validation failed: %s", arrival.error)
 
+    def _wait_for_scan_results_processed(self, timeout_s: float) -> bool:
+        if not self._ionvision_ws_initialized:
+            return False
+
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._scan_stopped_event.is_set():
+                logger.warning(
+                    "IonVision reported scan.stopped before results processing"
+                )
+                return False
+            if self._scan_results_processed_event.wait(timeout=0.25):
+                return True
+
+        logger.warning(
+            "Timed out waiting for IonVision scan.resultsProcessed after scan.finished"
+        )
+        return False
+
+    def _poll_latest_dataobject(self, timeout_s: float) -> dict | None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            latest = self._ionvision.get_latest_dataobject()
+            if latest.ok:
+                return latest.payload
+            if self._stop_requested:
+                return None
+            time.sleep(0.5)
+
+        logger.warning("Timed out waiting for IonVision latest scan data object")
+        return None
+
     # ---- Misc ----
 
     def health(self) -> dict[str, object]:
@@ -419,13 +495,13 @@ class OrchestratorService:
             components["camera"] = {"status": "error", "error": str(exc)}
 
         try:
-            result = self._dms.ping()
-            components["dms"] = {
-                "status": "connected" if result.ok else "disconnected",
-                "error": result.error,
+            res = self._ionvision.ping()
+            components["ionvision"] = {
+                "status": "connected" if res.ok else "disconnected",
+                "error": res.error,
             }
         except Exception as exc:
-            components["dms"] = {"status": "error", "error": str(exc)}
+            components["ionvision"] = {"status": "error", "error": str(exc)}
 
         overall = (
             "degraded"
@@ -487,7 +563,9 @@ class OrchestratorService:
 
         robot_status = self._robot.ping()
         if not robot_status.ok:
-            raise RuntimeError(f"Robot not ready: {robot_status.error or 'unknown error'}")
+            raise RuntimeError(
+                f"Robot not ready: {robot_status.error or 'unknown error'}"
+            )
 
     # ---- Calibration ----
 
@@ -754,9 +832,7 @@ class OrchestratorService:
 
         image_points = np.array(
             [[target.x, target.y] for target in session.targets], dtype=np.float64
-        ).reshape(
-            -1, 1, 2
-        )
+        ).reshape(-1, 1, 2)
         robot_points = np.array(
             session.captured_robot_points, dtype=np.float64
         ).reshape(-1, 3)
@@ -837,22 +913,25 @@ class OrchestratorService:
             for key in required:
                 if key not in data:
                     raise ValueError(f"Missing mapping key: {key}")
-            fixed_points = (
-                data.get("checkerboard", {}).get("fixed_points")
-                or [list(point) for point in FIXED_CALIBRATION_POINTS]
-            )
+            fixed_points = data.get("checkerboard", {}).get("fixed_points") or [
+                list(point) for point in FIXED_CALIBRATION_POINTS
+            ]
             if fixed_points != [list(point) for point in FIXED_CALIBRATION_POINTS]:
                 raise ValueError("Unsupported checkerboard point order")
             if self._camera_vision.intrinsics_loaded:
                 current_intrinsics_path = self._camera_vision.intrinsics_path
-                if current_intrinsics_path and data.get(
-                    "intrinsics_path"
-                ) != current_intrinsics_path:
+                if (
+                    current_intrinsics_path
+                    and data.get("intrinsics_path") != current_intrinsics_path
+                ):
                     raise ValueError("Mapping intrinsics do not match current camera")
                 expected_resolution = list(
                     self._camera_vision.intrinsics_resolution or []
                 )
-                if expected_resolution and data.get("resolution") != expected_resolution:
+                if (
+                    expected_resolution
+                    and data.get("resolution") != expected_resolution
+                ):
                     raise ValueError("Mapping resolution does not match intrinsics")
             return data
         except Exception as exc:
@@ -893,9 +972,10 @@ class OrchestratorService:
         y_direction = robot_by_grid[(row_target.row, row_target.col)] - origin
 
         x_norm = np.linalg.norm(x_direction)
-        y_direction = y_direction - (
-            np.dot(y_direction, x_direction) / max(x_norm**2, 1e-12)
-        ) * x_direction
+        y_direction = (
+            y_direction
+            - (np.dot(y_direction, x_direction) / max(x_norm**2, 1e-12)) * x_direction
+        )
         y_norm = np.linalg.norm(y_direction)
 
         if x_norm <= 1e-9 or y_norm <= 1e-9:
@@ -1048,6 +1128,13 @@ class OrchestratorService:
                 f"measuring_points_per_cm must be <= {MAX_MEASURING_POINTS_PER_CM}"
             )
 
+        logger.info(
+            "Populate start batteries=%d measuring_points_per_cm=%.3f calibrated=%s",
+            len(batteries),
+            measuring_points_per_cm,
+            self.is_calibrated,
+        )
+
         step_mm = 10.0 / measuring_points_per_cm
         ordered_batteries: list[tuple[float, list[tuple[float, float]]]] = []
 
@@ -1096,10 +1183,55 @@ class OrchestratorService:
                         }
                     )
 
+        logger.info(
+            "Populate success batteries_in=%d batteries_used=%d points_out=%d step_mm=%.3f",
+            len(batteries),
+            len(ordered_batteries),
+            len(path),
+            step_mm,
+        )
+
         return path
 
     def detect_path(self) -> DetectionResults:
-        return self._camera_vision.detect_latest()
+        try:
+            return self._camera_vision.detect_latest()
+        finally:
+            self._prune_image_files()
+
+    def _prune_old_data(self) -> None:
+        if self._max_jobs <= 0:
+            return
+        self._storage.prune_jobs(max_jobs=self._max_jobs)
+        self._prune_image_files()
+
+    def _prune_image_files(self) -> None:
+        if self._max_jobs <= 0:
+            return
+
+        output_dir = getattr(self._camera_vision, "_output_dir", None)
+        image_dir = Path(output_dir) if output_dir else Path("data/images")
+        if not image_dir.exists():
+            return
+
+        try:
+            captures = sorted(
+                image_dir.glob("capture_*.jpg"),
+                key=lambda path: path.stat().st_mtime,
+            )
+        except OSError:
+            logger.debug("Failed to list capture files for pruning", exc_info=True)
+            return
+
+        excess = len(captures) - self._max_jobs
+        if excess <= 0:
+            return
+
+        for path in captures[:excess]:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.debug("Failed to delete capture file %s", path, exc_info=True)
 
     @property
     def camera_vision(self) -> CameraVisionAdapter:
@@ -1110,23 +1242,79 @@ class OrchestratorService:
 
     # ---- WEBSOCKET SERVICES ----
 
-    async def initialize_dms(self) -> None:
-        await self._dms.initialize_websocket()
-        self._dms.on_event("scan.resultsProcessed", self._handle_scan_results_processed)
-        self._dms.on_event("scan.stopped", self._handle_scan_stopped)
+    async def initialize_ionvision(self) -> None:
+        """Initialize DMS WebSocket connection and register event handlers.
 
-    async def _close_dms(self) -> None:
-        await self._dms.disconnect_websocket()
-        self._dms.off_event(
+        Establishes the WebSocket connection to the DMS and registers handlers
+        for scan lifecycle events. Must be called before any scan operations
+        to enable real-time event monitoring.
+        """
+        await self._ionvision.initialize_websocket()
+        self._ionvision.on_event(
             "scan.resultsProcessed", self._handle_scan_results_processed
         )
-        self._dms.off_event("scan.stopped", self._handle_scan_stopped)
+        self._ionvision.on_event("scan.stopped", self._handle_scan_stopped)
+        self._ionvision_ws_initialized = True
+
+    async def _close_ionvision(self) -> None:
+        """Clean up DMS WebSocket connection and unregister event handlers.
+
+        Gracefully closes the WebSocket connection and removes all registered
+        event handlers. Should be called during orchestrator shutdown to
+        prevent resource leaks.
+        """
+        if self._ionvision_ws_initialized:
+            await self._ionvision.disconnect_websocket()
+            self._ionvision.off_event(
+                "scan.resultsProcessed", self._handle_scan_results_processed
+            )
+            self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
+            self._ionvision_ws_initialized = False
+
+    async def close_ionvision(self) -> None:
+        await self._close_ionvision()
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
+        """Handle scan results processing completion event.
+
+        Called when the DMS finishes processing a scan result and stores it
+        to device storage. This indicates the scan is fully complete and
+        the result data is ready for retrieval.
+
+        Args:
+            data: WebSocket message envelope containing event details
+                (has 'type', 'time', and 'body' keys)
+        """
         logger.info("Scan results have been processed: %s", data.get("body"))
+        self._scan_results_processed_event.set()
 
     async def _handle_scan_stopped(self, data: dict) -> None:
+        """Handle scan stop event.
+
+        Called when an ongoing scan is stopped, either by user request
+        or due to an error condition. The stop may occur before results
+        are fully processed.
+
+        Args:
+            data: WebSocket message envelope containing event details
+                (has 'type', 'time', and 'body' keys)
+        """
         logger.info("Scan has been stopped: %s", data.get("body"))
+        self._scan_stopped_event.set()
 
     async def _handle_error(self, data: dict) -> None:
+        """Handle DMS error event.
+
+        Called when the DMS encounters an error condition. This handler
+        may not be actively used in the current project implementation,
+        but is available for future error handling logic.
+
+        Note:
+            A scan may be stopped without finishing. No result data will be
+            saved in this case.
+
+        Args:
+            data: WebSocket message envelope containing error details
+                (has 'type', 'time', 'code', and other error info)
+        """
         logger.warning("An error occurred: %s", data.get("code"))

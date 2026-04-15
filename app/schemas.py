@@ -59,7 +59,7 @@ class Health(BaseModel):
     uptime_s: float = Field(0.0, alias="uptimeSeconds")
     robot: ComponentHealth
     camera: ComponentHealth
-    dms: ComponentHealth
+    ionvision: ComponentHealth
 
     model_config = {"populate_by_name": True}
 
@@ -86,6 +86,8 @@ class Status(BaseModel):
 class Profile(BaseModel):
     name: str
     description: str | None = None
+    work_z: float = Field(0.0, alias="workZ")
+    measuring_points_per_cm: float = Field(0.5, alias="measuringPointsPerCm", gt=0.0)
 
 
 class CornerSchema(BaseModel):

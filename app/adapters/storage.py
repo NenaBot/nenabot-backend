@@ -116,6 +116,48 @@ class StorageAdapter:
             self._db.commit()
             return cur.rowcount > 0
 
+    def prune_jobs(self, max_jobs: int) -> list[str]:
+        """Delete the oldest jobs so that at most *max_jobs* remain.
+
+        Jobs are ordered by ``created_at`` ascending; the oldest ones are
+        removed first.  Cascade constraints on the ``waypoints``,
+        ``measurements``, and ``job_images`` tables ensure all child rows
+        are deleted automatically.
+
+        Parameters
+        ----------
+        max_jobs:
+            Maximum number of jobs to retain.  Values ≤ 0 are a no-op.
+
+        Returns
+        -------
+        list[str]
+            IDs of the jobs that were deleted.
+        """
+        if max_jobs <= 0:
+            return []
+        count_row = self._db.fetchone("SELECT COUNT(*) AS n FROM jobs")
+        total_jobs = int(count_row["n"]) if count_row else 0
+        excess = total_jobs - max_jobs
+        if excess <= 0:
+            return []
+
+        oldest_rows = self._db.fetchall(
+            "SELECT id FROM jobs ORDER BY created_at ASC LIMIT ?",
+            (excess,),
+        )
+        to_delete = [r["id"] for r in oldest_rows]
+        if not to_delete:
+            return []
+
+        placeholders = ",".join("?" for _ in to_delete)
+        self._db.execute(
+            f"DELETE FROM jobs WHERE id IN ({placeholders})",
+            tuple(to_delete),
+        )
+        self._db.commit()
+        return to_delete
+
     # ---- Measurements ----
 
     def save_measurement(self, job_id: str, m: Measurement) -> None:
@@ -153,9 +195,9 @@ class StorageAdapter:
                     waypoint=Waypoint(x=r["x"], y=r["y"], z=r["z"], r=r["r"]),
                     pixel_x=r["pixel_x"],
                     pixel_y=r["pixel_y"],
-                    scan_result=json.loads(r["scan_result"])
-                    if r["scan_result"]
-                    else None,
+                    scan_result=(
+                        json.loads(r["scan_result"]) if r["scan_result"] else None
+                    ),
                     simulated=bool(r["simulated"]),
                     timestamp=r["timestamp"],
                 )

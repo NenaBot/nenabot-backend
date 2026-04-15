@@ -323,6 +323,81 @@ def test_get_results_rejects_page_numbers_below_one(
     iv_adapter._request.assert_not_called()
 
 
+def test_ucv_valid_range_bounds_are_ordered() -> None:
+    """Guardrail: lower UCV bound should be strictly lower than upper bound."""
+    lower, upper = IVAdapter.UCV_VALID_RANGE
+
+    assert lower < upper
+
+
+def test_evaluate_scan_data_returns_average_of_top_three_valid_intensities(
+    iv_adapter: IVAdapter,
+) -> None:
+    """Average is computed from top 3 intensities mapped by configured UCV bounds."""
+    lower, upper = IVAdapter.UCV_VALID_RANGE
+    midpoint = (lower + upper) / 2
+    data = {
+        "body": {
+            "measurementData": {
+                "ucv": [lower, midpoint, upper, upper + 0.1, "bad"],
+                "intensityTop": [10.0, 3.0, 9.0, 100.0, 999.0],
+            }
+        }
+    }
+
+    result = iv_adapter.evaluate_scan_data(data)
+
+    # Valid UCV indexes are 0,1,2; top 3 mapped intensities are 10, 9, 3.
+    assert result.ok is True
+    assert result.payload is not None
+    assert result.payload["intensity_average"] == pytest.approx(
+        (10.0 + 9.0 + 3.0) / 3.0
+    )
+
+
+def test_evaluate_scan_data_returns_none_when_less_than_three_values(
+    iv_adapter: IVAdapter,
+) -> None:
+    """Function returns IVResult with ok=False when fewer than 3 mapped numeric intensity values exist."""
+    data = {
+        "body": {
+            "measurementData": {
+                "ucv": [0.2, 1.5, -2.0],
+                "intensityTop": [8.0, 9.0, 10.0],
+            }
+        }
+    }
+
+    result = iv_adapter.evaluate_scan_data(data)
+
+    assert result.ok is False
+    assert result.error is not None
+
+
+@pytest.mark.parametrize("data", [None, "not-a-dict", []])
+def test_evaluate_scan_data_returns_none_on_non_dict_top_level_payload(
+    iv_adapter: IVAdapter,
+    data: object,
+) -> None:
+    """Function returns IVResult with ok=False when the top-level payload is not a dictionary."""
+    result = iv_adapter.evaluate_scan_data(data)
+
+    assert result.ok is False
+    assert result.error is not None
+
+
+@pytest.mark.parametrize("data", [{"body": "not-a-dict"}])
+def test_evaluate_scan_data_returns_none_on_invalid_payload_shape(
+    iv_adapter: IVAdapter,
+    data: dict[str, object],
+) -> None:
+    """Function returns IVResult with ok=False when payload structure is missing expected dict/list nodes."""
+    result = iv_adapter.evaluate_scan_data(data)
+
+    assert result.ok is False
+    assert result.error is not None
+
+
 # IVAdapter _request tests
 @respx.mock
 def test__request_returns_ivresult_on_2xx(iv_adapter: IVAdapter) -> None:

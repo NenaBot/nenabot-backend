@@ -108,6 +108,55 @@ Open [`docs/calibration-tester.html`](./calibration-tester.html) and follow the 
 6. Repeat until all 4 points are captured.
 7. After the 4th point, the backend solves the mapping and overwrites `data/calibration/robot_mapping.json`.
 
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant FE as Calibration Tester
+    participant BE as Backend API
+    participant CAM as CameraVisionAdapter
+    participant ARM as RobotAdapter
+
+    U->>FE: Open calibration page
+    FE->>BE: GET /api/status
+    BE->>CAM: checkerboard_status()
+    CAM-->>BE: visible / not visible
+    BE-->>FE: calibration status
+
+    opt Optional live previews
+        FE->>BE: GET /api/stream/camera/feed
+        BE-->>FE: raw MJPEG stream
+        FE->>BE: GET /api/stream/detection/feed
+        BE-->>FE: detection MJPEG stream
+    end
+
+    U->>FE: Place checkerboard and move arm to desired start pose
+    U->>FE: Click Start Calibration
+    FE->>BE: POST /api/calibration { action: "start" }
+    BE->>CAM: get_latest_frame()
+    BE->>CAM: find_checkerboard(frame)
+    BE->>ARM: get_pose()
+    BE-->>FE: referenceImageBase64 + targetPoint P1 + currentStep=0
+
+    loop Capture 4 checkerboard touch points
+        U->>FE: Move arm tip to highlighted point and click Capture
+        FE->>BE: POST /api/calibration { action: "capture" }
+        BE->>ARM: get_pose()
+        alt points 1-3
+            BE-->>FE: capturedPoints + next targetPoint
+        else point 4
+            BE->>BE: solvePnP + derive plane metadata
+            BE->>BE: overwrite data/calibration/robot_mapping.json
+            BE-->>FE: calibrated=true + lastCalibratedAt
+        end
+    end
+
+    FE->>BE: GET /api/status
+    BE-->>FE: calibrated=true + lastCalibratedAt
+```
+
 The fixed checkerboard sequence is:
 
 - `P1 (1, 0)`

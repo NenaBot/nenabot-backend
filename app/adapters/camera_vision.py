@@ -127,6 +127,14 @@ class CameraVisionAdapter:
         self._checkerboard_status_cache: dict[str, bool | str | None] | None = None
         self._checkerboard_status_cached_at = 0.0
 
+        # Streaming state
+        self._camera_streaming = False
+        self._detection_streaming = False
+
+    @property
+    def output_dir(self) -> Path:
+        return self._output_dir
+
     # ---- intrinsics ----
 
     def _load_intrinsics(self) -> None:
@@ -314,6 +322,8 @@ class CameraVisionAdapter:
             return CaptureResult(False, error=self._capture_error)
         return CaptureResult(True)
 
+    # ---- health check ----
+
     def ping(self) -> CaptureResult:
         try:
             import cv2
@@ -472,11 +482,11 @@ class CameraVisionAdapter:
         if cached is not None:
             return cached
 
-        frame = self.get_latest_frame(timeout_s=0.1, ensure_capture=False)
+        frame, error = self._capture_frame_for_processing(timeout_s=0.1)
         if frame is None:
             return self._cache_checkerboard_status(
                 visible=False,
-                error="No camera frame available",
+                error=error,
             )
 
         result = self.find_checkerboard(frame)
@@ -616,55 +626,85 @@ class CameraVisionAdapter:
         _, jpeg = cv2.imencode(".jpg", frame)
         return jpeg.tobytes()
 
-    async def stream_camera(self) -> AsyncGenerator[bytes, None]:
-        import cv2
+    @staticmethod
+    def _multipart_frame(payload: bytes) -> bytes:
+        return b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + payload + b"\r\n"
 
+    def _stream_error_chunk(self, text: str) -> bytes:
+        return self._multipart_frame(self._error_frame(text))
+
+    def _capture_frame_for_processing(
+        self,
+        *,
+        timeout_s: float,
+    ) -> tuple[np.ndarray | None, str | None]:
         result = self._ensure_capture_running()
         if not result.ok:
-            error = self._error_frame(result.error or "Camera not available")
-            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+            return None, result.error or "Camera not available"
+
+        frame = self.get_latest_frame(timeout_s=timeout_s, ensure_capture=False)
+        if frame is None:
+            return None, self._capture_error or "No camera frame available"
+        return frame, None
+
+    @staticmethod
+    def _encode_jpeg(
+        frame: np.ndarray,
+        *,
+        quality: int = 70,
+    ) -> bytes | None:
+        import cv2
+
+        ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        if not ok:
+            return None
+        return jpeg.tobytes()
+
+    def _camera_stream_chunk(self) -> bytes:
+        frame, error = self._capture_frame_for_processing(timeout_s=1.0)
+        if frame is None:
+            return self._stream_error_chunk(error or "No camera frame available")
+
+        jpeg = self._encode_jpeg(frame, quality=70)
+        if jpeg is None:
+            return self._stream_error_chunk("Failed to encode camera frame")
+        return self._multipart_frame(jpeg)
+
+    async def stream_camera(self) -> AsyncGenerator[bytes, None]:
+        result = await asyncio.to_thread(self._ensure_capture_running)
+        if not result.ok:
+            yield await asyncio.to_thread(
+                self._stream_error_chunk,
+                result.error or "Camera not available",
+            )
             return
 
         while True:
-            frame = self.get_latest_frame(timeout_s=1.0)
-            if frame is None:
-                error = self._error_frame("No camera frame available")
-                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
-                await asyncio.sleep(0.2)
-                continue
-
-            _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                + jpeg.tobytes()
-                + b"\r\n"
-            )
+            yield await asyncio.to_thread(self._camera_stream_chunk)
             await asyncio.sleep(CAMERA_STREAM_INTERVAL_S)
 
-    async def stream_detection(self) -> AsyncGenerator[bytes, None]:
-        import cv2
+    def _detection_stream_chunk(self) -> bytes:
+        frame, error = self._capture_frame_for_processing(timeout_s=1.0)
+        if frame is None:
+            return self._stream_error_chunk(error or "No camera frame available")
 
-        result = self._ensure_capture_running()
+        annotated = self.detect_live(frame)
+        jpeg = self._encode_jpeg(annotated, quality=70)
+        if jpeg is None:
+            return self._stream_error_chunk("Failed to encode detection frame")
+        return self._multipart_frame(jpeg)
+
+    async def stream_detection(self) -> AsyncGenerator[bytes, None]:
+        result = await asyncio.to_thread(self._ensure_capture_running)
         if not result.ok:
-            error = self._error_frame(result.error or "Camera not available")
-            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
+            yield await asyncio.to_thread(
+                self._stream_error_chunk,
+                result.error or "Camera not available",
+            )
             return
 
         while True:
-            frame = self.get_latest_frame(timeout_s=1.0)
-            if frame is None:
-                error = self._error_frame("No camera frame available")
-                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + error + b"\r\n"
-                await asyncio.sleep(0.2)
-                continue
-
-            annotated = self.detect_live(frame)
-            _, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                + jpeg.tobytes()
-                + b"\r\n"
-            )
+            yield await asyncio.to_thread(self._detection_stream_chunk)
             await asyncio.sleep(DETECTION_STREAM_INTERVAL_S)
 
     def detect_live(self, frame: np.ndarray) -> np.ndarray:
