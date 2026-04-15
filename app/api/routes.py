@@ -316,9 +316,8 @@ async def _job_events_stream(
 
         while True:
             try:
-                event = subscriber.get_nowait()
+                event = await asyncio.to_thread(subscriber.get, True, 1.0)
             except queue.Empty:
-                await asyncio.sleep(1)
                 continue
 
             event_type = event.get("type", "job:update")
