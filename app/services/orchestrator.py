@@ -1215,6 +1215,12 @@ class OrchestratorService:
     # ---- WEBSOCKET SERVICES ----
 
     async def initialize_ionvision(self) -> None:
+        """Initialize DMS WebSocket connection and register event handlers.
+
+        Establishes the WebSocket connection to the DMS and registers handlers
+        for scan lifecycle events. Must be called before any scan operations
+        to enable real-time event monitoring.
+        """
         await self._ionvision.initialize_websocket()
         self._ionvision.on_event(
             "scan.resultsProcessed", self._handle_scan_results_processed
@@ -1223,6 +1229,12 @@ class OrchestratorService:
         self._ionvision_ws_initialized = True
 
     async def _close_ionvision(self) -> None:
+        """Clean up DMS WebSocket connection and unregister event handlers.
+
+        Gracefully closes the WebSocket connection and removes all registered
+        event handlers. Should be called during orchestrator shutdown to
+        prevent resource leaks.
+        """
         if self._ionvision_ws_initialized:
             await self._ionvision.disconnect_websocket()
             self._ionvision.off_event(
@@ -1235,12 +1247,46 @@ class OrchestratorService:
         await self._close_ionvision()
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
+        """Handle scan results processing completion event.
+
+        Called when the DMS finishes processing a scan result and stores it
+        to device storage. This indicates the scan is fully complete and
+        the result data is ready for retrieval.
+
+        Args:
+            data: WebSocket message envelope containing event details
+                (has 'type', 'time', and 'body' keys)
+        """
         logger.info("Scan results have been processed: %s", data.get("body"))
         self._scan_results_processed_event.set()
 
     async def _handle_scan_stopped(self, data: dict) -> None:
+        """Handle scan stop event.
+
+        Called when an ongoing scan is stopped, either by user request
+        or due to an error condition. The stop may occur before results
+        are fully processed.
+
+        Args:
+            data: WebSocket message envelope containing event details
+                (has 'type', 'time', and 'body' keys)
+        """
         logger.info("Scan has been stopped: %s", data.get("body"))
         self._scan_stopped_event.set()
 
     async def _handle_error(self, data: dict) -> None:
+        """Handle DMS error event.
+
+        Called when the DMS encounters an error condition. This handler
+        may not be actively used in the current project implementation,
+        but is available for future error handling logic.
+
+        Note:
+            A scan may be stopped without finishing. No result data will be
+            saved in this case.
+
+        Args:
+            data: WebSocket message envelope containing error details
+                (has 'type', 'time', 'code', and other error info)
+        """
         logger.warning("An error occurred: %s", data.get("code"))
