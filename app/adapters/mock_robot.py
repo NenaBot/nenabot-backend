@@ -6,7 +6,8 @@ from app.adapters.robot import PoseResult, RobotResult
 class MockRobotAdapter:
     """In-memory robot adapter for frontend/dev mock mode."""
 
-    def __init__(self) -> None:
+    def __init__(self, baud: int = 115200) -> None:
+        self._baud = baud
         self._connected = False
         self._pose = PoseResult(ok=True, x=200.0, y=100.0, z=-50.0, r=0.0)
 
@@ -42,7 +43,7 @@ class MockRobotAdapter:
             result = self.move(x, y, z, r, wait=True)
             if not result.ok:
                 return result
-        return RobotResult(ok=True)
+        return self.home()
 
     def get_pose(self) -> PoseResult:
         if not self._connected:
@@ -85,3 +86,10 @@ class MockRobotAdapter:
 
     def disconnect(self) -> None:
         self._connected = False
+
+    def is_reachable_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
+        if z_mm > 0 or z_mm < -30 or x_mm < 10:
+            return False
+
+        dist = (y_mm**2 + x_mm**2) ** 0.5
+        return 180 <= dist <= 320

@@ -7,11 +7,13 @@ import time
 from copy import deepcopy
 from typing import Any, Callable
 
-from app.adapters.ionVision import IVResult
+from app.adapters.ionVision import IVAdapter, IVResult
 
 
 class MockIVAdapter:
     """Deterministic IonVision adapter for frontend/dev mock mode."""
+
+    UCV_VALID_RANGE = IVAdapter.UCV_VALID_RANGE
 
     def __init__(
         self,
@@ -40,6 +42,10 @@ class MockIVAdapter:
 
     def _build_latest_dataobject(self) -> dict[str, Any]:
         result_id = f"mock-result-{int(time.time())}"
+        measurement_data = {
+            "Ucv": [0.5, 1.2, 2.0, 4.1],
+            "IntensityTop": [12.0, 42.0, 30.0, 2.0],
+        }
         return {
             "Id": result_id,
             "scanId": self._scan_id or "",
@@ -47,6 +53,8 @@ class MockIVAdapter:
             "FinishTime": self._now_iso(),
             "Date": self._now_iso(),
             "information": deepcopy(self._comments),
+            "MeasurementData": measurement_data,
+            "body": {"measurementData": measurement_data},
             "meta": {"totalResults": 1, "mock": True},
             "results": [
                 {
@@ -212,6 +220,10 @@ class MockIVAdapter:
             ok=True,
             payload={"message": "Stored result comments updated successfully."},
         )
+
+    def evaluate_scan_data(self, data: dict[str, Any]) -> IVResult:
+        # Keep evaluation semantics in sync with the production adapter.
+        return IVAdapter.evaluate_scan_data(self, data)
 
     async def initialize_websocket(self) -> None:
         self._connected = True

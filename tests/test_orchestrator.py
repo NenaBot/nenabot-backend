@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -310,6 +311,138 @@ def test_job_fails_on_robot_move_error(tmp_path: Path) -> None:
     assert db_job is not None
     assert db_job.state == "failed"
     assert "Robot move failed" in (db_job.error or "")
+
+
+def test_job_waits_for_scan_results_processed_before_next_waypoint(
+    tmp_path: Path,
+) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    job = service.create_job(
+        path=[Waypoint(x=1, y=2), Waypoint(x=3, y=4)],
+        dry_run=False,
+    )
+
+    service._ionvision_ws_initialized = True
+
+    move_calls: list[tuple[float, float, float, float]] = []
+    first_scan_started = threading.Event()
+    second_scan_started = threading.Event()
+    scan_start_count = 0
+
+    def _track_move(x: float, y: float, z: float, r: float) -> RobotResult:
+        move_calls.append((x, y, z, r))
+        return RobotResult(ok=True)
+
+    def _track_scan_start() -> IVResult:
+        nonlocal scan_start_count
+        scan_start_count += 1
+        if scan_start_count == 1:
+            first_scan_started.set()
+        elif scan_start_count == 2:
+            second_scan_started.set()
+        return IVResult(ok=True)
+
+    with patch.object(service._robot, "move", side_effect=_track_move), patch.object(
+        service._robot,
+        "wait_for_position",
+        return_value=PoseResult(ok=True, x=0, y=0, z=0, r=0),
+    ), patch.object(
+        service._ionvision,
+        "start_new_scan",
+        side_effect=_track_scan_start,
+    ) as mock_start_scan, patch.object(
+        service._ionvision,
+        "get_current_scan",
+        return_value=IVResult(ok=True, payload={"state": "running"}),
+    ) as mock_get_current_scan, patch.object(
+        service._ionvision,
+        "get_latest_dataobject",
+        return_value=IVResult(ok=True, payload={"result": "ok"}),
+    ), patch(
+        "time.sleep"
+    ):
+        service.run_job(job.id)
+        assert service._job_thread is not None
+
+        assert first_scan_started.wait(timeout=2), "First scan did not start"
+        assert len(move_calls) == 1
+        assert (
+            not second_scan_started.is_set()
+        ), "Second waypoint started before scan.resultsProcessed was observed"
+
+        service._scan_results_processed_event.set()
+
+        assert second_scan_started.wait(
+            timeout=2
+        ), "Second scan did not start after scan.resultsProcessed"
+        assert len(move_calls) == 2
+
+        service._scan_results_processed_event.set()
+        service._job_thread.join(timeout=5)
+
+    db_job = service.get_job(job.id)
+    assert db_job is not None
+    assert db_job.state == "completed"
+    assert mock_start_scan.call_count == 2
+    assert mock_get_current_scan.call_count == 0
+
+
+def test_job_stores_evaluated_scan_payload_for_client(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    job = service.create_job(path=[Waypoint(x=1, y=2)], dry_run=False)
+
+    service._ionvision_ws_initialized = True
+    raw_payload = {
+        "body": {
+            "measurementData": {
+                "ucv": [0.1, 0.5, 1.0],
+                "intensityTop": [10.0, 20.0, 30.0],
+            }
+        },
+        "scanId": "scan-123",
+    }
+
+    with patch.object(
+        service._robot,
+        "move",
+        return_value=RobotResult(ok=True),
+    ), patch.object(
+        service._robot,
+        "wait_for_position",
+        return_value=PoseResult(ok=True, x=1, y=2, z=0, r=0),
+    ), patch.object(
+        service._ionvision,
+        "start_new_scan",
+        return_value=IVResult(ok=True, payload={"message": "scan started"}),
+    ), patch.object(
+        service,
+        "_wait_for_scan_results_processed",
+        return_value=True,
+    ), patch.object(
+        service._ionvision,
+        "get_latest_dataobject",
+        return_value=IVResult(ok=True, payload=raw_payload),
+    ), patch.object(
+        service._ionvision,
+        "evaluate_scan_data",
+        return_value=IVResult(ok=True, payload={"intensity_average": 20.0}),
+    ) as mock_evaluate, patch(
+        "time.sleep"
+    ):
+        service.run_job(job.id)
+        assert service._job_thread is not None
+        service._job_thread.join(timeout=10)
+
+    db_job = service.get_job(job.id)
+    assert db_job is not None
+    assert db_job.state == "completed"
+    assert len(db_job.measurements) == 1
+    assert db_job.measurements[0].scan_result is not None
+    assert db_job.measurements[0].scan_result.get("scanId") == "scan-123"
+    assert db_job.measurements[0].scan_result.get("evaluation") == {
+        "intensity_average": 20.0
+    }
+    mock_evaluate.assert_called_once_with(raw_payload)
 
 
 def test_return_to_start_after_completion(tmp_path: Path) -> None:

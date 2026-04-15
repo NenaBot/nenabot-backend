@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -112,6 +114,7 @@ class FakeIonVisionAdapter:
         self.start_new_scan_calls = 0
         self.get_current_scan_calls = 0
         self.get_latest_dataobject_calls = 0
+        self._handlers: dict[str, list] = {}
 
     def ping(self) -> IVResult:
         self.ping_calls += 1
@@ -124,19 +127,36 @@ class FakeIonVisionAdapter:
         return None
 
     def on_event(self, event_type: str, handler) -> None:
-        return None
+        self._handlers.setdefault(event_type, []).append(handler)
 
     def off_event(self, event_type: str, handler) -> None:
-        return None
+        handlers = self._handlers.get(event_type, [])
+        try:
+            handlers.remove(handler)
+        except ValueError:
+            pass
+
+    def _emit_event(self, event_type: str) -> None:
+        message = {
+            "type": event_type,
+            "time": int(time.time() * 1000),
+            "body": {},
+        }
+        for handler in list(self._handlers.get(event_type, [])):
+            result = handler(message)
+            if inspect.isawaitable(result):
+                asyncio.run(result)
 
     def start_new_scan(self) -> IVResult:
         self.start_new_scan_calls += 1
+        self._emit_event("scan.resultsProcessed")
         return IVResult(ok=True, payload={"message": "scan started"})
 
     def get_current_scan(self) -> IVResult:
         self.get_current_scan_calls += 1
         if self.get_current_scan_calls == 1:
             return IVResult(ok=True, payload={"state": "running", "progress": 50})
+        self._emit_event("scan.resultsProcessed")
         return IVResult(ok=True, payload={"state": "finished", "progress": 100})
 
     def get_latest_dataobject(self) -> IVResult:
@@ -149,6 +169,10 @@ class FakeIonVisionAdapter:
                 "gasDetection": {"gasName": "ethanol", "confidence": 0.93},
             },
         )
+
+    def evaluate_scan_data(self, data: dict) -> IVResult:
+        _ = data
+        return IVResult(ok=True, payload={"intensity_average": 42.0})
 
 
 @pytest.fixture
@@ -245,6 +269,9 @@ def test_non_dry_run_job_uses_mock_ionvision_scan_flow(ionvision_client) -> None
     assert job["measurements"][0]["simulated"] is False
     assert job["measurements"][0]["scanResult"]["id"] == "result-123"
     assert job["measurements"][0]["scanResult"]["gasDetection"]["gasName"] == "ethanol"
+    assert (
+        job["measurements"][0]["scanResult"]["evaluation"]["intensity_average"] == 42.0
+    )
     assert fake_dms.start_new_scan_calls == 1
-    assert fake_dms.get_current_scan_calls >= 2
+    assert fake_dms.get_current_scan_calls == 0
     assert fake_dms.get_latest_dataobject_calls == 1

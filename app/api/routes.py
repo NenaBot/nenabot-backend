@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import queue
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import get_orchestrator
@@ -37,6 +38,7 @@ from app.schemas import (
 from app.services.orchestrator import OrchestratorService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/health", response_model=Health)
@@ -221,7 +223,14 @@ def detect_path(
     payload: PathRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> PathResponse:
+    logger.info("Path detect start options=%s", payload.options)
     result = svc.detect_path()
+    logger.info(
+        "Path detect done ok=%s detections=%d error=%s",
+        result.ok,
+        len(result.detections),
+        result.error,
+    )
     return PathResponse(
         request_succeeded=result.ok,
         detections=[
@@ -252,12 +261,23 @@ def calibration(
     return CalibrationFlowResponse(**svc.calibration_action(payload.action))
 
 
-async def _job_events_stream(job_id: str, svc: OrchestratorService):
+async def _job_events_stream(
+    job_id: str,
+    svc: OrchestratorService,
+    *,
+    client: str | None = None,
+):
     job = svc.get_job(job_id)
     if not job:
+        logger.warning(
+            "SSE stream requested for missing job job_id=%s client=%s",
+            job_id,
+            client,
+        )
         return
 
     subscriber = svc.subscribe(job_id)
+    logger.info("SSE subscribed job_id=%s client=%s", job_id, client)
     try:
         snapshot = {
             "type": "job:snapshot",
@@ -268,9 +288,30 @@ async def _job_events_stream(job_id: str, svc: OrchestratorService):
             "error": job.error,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        yield _format_sse("job:snapshot", snapshot)
+        logger.info(
+            "SSE send snapshot job_id=%s state=%s points=%d/%d",
+            job_id,
+            job.state,
+            job.last_point_processed,
+            len(job.path),
+        )
+        snapshot_frame = _format_sse("job:snapshot", snapshot)
+        logger.info(
+            "SSE frame bytes=%d event=%s job_id=%s client=%s",
+            len(snapshot_frame),
+            "job:snapshot",
+            job_id,
+            client,
+        )
+        yield snapshot_frame
 
         if job.state in ("completed", "failed", "stopped"):
+            logger.info(
+                "SSE stream closing immediately job_id=%s state=%s client=%s",
+                job_id,
+                job.state,
+                client,
+            )
             return
 
         while True:
@@ -295,11 +336,34 @@ async def _job_events_stream(job_id: str, svc: OrchestratorService):
             if "waypoint_index" in event:
                 payload["waypointIndex"] = event["waypoint_index"]
 
-            yield _format_sse(event_type, payload)
+            logger.info(
+                "SSE send event=%s job_id=%s state=%s points=%s/%s",
+                event_type,
+                payload.get("jobId"),
+                payload.get("state"),
+                payload.get("lastPointProcessed"),
+                payload.get("totalPoints"),
+            )
+            event_frame = _format_sse(event_type, payload)
+            logger.info(
+                "SSE frame bytes=%d event=%s job_id=%s client=%s",
+                len(event_frame),
+                event_type,
+                payload.get("jobId"),
+                client,
+            )
+            yield event_frame
             if event.get("state") in ("completed", "failed", "stopped"):
+                logger.info(
+                    "SSE stream closing on terminal state job_id=%s state=%s client=%s",
+                    job_id,
+                    event.get("state"),
+                    client,
+                )
                 return
     finally:
         svc.unsubscribe(job_id, subscriber)
+        logger.info("SSE unsubscribed job_id=%s client=%s", job_id, client)
 
 
 @router.get(
@@ -319,12 +383,22 @@ async def _job_events_stream(job_id: str, svc: OrchestratorService):
 )
 async def job_events(
     job_id: str,
+    request: Request,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
+    client_host = request.client.host if request.client else "unknown"
+    client_port = request.client.port if request.client else "unknown"
+    client = f"{client_host}:{client_port}"
+
     if not svc.get_job(job_id):
+        logger.warning(
+            "SSE connect rejected missing job job_id=%s client=%s", job_id, client
+        )
         raise HTTPException(status_code=404, detail="Job not found")
+
+    logger.info("SSE connect accepted job_id=%s client=%s", job_id, client)
     return StreamingResponse(
-        _job_events_stream(job_id, svc),
+        _job_events_stream(job_id, svc, client=client),
         media_type="text/event-stream",
     )
 
@@ -338,7 +412,13 @@ def populate_path(
     payload: PathPopulateRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> PathPopulateResponse:
+    logger.info(
+        "Path populate start batteries=%d measuring_points_per_cm=%.3f",
+        len(payload.batteries),
+        payload.measuring_points_per_cm,
+    )
     if not svc.is_calibrated:
+        logger.warning("Path populate rejected: not calibrated")
         raise HTTPException(
             status_code=409,
             detail="Not calibrated — complete POST /calibration first",
@@ -354,9 +434,13 @@ def populate_path(
             payload.measuring_points_per_cm,
         )
     except ValueError as exc:
+        logger.warning("Path populate validation error: %s", exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
+        logger.warning("Path populate runtime error: %s", exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    logger.info("Path populate done points=%d", len(populated))
 
     return PathPopulateResponse(
         path=[PopulatedPathPointSchema(**point) for point in populated]

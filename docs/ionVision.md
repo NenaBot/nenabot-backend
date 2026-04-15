@@ -45,96 +45,13 @@ Evaluate IonVision websocket payload data and compute a scan score.
 Evaluation steps:
 
 1. Read `body.measurementData.ucv` and `body.measurementData.intensityTop`.
-2. Keep indexes where UCV is numeric and in the inclusive range [-1.0, 1.0].
-3. Map those indexes to numeric intensity values.
-4. Sort descending and keep only the 3 highest values.
-5. Return the arithmetic mean of those 3 values.
-
-Return behavior:
-
-- `float`: Average of the top 3 intensity values.
-- `False`: Invalid payload shape or fewer than 3 valid values.
-
-## Core WebSocket Methods
-
-IonVision websocket traffic is one-way from the device to the client. Each
-message is a JSON object with `type`, `time`, and `body` keys. The adapter
-passes that full parsed message to registered handlers.
-
-Example:
-
-```json
-{
-    "type": "controllers.status",
-    "time": 1616057824108,
-    "body": {
-        "status": {
-            "rtmReady": true
-        }
-    }
-}
-```
-
-**initialize_websocket()** <br>
-Initialize WebSocket connection for event streaming.
-Must be called after instantiation to open the WebSocket.
-
-**disconnect_websocket()** <br>
-Close WebSocket connection and stop listening for events.
-
-**on_event(event_type: str, handler: Callable[[Dict[str, Any]], Any])** <br>
-Parameters:
-
-- event_type: The type of event to listen for (e.g., "message.error", "scan.finished")
-- handler: Async or sync callable that receives the full websocket message
-  object with `type`, `time`, and `body`
-
-Description:
-Register a handler for a WebSocket event.
-
-**off_event(event_type: str, handler: Callable[[Dict[str, Any]], Any])** <br>
-Parameters:
-
-- event_type: The type of event to stop listening for (e.g., "message.error", "scan.finished")
-- handler: The previously registered callback to remove
-
-Description:
-Unregister a handler for a WebSocket event.
-
-## Internal Architecture
-
-- Delegates WebSocket management to WebSocketAdapter class
-- Returns IVResult objects (with ok, payload, error fields) for HTTP calls
-- Dispatches websocket events by `type`
-- Keeps the full documented IonVision websocket envelope intact for handlers
-
-## Sequence Diagram: Successful IonVision-Backend Communication Flow
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant BE as Backend API
-    participant IV as IonVision
-    BE->>IV: GET/currentScan/comments
-    IV-->BE: Comments object
-    BE->>IV: PUT/currentScan/comments
-    IV-->BE: Scan comments replaced
-    BE->>IV: POST/currentScan
-    IV-->BE: The new scan is now starting
-
-    IV->>BE: scan.resultsProcessed
-    BE->>IV: GET/results/latest
-    IV-->BE: The data object of latest scan result
-```
-
----
-
+2. Keep indexes where UCV is numeric and inside `IVAdapter.UCV_VALID_RANGE` (inclusive).
 ## Hardware Integration Tests
 
 The hardware test suite lives at `tests/test_ionvision_hardware.py` and is marked
-`@pytest.mark.hardware` + `@pytest.mark.ionvision`. CI excludes these markers, so
-tests are never run automatically — they must be triggered manually when connected
-to the device.
+`@pytest.mark.hardware` + `@pytest.mark.ionvision`. CI excludes these markers via
+`pytest.ini`, so you must override the default `addopts` filter when running
+them locally.
 
 ### What the tests cover
 
@@ -172,7 +89,8 @@ Connection defaults to `http://192.168.1.109/api` and `ws://192.168.1.109/socket
 All settings can be overridden with environment variables.
 
 ```bash
-IONVISION_RUN_HARDWARE_TESTS=1 pytest -s -v tests/test_ionvision_hardware.py
+IONVISION_RUN_HARDWARE_TESTS=1 \
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py
 ```
 
 Override connection settings for a different device:
@@ -180,7 +98,7 @@ Override connection settings for a different device:
 ```bash
 IONVISION_RUN_HARDWARE_TESTS=1 \
 IONVISION_BASE_URL=http://<device-ip>/api \
-pytest -s -v tests/test_ionvision_hardware.py
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py
 ```
 
 ### Environment variables
@@ -199,9 +117,9 @@ All variables are optional — hardcoded defaults are used if not set.
 | `IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S` | `120.0`                     | Timeout waiting for `scan.resultsProcessed`                        |
 | `IONVISION_RESULTS_MAX_RESULTS`              | `100`                       | Max results returned from `/results`                               |
 | `IONVISION_RESULTS_PAGE`                     | —                           | Page number (uses device default if unset)                         |
-| `IONVISION_RESULTS_START_DATE`               | `2026-03-17T13:01:11.874Z`  | Results query start date                                           |
-| `IONVISION_RESULTS_END_DATE`                 | `2026-03-25T13:01:11.874Z`  | Results query end date                                             |
-| `IONVISION_RESULTS_SORT_BY`                  | `date_dsc`                  | Results sort order                                                 |
+| `IONVISION_RESULTS_START_DATE`               | `2026-03-17T13:01:11.874Z`  | Results query start date                                            |
+| `IONVISION_RESULTS_END_DATE`                 | `2026-03-25T13:01:11.874Z`  | Results query end date                                              |
+| `IONVISION_RESULTS_SORT_BY`                  | `date_dsc`                  | Results sort order                                                  |
 | `IONVISION_RESULTS_ONLY_METADATA`            | `true`                      | Return metadata only (no full data objects)                        |
 | `IONVISION_RESULTS_IDS`                      | —                           | Comma-separated result IDs to filter by                            |
 
@@ -211,7 +129,7 @@ WebSocket connectivity only:
 
 ```bash
 IONVISION_RUN_HARDWARE_TESTS=1 \
-pytest -s -v tests/test_ionvision_hardware.py::test_websocket_endpoint_accepts_connections
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py::test_websocket_endpoint_accepts_connections
 ```
 
 Scan lifecycle (start + stop) only:
@@ -219,16 +137,105 @@ Scan lifecycle (start + stop) only:
 ```bash
 IONVISION_RUN_HARDWARE_TESTS=1 \
 IONVISION_ENABLE_MUTATION_TESTS=1 \
-pytest -s -v tests/test_ionvision_hardware.py::test_scan_lifecycle_start_and_stop
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py::test_scan_lifecycle_start_and_stop
 ```
 
 Full scan completion (waits for `scan.resultsProcessed`):
+
+This test starts a scan, waits for `/currentScan` to report a finished state,
+waits for the `scan.resultsProcessed` websocket event, and then polls
+`/results/latest` until the processed result is available. If your device takes
+longer to process scans, increase `IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S`.
 
 ```bash
 IONVISION_RUN_HARDWARE_TESTS=1 \
 IONVISION_ENABLE_MUTATION_TESTS=1 \
 IONVISION_RUN_WS_TEST=1 \
-pytest -s -v tests/test_ionvision_hardware.py::test_websocket_scan_results_processed_event
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py::test_websocket_scan_results_processed_event
+```
+- WebSocket connect and receipt of a `controllers.status` event
+- Full scan completion and receipt of `scan.resultsProcessed`
+
+### Before you run
+
+1. Make sure your machine can reach the IonVision device over the network.
+2. Confirm the device is idle before running the scan lifecycle tests.
+3. Activate the virtualenv:
+
+```bash
+source .venv/bin/activate
+```
+
+### Running the tests
+
+Connection defaults to `http://192.168.1.109/api` and `ws://192.168.1.109/socket`.
+All settings can be overridden with environment variables.
+
+```bash
+`@pytest.mark.hardware` + `@pytest.mark.ionvision`. CI excludes these markers via
+`pytest.ini`, so you must override the default `addopts` filter when running
+them locally.
+
+Override connection settings for a different device:
+
+```bash
+IONVISION_RUN_HARDWARE_TESTS=1 \
+IONVISION_BASE_URL=http://<device-ip>/api \
+pytest -s -v -m hardware tests/test_ionvision_hardware.py
+IONVISION_RUN_HARDWARE_TESTS=1 \
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py
+
+### Environment variables
+
+All variables are optional — hardcoded defaults are used if not set.
+
+| Variable                                     | Default                     | Description                                                        |
+| :------------------------------------------- | :-------------------------- | :----------------------------------------------------------------- |
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py
+| `IONVISION_BASE_URL`                         | `http://192.168.1.109/api`  | IonVision HTTP base URL                                            |
+| `IONVISION_WS_BASE_URL`                      | `ws://192.168.1.109/socket` | WebSocket URL (derived from base URL if omitted)                   |
+| `IONVISION_REQUEST_TIMEOUT_S`                | `10.0`                      | Per-request timeout in seconds                                     |
+| `IONVISION_ENABLE_MUTATION_TESTS`            | `true`                      | Allow scan start/stop and comment writes                           |
+| `IONVISION_RUN_WS_TEST`                      | `true`                      | Enable WebSocket tests                                             |
+| `IONVISION_WS_EVENT_TIMEOUT_S`               | `10.0`                      | Timeout for quick WS events (`controllers.status`, `scan.stopped`) |
+| `IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S` | `120.0`                     | Timeout waiting for `scan.resultsProcessed`                        |
+| `IONVISION_RESULTS_MAX_RESULTS`              | `100`                       | Max results returned from `/results`                               |
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py::test_websocket_endpoint_accepts_connections
+| `IONVISION_RESULTS_START_DATE`               | `2026-03-17T13:01:11.874Z`  | Results query start date                                           |
+| `IONVISION_RESULTS_END_DATE`                 | `2026-03-25T13:01:11.874Z`  | Results query end date                                             |
+| `IONVISION_RESULTS_SORT_BY`                  | `date_dsc`                  | Results sort order                                                 |
+| `IONVISION_RESULTS_ONLY_METADATA`            | `true`                      | Return metadata only (no full data objects)                        |
+| `IONVISION_RESULTS_IDS`                      | —                           | Comma-separated result IDs to filter by                            |
+
+### Running specific tests
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py::test_scan_lifecycle_start_and_stop
+WebSocket connectivity only:
+
+```bash
+IONVISION_RUN_HARDWARE_TESTS=1 \
+pytest -s -v -m hardware tests/test_ionvision_hardware.py::test_websocket_endpoint_accepts_connections
+```
+
+Scan lifecycle (start + stop) only:
+
+```bash
+IONVISION_RUN_HARDWARE_TESTS=1 \
+IONVISION_ENABLE_MUTATION_TESTS=1 \
+pytest -s -v -m hardware tests/test_ionvision_hardware.py::test_scan_lifecycle_start_and_stop
+pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py::test_websocket_scan_results_processed_event
+
+Full scan completion (waits for `scan.resultsProcessed`):
+
+This test starts a scan, waits for `/currentScan` to report a finished state,
+waits for the `scan.resultsProcessed` websocket event, and then polls
+`/results/latest` until the processed result is available. If your device takes
+longer to process scans, increase `IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S`.
+
+```bash
+IONVISION_RUN_HARDWARE_TESTS=1 \
+IONVISION_ENABLE_MUTATION_TESTS=1 \
+IONVISION_RUN_WS_TEST=1 \
+pytest -s -v -m hardware tests/test_ionvision_hardware.py::test_websocket_scan_results_processed_event
 ```
 
 ### Safety notes
