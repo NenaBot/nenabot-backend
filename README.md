@@ -1,8 +1,8 @@
-# nenabot-main
+# nenabot-backend
 
 Repo for hosting Hardware Controls and Machine Vision code
 
-# Orchestrator (Initial Template)
+# Orchestrator
 
 Minimal FastAPI-based orchestrator that follows the planning document. Vision, camera, and robot integrations are in-process adapters (no per-module HTTP). DMS is accessed over HTTP.
 
@@ -11,7 +11,7 @@ Minimal FastAPI-based orchestrator that follows the planning document. Vision, c
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
@@ -87,9 +87,12 @@ The following environment variables control nenabot's runtime behaviour.
 | :---------------------------------------- | :---------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `IONVISION_BASE_URL`                      | `http://localhost:8080` | HTTP base URL of the IonVision DMS device                                                                                                                                                                                                                                                                                                                                                                                 |
 | `IONVISION_WS_BASE_URL`                   | derived from HTTP URL   | WebSocket base URL of the IonVision DMS device                                                                                                                                                                                                                                                                                                                                                                            |
+| `NENABOT_MOCK_MODE`                       | `0`                     | Enable full mock runtime (`1` = mock robot/camera/ionvision adapters with in-memory storage, `0` = real adapters). In mock mode, each non-dry-run waypoint triggers a mock IonVision scan and persists a realistic `scanResult` payload (including `MeasurementData`, `SystemData`, `gasDetection`, and `evaluation.intensity_average`).                                                                                  |
+| `NENABOT_ENABLE_STARTUP_HOMING`           | `0`                     | Set to `1` to home the real robot automatically after connect during app startup.                                                                                                                                                                                                                                                                                                                                         |
 | `NENABOT_MAX_JOBS`                        | _(unset — unlimited)_   | Maximum number of jobs to retain. When set to a positive integer, the oldest jobs beyond this limit are automatically deleted at the end of every job execution. Both the database records (job, waypoints, measurements, snapshot image) and the captured JPEG files in `data/images/` are cleaned up. Set this to a small number (e.g. `10`) on memory-constrained devices to prevent unbounded disk and SQLite growth. |
 | `NENABOT_DEFAULT_WORK_Z`                  | `0.0`                   | Default Z coordinate (mm) for the default inspection profile. Pre-filled in the job tester UI on page load. Negative values lower the arm below the calibration plane (e.g. `-35`).                                                                                                                                                                                                                                       |
 | `NENABOT_DEFAULT_MEASURING_POINTS_PER_CM` | `0.5`                   | Default path population density for the default inspection profile (measuring points per cm). Pre-filled in the job tester UI on page load. Must be greater than `0`.                                                                                                                                                                                                                                                     |
+| `NENABOT_DEFAULT_MEASUREMENT_THRESHOLD`   | `120.0`                 | Default grayscale threshold used by detection/path generation (must be in `[0,255]`).                                                                                                                                                                                                                                                                                                                                     |
 
 See `.env.example` for a reference file with all variables.
 
@@ -112,6 +115,7 @@ docker run -d --name nenabot \
 - **Camera/Vision**: `app/adapters/camera_vision.py` loads the intrinsic camera profile, runs shared-camera capture, detects checkerboards and battery contours, and serves MJPEG streams.
 - **Calibration**: runtime 4-point mapping is written to `data/calibration/robot_mapping.json`. The last calibration timestamp is exposed through `GET /api/status`.
 - **IonVision (DMS)**: `app/adapters/ionVision.py` is an HTTP/WebSocket client to the external IonVision API. Configure the base URL with `IONVISION_BASE_URL` / `IONVISION_WS_BASE_URL` or in `app/dependencies.py`.
+- **Mock IonVision behavior**: in `NENABOT_MOCK_MODE=1`, every non-dry-run waypoint produces its own mock IonVision scan result. The stored `measurement.scanResult` mirrors real data object structure and includes `evaluation.intensity_average`.
 - **Database**: SQLite (`data/nenabot.db`) stores all job state, waypoints, measurements, and snapshot images. See [Database Documentation](docs/database.md).
 
 ## UI pages
@@ -127,7 +131,7 @@ docker run -d --name nenabot \
 ## Tests
 
 ```bash
-pytest -q -m "not hardware and not integration"
+python -m pytest -q -m "not hardware and not integration"
 ```
 
 CI runs only unit tests. Hardware/integration tests are excluded via `-m "not hardware and not integration"` and must be run manually when connected to the devices.

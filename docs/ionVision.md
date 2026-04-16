@@ -16,6 +16,19 @@ WebSocket APIs.
 
 ## Core HTTP Methods
 
+## Mock Mode Behavior
+
+When the backend runs with `NENABOT_MOCK_MODE=1`, the IonVision adapter is
+implemented by `app/adapters/mock_ionVision.py`.
+
+- Each non-dry-run waypoint triggers one mock scan in job execution.
+- Each scan returns a distinct `scanId` and result `Id`/`id`.
+- `measurement.scanResult` is shaped to resemble real IonVision data objects,
+  including `MeasurementData`, `SystemData`, `gasDetection`, and
+  `evaluation.intensity_average`.
+- `evaluate_scan_data(...)` uses the same logic as the production adapter,
+  so score semantics stay consistent between mock and hardware flows.
+
 **get_scan_comments()** <br>
 Get the comments object associated with the ongoing or next scan.
 The comments object is automatically reset once a scan finishes
@@ -46,6 +59,7 @@ Evaluation steps:
 
 1. Read `body.measurementData.ucv` and `body.measurementData.intensityTop`.
 2. Keep indexes where UCV is numeric and inside `IVAdapter.UCV_VALID_RANGE` (inclusive).
+
 ## Hardware Integration Tests
 
 The hardware test suite lives at `tests/test_ionvision_hardware.py` and is marked
@@ -117,9 +131,9 @@ All variables are optional — hardcoded defaults are used if not set.
 | `IONVISION_SCAN_RESULTS_PROCESSED_TIMEOUT_S` | `120.0`                     | Timeout waiting for `scan.resultsProcessed`                        |
 | `IONVISION_RESULTS_MAX_RESULTS`              | `100`                       | Max results returned from `/results`                               |
 | `IONVISION_RESULTS_PAGE`                     | —                           | Page number (uses device default if unset)                         |
-| `IONVISION_RESULTS_START_DATE`               | `2026-03-17T13:01:11.874Z`  | Results query start date                                            |
-| `IONVISION_RESULTS_END_DATE`                 | `2026-03-25T13:01:11.874Z`  | Results query end date                                              |
-| `IONVISION_RESULTS_SORT_BY`                  | `date_dsc`                  | Results sort order                                                  |
+| `IONVISION_RESULTS_START_DATE`               | `2026-03-17T13:01:11.874Z`  | Results query start date                                           |
+| `IONVISION_RESULTS_END_DATE`                 | `2026-03-25T13:01:11.874Z`  | Results query end date                                             |
+| `IONVISION_RESULTS_SORT_BY`                  | `date_dsc`                  | Results sort order                                                 |
 | `IONVISION_RESULTS_ONLY_METADATA`            | `true`                      | Return metadata only (no full data objects)                        |
 | `IONVISION_RESULTS_IDS`                      | —                           | Comma-separated result IDs to filter by                            |
 
@@ -153,6 +167,7 @@ IONVISION_ENABLE_MUTATION_TESTS=1 \
 IONVISION_RUN_WS_TEST=1 \
 pytest --override-ini addopts='' -s -v -m hardware tests/test_ionvision_hardware.py::test_websocket_scan_results_processed_event
 ```
+
 - WebSocket connect and receipt of a `controllers.status` event
 - Full scan completion and receipt of `scan.resultsProcessed`
 
@@ -171,7 +186,7 @@ source .venv/bin/activate
 Connection defaults to `http://192.168.1.109/api` and `ws://192.168.1.109/socket`.
 All settings can be overridden with environment variables.
 
-```bash
+````bash
 `@pytest.mark.hardware` + `@pytest.mark.ionvision`. CI excludes these markers via
 `pytest.ini`, so you must override the default `addopts` filter when running
 them locally.
@@ -214,11 +229,11 @@ WebSocket connectivity only:
 ```bash
 IONVISION_RUN_HARDWARE_TESTS=1 \
 pytest -s -v -m hardware tests/test_ionvision_hardware.py::test_websocket_endpoint_accepts_connections
-```
+````
 
 Scan lifecycle (start + stop) only:
 
-```bash
+````bash
 IONVISION_RUN_HARDWARE_TESTS=1 \
 IONVISION_ENABLE_MUTATION_TESTS=1 \
 pytest -s -v -m hardware tests/test_ionvision_hardware.py::test_scan_lifecycle_start_and_stop
@@ -236,7 +251,7 @@ IONVISION_RUN_HARDWARE_TESTS=1 \
 IONVISION_ENABLE_MUTATION_TESTS=1 \
 IONVISION_RUN_WS_TEST=1 \
 pytest -s -v -m hardware tests/test_ionvision_hardware.py::test_websocket_scan_results_processed_event
-```
+````
 
 ### Safety notes
 

@@ -6,6 +6,7 @@ import inspect
 import time
 from copy import deepcopy
 from typing import Any, Callable
+import uuid
 
 from app.adapters.ionVision import IVAdapter, IVResult
 
@@ -40,21 +41,116 @@ class MockIVAdapter:
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def _build_latest_dataobject(self) -> dict[str, Any]:
-        result_id = f"mock-result-{int(time.time())}"
-        measurement_data = {
-            "Ucv": [0.5, 1.2, 2.0, 4.1],
-            "IntensityTop": [12.0, 42.0, 30.0, 2.0],
-        }
+    @staticmethod
+    def _build_mock_measurement_data() -> dict[str, Any]:
+        # Keep the shape close to real IonVision dumps while staying lightweight.
+        ucv = [-3.0, -2.5, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5]
+        intensity_top = [
+            0.016,
+            1.445,
+            1.331,
+            1.623,
+            1.412,
+            1.558,
+            52.253,
+            72.918,
+            115.448,
+            91.634,
+            58.26,
+            1.38,
+        ]
         return {
+            "DataValid": True,
+            "DataPoints": len(ucv),
+            "IntensityTop": intensity_top,
+            "IntensityBottom": [
+                133.466,
+                -2.224,
+                -2.305,
+                -2.24,
+                -2.126,
+                -2.143,
+                -53.015,
+                -74.831,
+                -130.28,
+                -84.246,
+                -23.407,
+                -2.451,
+            ],
+            "Usv": [400] * len(ucv),
+            "Ucv": ucv,
+            "Vb": [-6] * len(ucv),
+            "PP": [1000] * len(ucv),
+            "PW": [220] * len(ucv),
+            "NForSampleAverages": [2048] * len(ucv),
+        }
+
+    @staticmethod
+    def _build_mock_system_data() -> dict[str, Any]:
+        return {
+            "ErrorRegister": {
+                "sampleFlowR1Over": True,
+                "sensorFlowR1Over": True,
+                "sampleHeaterTemperatureR1Under": True,
+                "sensorHeaterTemperatureR1Under": True,
+            },
+            "FetTemperature": {"Avg": 26, "Min": 25, "Max": 26},
+            "Sample": {
+                "Flow": {"Avg": 3.11, "Min": 3.08, "Max": 3.15},
+                "Temperature": {"Avg": 24.98, "Min": 24.98, "Max": 24.99},
+                "Pressure": {"Avg": 1008.65, "Min": 1008.65, "Max": 1008.75},
+                "Humidity": {"Avg": 1.83, "Min": 1.82, "Max": 1.83},
+                "PumpPWM": {"Avg": 100, "Min": 100, "Max": 100},
+            },
+            "Sensor": {
+                "Flow": {"Avg": 6.06, "Min": 6.01, "Max": 6.06},
+                "Temperature": {"Avg": 24.22, "Min": 24.21, "Max": 24.22},
+                "Pressure": {"Avg": 899.64, "Min": 899.64, "Max": 899.86},
+                "Humidity": {"Avg": 2.48, "Min": 2.44, "Max": 2.48},
+                "PumpPWM": {"Avg": 100, "Min": 100, "Max": 100},
+            },
+            "Ambient": {
+                "Temperature": {"Avg": 26.44, "Min": 26.43, "Max": 26.44},
+                "Pressure": {"Avg": 1008.66, "Min": 1008.66, "Max": 1008.66},
+                "Humidity": {"Avg": 8.03, "Min": 8.01, "Max": 8.03},
+            },
+        }
+
+    def _build_latest_dataobject(self) -> dict[str, Any]:
+        result_id = f"mock-result-{uuid.uuid4()}"
+        start_time = self._now_iso()
+        finish_time = self._now_iso()
+        measurement_data = self._build_mock_measurement_data()
+        evaluation = self.evaluate_scan_data({"MeasurementData": measurement_data})
+        intensity_average = (
+            float(evaluation.payload["intensity_average"])
+            if evaluation.ok and evaluation.payload
+            else 0.0
+        )
+        gas_detection = {"gasName": "ethanol", "confidence": 0.92}
+        return {
+            "id": result_id,
             "Id": result_id,
+            "Measurer": "Laser",
+            "StartTime": start_time,
             "scanId": self._scan_id or "",
             "scanName": "Mock Scan",
-            "FinishTime": self._now_iso(),
-            "Date": self._now_iso(),
+            "FinishTime": finish_time,
+            "Date": finish_time,
+            "Parameters": "mock-parameter-1",
+            "Project": "NenaBot",
+            "Comments": deepcopy(self._comments),
+            "FormatVersion": 3,
+            "SystemData": self._build_mock_system_data(),
             "information": deepcopy(self._comments),
             "MeasurementData": measurement_data,
-            "body": {"measurementData": measurement_data},
+            "body": {
+                "measurementData": measurement_data,
+                "gasDetection": gas_detection,
+            },
+            "gasDetection": gas_detection,
+            "evaluation": {"intensity_average": intensity_average},
+            "intensity_average": intensity_average,
             "meta": {"totalResults": 1, "mock": True},
             "results": [
                 {
@@ -62,6 +158,7 @@ class MockIVAdapter:
                     "gasName": "ethanol",
                     "confidence": 0.92,
                     "ppb": 42.0,
+                    "intensity_average": intensity_average,
                 }
             ],
         }
@@ -82,10 +179,20 @@ class MockIVAdapter:
             return IVResult(ok=False, error="409 Conflict: scan already active")
 
         self._scan_started_at = time.monotonic()
-        self._scan_id = f"mock-scan-{int(time.time())}"
+        self._scan_id = f"mock-scan-{uuid.uuid4()}"
         self._scan_status = "ongoing"
         self._scan_progress = 0
         self._results_processed_emitted = False
+        self._latest_payload = self._build_latest_dataobject()
+        self._latest_payload["scanId"] = self._scan_id
+        self._latest_payload["information"] = deepcopy(self._comments)
+
+        # In mock mode scans complete quickly; emit resultsProcessed to unblock
+        # orchestrator wait loops and return realistic payloads immediately.
+        self.emit_event_sync("scan.resultsProcessed", {})
+        self._results_processed_emitted = True
+        self._scan_status = "finished"
+        self._scan_progress = 100
 
         return IVResult(
             ok=True,
@@ -116,7 +223,7 @@ class MockIVAdapter:
             )
 
         elapsed = time.monotonic() - self._scan_started_at
-        if elapsed < 1.0 and self._scan_status != "stopped":
+        if elapsed < 1.0 and self._scan_status in {"running", "ongoing"}:
             self._scan_status = "ongoing"
             self._scan_progress = min(99, int(elapsed * 100))
             return IVResult(
@@ -131,7 +238,7 @@ class MockIVAdapter:
                 },
             )
 
-        if self._scan_status != "stopped":
+        if self._scan_status in {"running", "ongoing"}:
             self._scan_status = "finished"
             self._scan_progress = 100
             self._latest_payload = self._build_latest_dataobject()
@@ -190,6 +297,10 @@ class MockIVAdapter:
         )
 
     def get_latest_gas_detection(self) -> IVResult:
+        latest = self.get_latest_dataobject().payload or {}
+        gas = latest.get("gasDetection")
+        if isinstance(gas, dict):
+            return IVResult(ok=True, payload=gas)
         return IVResult(ok=True, payload={"gasName": "ethanol", "confidence": 0.92})
 
     def get_gas_detection_result(self, id: str) -> IVResult:
@@ -199,6 +310,7 @@ class MockIVAdapter:
     def get_scan_dataobject(self, id: str) -> IVResult:
         payload = deepcopy(self._latest_payload)
         payload["Id"] = id
+        payload["id"] = id
         return IVResult(ok=True, payload=payload)
 
     def get_scan_comments(self) -> IVResult:
