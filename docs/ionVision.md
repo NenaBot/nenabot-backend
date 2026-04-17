@@ -39,6 +39,22 @@ Get the data object of the latest scan result once it has been processed.
 Please note that it can take some time for the device to process the scan
 result data after a scan has already been finished.
 
+**evaluate_scan_data(data: dict)** <br>
+Evaluate IonVision websocket payload data and compute a scan score.
+
+Evaluation steps:
+
+1. Read `body.measurementData.ucv` and `body.measurementData.intensityTop`.
+2. Keep indexes where UCV is numeric and in the inclusive range [-1.0, 1.0].
+3. Map those indexes to numeric intensity values.
+4. Sort descending and keep only the 3 highest values.
+5. Return the arithmetic mean of those 3 values.
+
+Return behavior:
+
+- `float`: Average of the top 3 intensity values.
+- `False`: Invalid payload shape or fewer than 3 valid values.
+
 ## Core WebSocket Methods
 
 IonVision websocket traffic is one-way from the device to the client. Each
