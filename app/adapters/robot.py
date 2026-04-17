@@ -7,7 +7,6 @@ import os
 import sys
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,7 @@ def _get_dobot_dll_type():
 @dataclass
 class RobotResult:
     ok: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -35,7 +34,7 @@ class PoseResult:
     j2: float = 0.0
     j3: float = 0.0
     j4: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
     def __iter__(self):
         """Backward-compatible unpacking support: pose, result = get_pose()."""
@@ -68,8 +67,7 @@ class RobotPose:
 
 
 class RobotAdapter:
-    """
-    Wrapper around Dobot DLL.
+    """Wrapper around Dobot DLL.
     Based on DobotDemoForPython/minimal_connect.py and DobotControl.py.
 
     The adapter does NOT connect automatically on construction.
@@ -80,10 +78,15 @@ class RobotAdapter:
     COMMAND_TIMEOUT_S = 20.0
     HOMING_TIMEOUT_S = 60.0
     LEGACY_HOMING_ENV = "DOBOT_ENABLE_LEGACY_HOMING"
+    MAX_REACH_RADIUS_MM = 320
+    MIN_REACH_RADIUS_MM = 180
+    MIN_Z_HEIGHT_MM = -30
+    MAX_Z_HEIGHT_MM = 0
+    MIN_X_POSITION_MM = 10
 
     def __init__(self, baud: int = 115200) -> None:
         self._baud = baud
-        self._connected_port: Optional[str] = None
+        self._connected_port: str | None = None
         self._api = None
 
     # ---- connection helpers ----
@@ -144,19 +147,35 @@ class RobotAdapter:
 
         self._api = DobotDllType.load()
         ret = DobotDllType.ConnectDobot(self._api, port, self._baud)[0]
-        if ret == 0:
-            if hasattr(DobotDllType, "SetCmdTimeout"):
-                DobotDllType.SetCmdTimeout(
-                    self._api, int(self.COMMAND_TIMEOUT_S * 1000)
-                )
-            if hasattr(DobotDllType, "SetQueuedCmdClear"):
-                DobotDllType.SetQueuedCmdClear(self._api)
-            if hasattr(DobotDllType, "SetQueuedCmdStartExec"):
-                DobotDllType.SetQueuedCmdStartExec(self._api)
-            self._connected_port = port
-            print(f"Connected to Dobot on {port}")
-            return RobotResult(True)
-        return RobotResult(False, f"Failed to connect on {port}, error code: {ret}")
+        if ret != 0:
+            self._api = None
+            return RobotResult(False, f"Connection failed with error code: {ret}")
+
+        DobotDllType.SetQueuedCmdClear(self._api)
+        DobotDllType.SetQueuedCmdStartExec(self._api)
+        self._connected_port = port
+        return RobotResult(True)
+
+    @staticmethod
+    def _discover_ports() -> list[str]:
+        """Return candidate serial ports for the current platform."""
+        import glob
+        import platform
+
+        system = platform.system()
+        if system == "Darwin":
+            return sorted(glob.glob("/dev/cu.usbserial-*"))
+        if system == "Linux":
+            return sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
+        if system == "Windows":
+            # Windows COM ports are not glob-able; return common COM port names
+            # and let the Dobot DLL attempt connections.
+            return [f"COM{idx}" for idx in range(1, 21)]
+        return []
+
+    @property
+    def connected(self) -> bool:
+        return self._api is not None and self._connected_port is not None
 
     def connect_first_available(self) -> RobotResult:
         """Auto-detect serial ports and connect to the first Dobot found."""
@@ -198,14 +217,26 @@ class RobotAdapter:
     # ---- movement ----
 
     def move_to_coordinates(
-        self, coords: Tuple[float, float, float, float], wait: bool = True
+        self, coords: tuple[float, float, float, float], wait: bool = True
     ) -> RobotResult:
         """Move robot to (x, y, z, r). If wait=True, blocks until the move finishes."""
         if self._api is None:
             return RobotResult(ok=False, error="No Dobot connection")
+        x, y, z, r = coords
+        if not self.is_reachable_mm(x, y, z):
+            return RobotResult(
+                ok=False,
+                error=(
+                    "The target measurement point "
+                    f"x={x}, y={y}, z={z}"
+                    " is outside the reachable area of the robot arm."
+                ),
+            )
         try:
             DobotDllType = _get_dobot_dll_type()
-            x, y, z, r = coords
+        except Exception as exc:
+            return RobotResult(ok=False, error=f"Dobot DLL not available: {exc}")
+        try:
             print(f"Moving to: {coords}")
             if hasattr(DobotDllType, "SetPTPCmdEx") and wait:
                 DobotDllType.SetPTPCmdEx(self._api, 1, x, y, z, r, 1)
@@ -222,15 +253,15 @@ class RobotAdapter:
         return self.move_to_coordinates((x, y, z, r), wait=wait)
 
     def execute_route(
-        self, coordinates: List[Tuple[float, float, float, float]]
+        self, coordinates: list[tuple[float, float, float, float]]
     ) -> RobotResult:
-        """
-        Execute a sequence of moves and return home afterwards.
+        """Execute a sequence of moves and return home afterwards.
 
         Parameters
         ----------
         coordinates : list of (x, y, z, r) tuples
             The waypoints the robot should visit in order.
+
         """
         for coord in coordinates:
             result = self.move_to_coordinates(coord)
@@ -463,11 +494,15 @@ class RobotAdapter:
     def is_reachable_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
         """Check if arm is allowed/capable of reaching a coordinate point"""
 
-        if z_mm > 0 or z_mm < -30 or x_mm < 10:
+        if (
+            z_mm > self.MAX_Z_HEIGHT_MM
+            or z_mm < self.MIN_Z_HEIGHT_MM
+            or x_mm < self.MIN_X_POSITION_MM
+        ):
             return False
 
         dist = sqrt(y_mm**2 + x_mm**2)
-        if dist > 320 or dist < 180:
+        if dist > self.MAX_REACH_RADIUS_MM or dist < self.MIN_REACH_RADIUS_MM:
             return False
         else:
             return True

@@ -35,8 +35,12 @@ after the robot connection succeeds.
 
 **`move(x, y, z, r, wait=True)`** / **`move_to_coordinates(coords, wait=True)`** <br>
 Move the end-effector to a Cartesian position. With `wait=True` (default) the
-call blocks until the arm reaches the target (`SetPTPCmdEx`). With `wait=False`
-the command is queued and the call returns immediately (`SetPTPCmd`).
+call uses `SetPTPCmdEx` when available (blocking path). If `SetPTPCmdEx` is
+not available, the adapter falls back to `SetPTPCmd`. With `wait=False` the
+command is queued and the call returns immediately (`SetPTPCmd`).
+
+`move_to_coordinates` validates coordinates with `is_reachable_mm` before
+sending movement commands, and rejects unreachable targets with an error.
 
 **`execute_route(coordinates)`** <br>
 Execute a list of `(x, y, z, r)` waypoints in sequence, then run the homing
@@ -85,6 +89,10 @@ arm is connected.
 
 ```bash
 source .venv/bin/activate
+```
+
+```powershell
+.\.venv\Scripts\Activate.ps1
 ```
 
 ### Running the tests
