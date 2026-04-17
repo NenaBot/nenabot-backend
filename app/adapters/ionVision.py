@@ -12,7 +12,7 @@ import inspect
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Dict, Optional
 
 import httpx
 import websockets
