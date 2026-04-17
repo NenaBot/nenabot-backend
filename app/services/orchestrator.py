@@ -9,11 +9,10 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from app.adapters.camera_vision import CameraVisionAdapter, DetectionResults
-from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
 from app.adapters.ionVision import IVAdapter
+from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
 from app.adapters.storage import StorageAdapter
 from app.domain.models import Job, Measurement, Waypoint
 
@@ -720,7 +719,7 @@ class OrchestratorService:
                 if edge_len == 0:
                     continue
 
-                sample_count = max(1, int(math.ceil(edge_len / step_px)))
+                sample_count = max(1, math.ceil(edge_len / step_px))
                 if len(path) + sample_count > MAX_POPULATED_PATH_POINTS:
                     raise ValueError(
                         "Requested path is too dense; reduce measuringPointsPerCm or battery count"
@@ -848,7 +847,7 @@ class OrchestratorService:
     def camera_vision(self) -> CameraVisionAdapter:
         return self._camera_vision
 
-    def latest_result(self) -> Optional[dict]:
+    def latest_result(self) -> dict | None:
         return self._storage.latest_result()
 
     # WEBSOCKET SERVICES

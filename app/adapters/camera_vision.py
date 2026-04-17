@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
@@ -228,7 +229,7 @@ class CameraVisionAdapter:
                 ok=False,
                 error="No battery contour detected",
                 pixels_per_mm=pixels_per_mm,
-                marker_count=int(len(ids)) if ids is not None else 0,
+                marker_count=len(ids) if ids is not None else 0,
                 marker_corners=aruco_corners_out,
             )
 
@@ -236,7 +237,7 @@ class CameraVisionAdapter:
             ok=True,
             detections=detections,
             pixels_per_mm=pixels_per_mm,
-            marker_count=int(len(ids)) if ids is not None else 0,
+            marker_count=len(ids) if ids is not None else 0,
             marker_corners=aruco_corners_out,
         )
 
@@ -429,6 +430,183 @@ class CameraVisionAdapter:
 
     def stop_detection_stream(self) -> None:
         self._detection_streaming = False
+
+    # ---- overlay rendering ----
+
+    @staticmethod
+    def render_overlay(
+        jpeg_bytes: bytes,
+        detections: list,
+        measurements: list | None = None,
+        starting_point: tuple | None = None,
+    ) -> bytes:
+        """Draw detection boxes, measurement points, and start marker.
+
+        Parameters
+        ----------
+        jpeg_bytes :
+            Raw JPEG bytes of the base image.
+        detections :
+            List of DetectionResult (corners, center, sizes).
+        measurements :
+            List of Measurement dataclass instances (optional).
+        starting_point :
+            (x, y) pixel coordinates of the robot start (optional).
+
+        Returns
+        -------
+        bytes
+            JPEG bytes of the annotated image.
+
+        """
+        import cv2
+        import numpy as np
+
+        buf = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        if frame is None:
+            return jpeg_bytes  # can't decode → return original
+
+        # --- detection bounding boxes (cyan) ---
+        # first detection/measurement center for connector line
+        first_target: tuple | None = None
+        for det in detections:
+            corners = det.corners if hasattr(det, "corners") else []
+            if len(corners) >= 4:
+                pts = np.array([[int(c.x), int(c.y)] for c in corners], dtype=np.int32)
+                cv2.drawContours(frame, [pts], 0, (0, 255, 255), 2)
+            # center cross
+            cx, cy = int(det.center_x), int(det.center_y)
+            cv2.drawMarker(
+                frame,
+                (cx, cy),
+                (0, 255, 255),
+                cv2.MARKER_CROSS,
+                12,
+                1,
+            )
+            if first_target is None:
+                first_target = (cx, cy)
+            # size label
+            label = f"{det.width_mm:.1f}x{det.height_mm:.1f} mm"
+            cv2.putText(
+                frame,
+                label,
+                (cx - 50, cy - 14),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 255, 255),
+                1,
+            )
+
+        # --- measurement points (green numbered circles) ---
+        if measurements:
+            for m in measurements:
+                # Use pixel coordinates if available, skip if missing
+                if m.pixel_x is not None and m.pixel_y is not None:
+                    px = int(m.pixel_x)
+                    py = int(m.pixel_y)
+                else:
+                    continue  # no pixel coords → can't place on image
+                color = (0, 220, 100)  # green
+                cv2.circle(frame, (px, py), 10, color, -1)
+                cv2.circle(frame, (px, py), 10, (255, 255, 255), 1)
+                idx_label = str(m.waypoint_index + 1)
+                cv2.putText(
+                    frame,
+                    idx_label,
+                    (px - 4, py + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.35,
+                    (0, 0, 0),
+                    1,
+                )
+                if first_target is None:
+                    first_target = (px, py)
+                # scan summary label
+                if m.scan_result:
+                    summary = _scan_summary(m.scan_result)
+                    cv2.putText(
+                        frame,
+                        summary,
+                        (px + 14, py + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.35,
+                        (200, 200, 200),
+                        1,
+                    )
+
+        # --- starting point (orange diamond + "START" label) ---
+        if starting_point:
+            sx, sy = int(starting_point[0]), int(starting_point[1])
+            # Diamond shape (rotated square)
+            size = 12
+            diamond = np.array(
+                [
+                    [sx, sy - size],
+                    [sx + size, sy],
+                    [sx, sy + size],
+                    [sx - size, sy],
+                ],
+                dtype=np.int32,
+            )
+            cv2.fillPoly(frame, [diamond], (0, 140, 255))  # orange fill
+            cv2.polylines(frame, [diamond], True, (255, 255, 255), 2)  # white border
+            cv2.putText(
+                frame,
+                "START",
+                (sx + 16, sy + 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 140, 255),
+                2,
+            )
+            # Dashed line from starting point → first target
+            if first_target:
+                _draw_dashed_line(frame, (sx, sy), first_target, (255, 255, 255), 1, 10)
+
+        _, out = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        return out.tobytes()
+
+
+def _scan_summary(scan_result: dict) -> str:
+    """Extract a short human-readable label from a DMS scan result dict."""
+    compound = scan_result.get("compound", scan_result.get("name", ""))
+    ppb = scan_result.get("ppb", scan_result.get("concentration", ""))
+    if compound and ppb:
+        return f"{compound} {ppb} ppb"
+    if compound:
+        return str(compound)
+    return "scan"
+
+
+def _draw_dashed_line(
+    img: np.ndarray,
+    pt1: tuple,
+    pt2: tuple,
+    color: tuple,
+    thickness: int = 1,
+    gap: int = 10,
+) -> None:
+    """Draw a dashed line between two points on a cv2 image."""
+    import numpy as np
+
+    x1, y1 = pt1
+    x2, y2 = pt2
+    dist = np.hypot(x2 - x1, y2 - y1)
+    if dist < 1:
+        return
+    dx = (x2 - x1) / dist
+    dy = (y2 - y1) / dist
+    num_segments = int(dist // gap)
+    import cv2
+
+    for i in range(0, num_segments, 2):
+        sx = int(x1 + dx * gap * i)
+        sy = int(y1 + dy * gap * i)
+        ex = int(x1 + dx * gap * min(i + 1, num_segments))
+        ey = int(y1 + dy * gap * min(i + 1, num_segments))
+        cv2.line(img, (sx, sy), (ex, ey), color, thickness)
 
     # ---- overlay rendering ----
 
