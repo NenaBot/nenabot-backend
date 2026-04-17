@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import glob
 import logging
+from math import sqrt
 import os
 import sys
 import time
@@ -472,3 +473,15 @@ class RobotAdapter:
             pass
         self._api = None
         self._connected_port = None
+
+    def is_reachable_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
+        """Check if arm is allowed/capable of reaching a coordinate point"""
+
+        if z_mm > 0 or z_mm < -30 or x_mm < 10:
+            return False
+
+        dist = sqrt(y_mm**2 + x_mm**2)
+        if dist > 320 or dist < 180:
+            return False
+        else:
+            return True
