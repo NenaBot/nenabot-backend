@@ -78,6 +78,11 @@ class RobotAdapter:
     COMMAND_TIMEOUT_S = 20.0
     HOMING_TIMEOUT_S = 60.0
     LEGACY_HOMING_ENV = "DOBOT_ENABLE_LEGACY_HOMING"
+    MAX_REACH_RADIUS_MM = 320
+    MIN_REACH_RADIUS_MM = 180
+    MIN_Z_HEIGHT_MM = -30
+    MAX_Z_HEIGHT_MM = 0
+    MIN_X_POSITION_MM = 10
 
     def __init__(self, baud: int = 115200) -> None:
         self._baud = baud
@@ -217,9 +222,21 @@ class RobotAdapter:
         """Move robot to (x, y, z, r). If wait=True, blocks until the move finishes."""
         if self._api is None:
             return RobotResult(ok=False, error="No Dobot connection")
+        x, y, z, r = coords
+        if not self.is_reachable_mm(x, y, z):
+            return RobotResult(
+                ok=False,
+                error=(
+                    "The target measurement point "
+                    f"x={x}, y={y}, z={z}"
+                    " is outside the reachable area of the robot arm."
+                ),
+            )
         try:
             DobotDllType = _get_dobot_dll_type()
-            x, y, z, r = coords
+        except Exception as exc:
+            return RobotResult(ok=False, error=f"Dobot DLL not available: {exc}")
+        try:
             print(f"Moving to: {coords}")
             if hasattr(DobotDllType, "SetPTPCmdEx") and wait:
                 DobotDllType.SetPTPCmdEx(self._api, 1, x, y, z, r, 1)
@@ -477,11 +494,15 @@ class RobotAdapter:
     def is_reachable_mm(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
         """Check if arm is allowed/capable of reaching a coordinate point"""
 
-        if z_mm > 0 or z_mm < -30 or x_mm < 10:
+        if (
+            z_mm > self.MAX_Z_HEIGHT_MM
+            or z_mm < self.MIN_Z_HEIGHT_MM
+            or x_mm < self.MIN_X_POSITION_MM
+        ):
             return False
 
         dist = sqrt(y_mm**2 + x_mm**2)
-        if dist > 320 or dist < 180:
+        if dist > self.MAX_REACH_RADIUS_MM or dist < self.MIN_REACH_RADIUS_MM:
             return False
         else:
             return True
