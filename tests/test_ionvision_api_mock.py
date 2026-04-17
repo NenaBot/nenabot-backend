@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -10,14 +12,15 @@ from fastapi.testclient import TestClient
 from app.adapters.camera_vision import (
     CaptureResult,
     Corner,
+    DetectionResult,
     DetectionResults,
-    MarkerCorners,
 )
 from app.adapters.database import Database
 from app.adapters.ionVision import IVResult
 from app.adapters.robot import PoseResult, RobotResult
 from app.adapters.storage import StorageAdapter
 from app.dependencies import get_orchestrator
+from app.domain.models import Waypoint
 from app.main import app
 from app.services.orchestrator import OrchestratorService
 
@@ -29,33 +32,42 @@ class FakeCameraVisionAdapter:
         self._capture_path = capture_path
         self.capture_calls = 0
         self.detect_calls = 0
+        self.intrinsics_loaded = True
 
     def ping(self) -> CaptureResult:
         return CaptureResult(ok=True)
+
+    def checkerboard_status(self) -> dict[str, bool | str | None]:
+        return {"visible": True, "error": None}
+
+    def checkerboard_visible(self) -> bool:
+        return True
 
     def capture(self) -> CaptureResult:
         self.capture_calls += 1
         return CaptureResult(ok=True, image_path=str(self._capture_path))
 
-    def detect(self, image_path: str) -> DetectionResults:
+    def detect_latest(self) -> DetectionResults:
         self.detect_calls += 1
-        assert image_path == str(self._capture_path)
-
-        marker = MarkerCorners(
-            corners=[
-                Corner(x=10.0, y=10.0),
-                Corner(x=20.0, y=10.0),
-                Corner(x=20.0, y=20.0),
-                Corner(x=10.0, y=20.0),
-            ]
-        )
 
         return DetectionResults(
             ok=True,
-            detections=[],
-            pixels_per_mm=2.0,
-            marker_count=1,
-            marker_corners=[marker],
+            detections=[
+                DetectionResult(
+                    corners=[
+                        Corner(x=10.0, y=10.0),
+                        Corner(x=20.0, y=10.0),
+                        Corner(x=20.0, y=20.0),
+                        Corner(x=10.0, y=20.0),
+                    ],
+                    width_mm=10.0,
+                    height_mm=10.0,
+                    center_x=15.0,
+                    center_y=15.0,
+                    confidence=0.99,
+                )
+            ],
+            image_base64="ZmFrZS1pbWFnZQ==",
         )
 
 
@@ -102,6 +114,7 @@ class FakeIonVisionAdapter:
         self.start_new_scan_calls = 0
         self.get_current_scan_calls = 0
         self.get_latest_dataobject_calls = 0
+        self._handlers: dict[str, list] = {}
 
     def ping(self) -> IVResult:
         self.ping_calls += 1
@@ -114,19 +127,36 @@ class FakeIonVisionAdapter:
         return None
 
     def on_event(self, event_type: str, handler) -> None:
-        return None
+        self._handlers.setdefault(event_type, []).append(handler)
 
     def off_event(self, event_type: str, handler) -> None:
-        return None
+        handlers = self._handlers.get(event_type, [])
+        try:
+            handlers.remove(handler)
+        except ValueError:
+            pass
+
+    def _emit_event(self, event_type: str) -> None:
+        message = {
+            "type": event_type,
+            "time": int(time.time() * 1000),
+            "body": {},
+        }
+        for handler in list(self._handlers.get(event_type, [])):
+            result = handler(message)
+            if inspect.isawaitable(result):
+                asyncio.run(result)
 
     def start_new_scan(self) -> IVResult:
         self.start_new_scan_calls += 1
+        self._emit_event("scan.resultsProcessed")
         return IVResult(ok=True, payload={"message": "scan started"})
 
     def get_current_scan(self) -> IVResult:
         self.get_current_scan_calls += 1
         if self.get_current_scan_calls == 1:
             return IVResult(ok=True, payload={"state": "running", "progress": 50})
+        self._emit_event("scan.resultsProcessed")
         return IVResult(ok=True, payload={"state": "finished", "progress": 100})
 
     def get_latest_dataobject(self) -> IVResult:
@@ -139,6 +169,10 @@ class FakeIonVisionAdapter:
                 "gasDetection": {"gasName": "ethanol", "confidence": 0.93},
             },
         )
+
+    def evaluate_scan_data(self, data: dict) -> IVResult:
+        _ = data
+        return IVResult(ok=True, payload={"intensity_average": 42.0})
 
 
 @pytest.fixture
@@ -157,6 +191,15 @@ def ionvision_client(tmp_path: Path):
         robot=fake_robot,
         ionvision=fake_dms,
         storage=StorageAdapter(db=db),
+    )
+    orchestrator._mapping_data = {
+        "start_pose": {"x": 200.0, "y": 200.0, "z": 0.0, "r": 0.0}
+    }
+    orchestrator.pixel_to_robot = lambda _px, _py, work_z, work_r: Waypoint(
+        x=200.0,
+        y=200.0,
+        z=work_z,
+        r=work_r,
     )
 
     with patch("app.main.get_orchestrator", return_value=orchestrator), patch(
@@ -202,8 +245,7 @@ def test_non_dry_run_job_uses_mock_ionvision_scan_flow(ionvision_client) -> None
     assert detect_response.status_code == 201
     detect_payload = detect_response.json()
     assert detect_payload["requestSucceeded"] is True
-    assert detect_payload["calibration"] is not None
-    assert detect_payload["calibration"]["calibrated"] is True
+    assert len(detect_payload["detections"]) == 1
 
     job_response = client.post(
         "/api/job",
@@ -227,6 +269,9 @@ def test_non_dry_run_job_uses_mock_ionvision_scan_flow(ionvision_client) -> None
     assert job["measurements"][0]["simulated"] is False
     assert job["measurements"][0]["scanResult"]["id"] == "result-123"
     assert job["measurements"][0]["scanResult"]["gasDetection"]["gasName"] == "ethanol"
+    assert (
+        job["measurements"][0]["scanResult"]["evaluation"]["intensity_average"] == 42.0
+    )
     assert fake_dms.start_new_scan_calls == 1
-    assert fake_dms.get_current_scan_calls >= 2
+    assert fake_dms.get_current_scan_calls == 0
     assert fake_dms.get_latest_dataobject_calls == 1

@@ -4,7 +4,6 @@ __pycache__/
 .git/
 .gitignore
 .pytest_cache/
-data/
 venv/
 .venv/
 *.egg-info/

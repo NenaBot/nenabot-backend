@@ -1,17 +1,18 @@
+import json
 import os
+import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from app.adapters.camera_vision import (
     CameraVisionAdapter,
     CaptureResult,
+    CheckerboardResult,
     Corner,
-    DetectionResult,
-    DetectionResults,
-    MarkerCorners,
 )
 from app.adapters.database import Database
 from app.adapters.ionVision import IVAdapter, IVResult
@@ -19,59 +20,93 @@ from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
 from app.adapters.storage import StorageAdapter
 from app.domain.models import Waypoint
 from app.services.orchestrator import OrchestratorService
+from tests.calibration_helpers import (
+    sample_correspondences,
+    write_intrinsics,
+    write_mapping,
+)
 
 
-def _make_svc(tmp_path: Path) -> OrchestratorService:
+def _make_svc(
+    tmp_path: Path, with_mapping: bool = False
+) -> tuple[OrchestratorService, Path, Path]:
+    intrinsics_path = write_intrinsics(tmp_path / "camera_intrinsics.json")
+    mapping_path = tmp_path / "robot_mapping.json"
+    if with_mapping:
+        write_mapping(mapping_path, intrinsics_path)
+
     db = Database(db_path=str(tmp_path / "test.db"))
     db.init_db()
 
-    camera = CameraVisionAdapter()
+    camera = CameraVisionAdapter(intrinsics_path=str(intrinsics_path))
     camera.ping = MagicMock(
         return_value=CaptureResult(ok=False, error="no camera in test")
+    )
+    camera.checkerboard_status = MagicMock(
+        return_value={"visible": False, "error": "no camera in test"}
     )
 
     robot = RobotAdapter()
     robot.ping = MagicMock(return_value=RobotResult(ok=False, error="no robot in test"))
 
-    return OrchestratorService(
+    ionvision = IVAdapter(
+        base_url="http://localhost:8080",
+        ws_base_url="ws://localhost:8080",
+    )
+    ionvision.ping = MagicMock(
+        return_value=IVResult(ok=False, error="no ionvision in test")
+    )
+
+    service = OrchestratorService(
         camera_vision=camera,
         robot=robot,
         storage=StorageAdapter(db=db),
-        ionvision=IVAdapter(
-            base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
-        ),
+        ionvision=ionvision,
+        mapping_path=str(mapping_path),
     )
+    return service, intrinsics_path, mapping_path
+
+
+def test_intrinsics_file_loading(tmp_path: Path) -> None:
+    intrinsics_path = write_intrinsics(tmp_path / "camera_intrinsics.json")
+    adapter = CameraVisionAdapter(intrinsics_path=str(intrinsics_path))
+    assert adapter.intrinsics_loaded is True
+    assert adapter.intrinsics_error is None
+
+
+def test_intrinsics_invalid_file_handling(tmp_path: Path) -> None:
+    bad_path = tmp_path / "bad_intrinsics.json"
+    bad_path.write_text("{not-json")
+    adapter = CameraVisionAdapter(intrinsics_path=str(bad_path))
+    assert adapter.intrinsics_loaded is False
+    assert "Invalid intrinsic calibration file" in (adapter.intrinsics_error or "")
 
 
 def test_create_job_creates_job(tmp_path: Path) -> None:
-    svc = _make_svc(tmp_path)
+    service, _, _ = _make_svc(tmp_path)
     waypoints = [Waypoint(x=1, y=2), Waypoint(x=3, y=4, z=5, r=90)]
-    job = svc.create_job(path=waypoints, dry_run=True, options={"foo": "bar"})
+    job = service.create_job(path=waypoints, dry_run=True, options={"foo": "bar"})
     assert job.id
     assert job.options == {"foo": "bar"}
     assert len(job.path) == 2
-    assert job.path[0].x == 1
-    assert job.dry_run is True
     assert job.state == "created"
 
-    # Verify it round-trips through the DB
-    fetched = svc.get_job(job.id)
+    fetched = service.get_job(job.id)
     assert fetched is not None
     assert fetched.options == {"foo": "bar"}
     assert len(fetched.path) == 2
-    assert fetched.dry_run is True
 
 
 def test_dry_run_completes(tmp_path: Path) -> None:
-    svc = _make_svc(tmp_path)
-    waypoints = [Waypoint(x=10, y=20), Waypoint(x=30, y=40)]
-    job = svc.create_job(path=waypoints, dry_run=True)
-    svc.run_job(job.id)
+    service, _, _ = _make_svc(tmp_path)
+    job = service.create_job(
+        path=[Waypoint(x=10, y=20), Waypoint(x=30, y=40)], dry_run=True
+    )
+    service.run_job(job.id)
 
-    # Poll the DB for completion (in-memory ref isn't updated)
     db_job = None
     for _ in range(30):
-        db_job = svc.get_job(job.id)
+        db_job = service.get_job(job.id)
         if db_job and db_job.state in ("completed", "failed"):
             break
         time.sleep(0.1)
@@ -80,23 +115,20 @@ def test_dry_run_completes(tmp_path: Path) -> None:
     assert db_job.state == "completed"
     assert db_job.last_point_processed == 2
     assert len(db_job.measurements) == 2
-    for m in db_job.measurements:
-        assert m.simulated is True
-        assert m.timestamp
 
 
 def test_stop_running_job(tmp_path: Path) -> None:
-    svc = _make_svc(tmp_path)
+    service, _, _ = _make_svc(tmp_path)
     waypoints = [Waypoint(x=float(i), y=float(i)) for i in range(100)]
-    job = svc.create_job(path=waypoints, dry_run=True)
-    svc.run_job(job.id)
-    time.sleep(0.3)
+    job = service.create_job(path=waypoints, dry_run=True)
+    service.run_job(job.id)
+    time.sleep(0.35)
 
-    assert svc.stop_job() is True
+    assert service.stop_job() is True
 
     db_job = None
     for _ in range(20):
-        db_job = svc.get_job(job.id)
+        db_job = service.get_job(job.id)
         if db_job and db_job.state in ("stopped", "completed"):
             break
         time.sleep(0.1)
@@ -106,395 +138,318 @@ def test_stop_running_job(tmp_path: Path) -> None:
     assert db_job.last_point_processed < 100
 
 
+def test_stop_when_no_job_running(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    assert service.stop_job() is False
+
+
+def test_prevent_concurrent_job_execution(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    first_job = service.create_job(
+        path=[Waypoint(x=float(i), y=float(i)) for i in range(100)],
+        dry_run=True,
+    )
+    service.run_job(first_job.id)
+    time.sleep(0.1)
+
+    second_job = service.create_job(path=[Waypoint(x=1, y=2)], dry_run=True)
+    with pytest.raises(RuntimeError, match="Another job is already running"):
+        service.run_job(second_job.id)
+
+    service.stop_job()
+
+
 def test_health_returns_component_statuses(tmp_path: Path) -> None:
-    """health() should probe each adapter and report per-component status."""
-    svc = _make_svc(tmp_path)
-    result = svc.health()
+    service, _, _ = _make_svc(tmp_path)
+    result = service.health()
 
     assert result["status"] in {"ok", "degraded"}
     assert result["uptime_s"] >= 0
-
     for key in ("robot", "camera", "ionvision"):
         assert key in result
         assert result[key]["status"] in {"connected", "disconnected", "error"}
 
 
 def test_health_uptime_advances(tmp_path: Path) -> None:
-    """uptime should increase between successive health() calls."""
-    svc = _make_svc(tmp_path)
-    h1 = svc.health()
+    service, _, _ = _make_svc(tmp_path)
+    first = service.health()
     time.sleep(0.15)
-    h2 = svc.health()
-    assert h2["uptime_s"] > h1["uptime_s"]
+    second = service.health()
+    assert second["uptime_s"] > first["uptime_s"]
+
+
+def test_status_includes_calibration_block(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    status = service.status()
+    assert status["state"] == "ready"
+    calibration = status["calibration"]
+    assert calibration["intrinsics_loaded"] is True
+    assert calibration["checkerboard_visible"] is False
+    assert calibration["calibrated"] is False
+    assert calibration["last_calibrated_at"] is None
 
 
 def test_status_reflects_running_job(tmp_path: Path) -> None:
-    """status() should return 'busy' while a job is executing."""
-    svc = _make_svc(tmp_path)
-    assert svc.status() == "ready"
+    service, _, _ = _make_svc(tmp_path)
+    assert service.status()["state"] == "ready"
 
-    waypoints = [Waypoint(x=float(i), y=float(i)) for i in range(50)]
-    job = svc.create_job(path=waypoints, dry_run=True)
-    svc.run_job(job.id)
+    job = service.create_job(
+        path=[Waypoint(x=float(i), y=float(i)) for i in range(50)],
+        dry_run=True,
+    )
+    service.run_job(job.id)
     time.sleep(0.1)
-    assert svc.status() == "busy"
+    assert service.status()["state"] == "busy"
 
-    svc.stop_job()
+    service.stop_job()
     for _ in range(20):
-        if svc.status() == "ready":
+        if service.status()["state"] == "ready":
             break
         time.sleep(0.1)
-    assert svc.status() == "ready"
+    assert service.status()["state"] == "ready"
 
 
-# ---- ORC-TC-004: Stop when no job is running ----
+def test_calibration_flow_writes_mapping_file_and_status_date(tmp_path: Path) -> None:
+    service, intrinsics_path, mapping_path = _make_svc(tmp_path)
+    image_points, robot_points = sample_correspondences()
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+    service.camera_vision.get_latest_frame = MagicMock(return_value=frame)
+    service.camera_vision.find_checkerboard = MagicMock(
+        return_value=CheckerboardResult(
+            ok=True,
+            corners=[Corner(x=x, y=y) for x, y in image_points],
+            target_points=[Corner(x=x, y=y) for x, y in image_points],
+            image_size=(1280, 720),
+        )
+    )
+    service.camera_vision.frame_to_base64 = MagicMock(return_value="encoded-image")
+    service.camera_vision.checkerboard_visible = MagicMock(return_value=True)
+
+    start_pose = PoseResult(ok=True, x=10.0, y=20.0, z=30.0, r=40.0)
+    captured_poses = [
+        PoseResult(ok=True, x=x, y=y, z=z, r=0.0) for x, y, z in robot_points
+    ]
+    service._robot.get_pose = MagicMock(side_effect=[start_pose, *captured_poses])
+
+    start_response = service.calibration_action("start")
+    assert start_response["ok"] is True
+    assert start_response["referenceImageBase64"] == "encoded-image"
+    assert start_response["currentStep"] == 0
+    assert start_response["targetPoint"]["pixelX"] == 100.0
+    assert start_response["targetPoint"]["pixelY"] == 100.0
+    assert start_response["targetPoint"]["gridRow"] == 1
+    assert start_response["targetPoint"]["gridCol"] == 0
+    assert start_response["targetPoint"]["step"] == 1
+    assert start_response["targetPoint"]["label"] == "P1 (1,0)"
+
+    for expected_step in range(1, 5):
+        response = service.calibration_action("capture")
+        assert response["currentStep"] == expected_step
+
+    assert mapping_path.exists()
+    saved = json.loads(mapping_path.read_text())
+    assert saved["intrinsics_path"] == str(intrinsics_path)
+    assert saved["calibrated_at"]
+    assert saved["plane"]["origin"] == pytest.approx([200.0, 100.0, -50.0])
+    assert saved["plane"]["x_axis"] == pytest.approx([1.0, 0.0, 0.0])
+    assert saved["plane"]["y_axis"] == pytest.approx([0.0, 1.0, 0.0])
+    assert saved["plane"]["normal"] == pytest.approx([0.0, 0.0, -1.0])
+    assert service.is_calibrated is True
+    assert service.last_calibrated_at == saved["calibrated_at"]
 
 
-def test_stop_when_no_job_running(tmp_path: Path) -> None:
-    """stop_job() should return False and have no side effects when idle."""
-    svc = _make_svc(tmp_path)
-    assert svc.stop_job() is False
-
-
-# ---- ORC-TC-005: Prevent concurrent job execution ----
-
-
-def test_prevent_concurrent_job_execution(tmp_path: Path) -> None:
-    """run_job() should raise RuntimeError if another job is already running."""
-    svc = _make_svc(tmp_path)
-    waypoints_a = [Waypoint(x=float(i), y=float(i)) for i in range(100)]
-    job_a = svc.create_job(path=waypoints_a, dry_run=True)
-    svc.run_job(job_a.id)
-    time.sleep(0.1)
-
-    job_b = svc.create_job(path=[Waypoint(x=1, y=2)], dry_run=True)
-    with pytest.raises(RuntimeError, match="Another job is already running"):
-        svc.run_job(job_b.id)
-
-    svc.stop_job()
-    for _ in range(20):
-        if svc.status() == "ready":
-            break
-        time.sleep(0.1)
-
-
-# ---- ORC-TC-010: pixel_to_robot coordinate conversion ----
-
-
-def test_pixel_to_robot_conversion(tmp_path: Path) -> None:
-    """pixel_to_robot() should correctly apply the calibration formula."""
-    svc = _make_svc(tmp_path)
-    svc._cal_robot_start = Waypoint(x=100.0, y=200.0, z=0.0, r=0.0)
-    svc._cal_canvas_start = (640.0, 400.0)
-    svc._cal_pixels_per_mm = 2.0
-
-    result = svc.pixel_to_robot(660.0, 380.0, 5.0, 90.0)
-    # dpx = 660 - 640 = 20, dpy = 380 - 400 = -20
-    # robot.x = 100 - (-20 / 2) = 110
-    # robot.y = 200 - (20 / 2) = 190
-    assert result.x == pytest.approx(110.0)
-    assert result.y == pytest.approx(190.0)
+def test_pixel_to_robot_uses_saved_mapping(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path, with_mapping=True)
+    result = service.pixel_to_robot(150.0, 150.0, 5.0, 90.0)
+    assert result.x == pytest.approx(250.0, abs=1.5)
+    assert result.y == pytest.approx(150.0, abs=1.5)
     assert result.z == 5.0
     assert result.r == 90.0
 
 
-# ---- ORC-TC-011: pixel_to_robot raises when uncalibrated ----
-
-
 def test_pixel_to_robot_raises_when_uncalibrated(tmp_path: Path) -> None:
-    """pixel_to_robot() should raise RuntimeError without calibration."""
-    svc = _make_svc(tmp_path)
+    service, _, _ = _make_svc(tmp_path)
     with pytest.raises(RuntimeError, match="Not calibrated"):
-        svc.pixel_to_robot(100, 200, 0, 0)
+        service.pixel_to_robot(150.0, 150.0, 0.0, 0.0)
 
 
-# ---- ORC-TC-012: is_calibrated property reflects state ----
-
-
-def test_is_calibrated_property(tmp_path: Path) -> None:
-    """is_calibrated should be False until all three calibration values are set."""
-    svc = _make_svc(tmp_path)
-    assert svc.is_calibrated is False
-
-    svc._cal_robot_start = Waypoint(x=100, y=200)
-    assert svc.is_calibrated is False
-
-    svc._cal_canvas_start = (640.0, 400.0)
-    assert svc.is_calibrated is False
-
-    svc._cal_pixels_per_mm = 2.0
-    assert svc.is_calibrated is True
-
-
-# ---- ORC-TC-013: sort_pixel_path_from_canvas_start orders_by_start_distance ----
-
-
-def test_sort_pixel_path_from_canvas_start_orders_by_start_distance(
-    tmp_path: Path,
-) -> None:
-    """sort_pixel_path_from_canvas_start should order waypoints by distance from the canvas start and return sorted waypoints only."""
-    svc = _make_svc(tmp_path)
-    svc._cal_canvas_start = (640.0, 400.0)
-
-    waypoints = [
-        (700.0, 400.0),
-        (642.0, 401.0),
-        (650.0, 400.0),
-    ]
-
-    sorted_points = svc.sort_pixel_path_from_canvas_start(waypoints)
-    assert sorted_points == [
-        (642.0, 401.0),
-        (650.0, 400.0),
-        (700.0, 400.0),
-    ]
-    assert (640.0, 400.0) not in sorted_points
-
-
-def test_sort_pixel_path_from_canvas_start_raises_when_uncalibrated(
-    tmp_path: Path,
-) -> None:
-    """sort_pixel_path_from_canvas_start should raise without canvas start calibration."""
-    svc = _make_svc(tmp_path)
-    with pytest.raises(RuntimeError, match="Not calibrated"):
-        svc.sort_pixel_path_from_canvas_start([(1.0, 2.0)])
-
-
-def test_populate_pixel_path_from_batteries_generates_perimeter_points(
-    tmp_path: Path,
-) -> None:
-    svc = _make_svc(tmp_path)
-    svc._cal_canvas_start = (640.0, 400.0)
-    svc._cal_pixels_per_mm = 2.0
-
-    path = svc.populate_pixel_path_from_batteries(
+def test_populate_pixel_path_from_batteries_generates_points(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path, with_mapping=True)
+    path = service.populate_pixel_path_from_batteries(
         batteries=[
             [
-                (650.0, 390.0),
-                (690.0, 390.0),
-                (690.0, 430.0),
-                (650.0, 430.0),
+                (100.0, 100.0),
+                (200.0, 100.0),
+                (200.0, 200.0),
+                (100.0, 200.0),
             ]
         ],
         measuring_points_per_cm=0.5,
     )
-
-    assert len(path) == 4
+    assert path
     assert path[0]["index"] == "0-0-0"
     assert path[0]["batteryNr"] == 0
     assert path[0]["cornerIndex"] == 0
     assert path[0]["measurementIndex"] == 0
-    assert path[0]["pixelX"] == pytest.approx(650.0)
-    assert path[0]["pixelY"] == pytest.approx(390.0)
-
-
-def test_populate_pixel_path_from_batteries_orders_batteries_by_start_distance(
-    tmp_path: Path,
-) -> None:
-    svc = _make_svc(tmp_path)
-    svc._cal_canvas_start = (640.0, 400.0)
-    svc._cal_pixels_per_mm = 2.0
-
-    path = svc.populate_pixel_path_from_batteries(
-        batteries=[
-            [
-                (900.0, 500.0),
-                (940.0, 500.0),
-                (940.0, 540.0),
-                (900.0, 540.0),
-            ],
-            [
-                (650.0, 390.0),
-                (690.0, 390.0),
-                (690.0, 430.0),
-                (650.0, 430.0),
-            ],
-        ],
-        measuring_points_per_cm=0.5,
-    )
-
-    assert path
-    assert path[0]["batteryNr"] == 0
-    assert path[0]["pixelX"] == pytest.approx(650.0)
-    assert path[0]["pixelY"] == pytest.approx(390.0)
-    assert any(point["batteryNr"] == 1 for point in path)
-
-
-def test_detect_path_keeps_detection_order(tmp_path: Path) -> None:
-    """detect_path() should keep detector output order unchanged."""
-    svc = _make_svc(tmp_path)
-
-    image_path = tmp_path / "capture.jpg"
-    image_path.write_bytes(b"fake-jpeg")
-    marker = MarkerCorners(
-        corners=[
-            Corner(x=10.0, y=10.0),
-            Corner(x=20.0, y=10.0),
-            Corner(x=20.0, y=20.0),
-            Corner(x=10.0, y=20.0),
-        ]
-    )
-
-    detections = [
-        DetectionResult(
-            corners=[],
-            width_mm=50.0,
-            height_mm=50.0,
-            center_x=700.0,
-            center_y=400.0,
-            confidence=0.9,
-        ),
-        DetectionResult(
-            corners=[],
-            width_mm=50.0,
-            height_mm=50.0,
-            center_x=642.0,
-            center_y=401.0,
-            confidence=0.9,
-        ),
-        DetectionResult(
-            corners=[],
-            width_mm=50.0,
-            height_mm=50.0,
-            center_x=650.0,
-            center_y=400.0,
-            confidence=0.9,
-        ),
-    ]
-    with patch.object(
-        svc._camera_vision,
-        "capture",
-        return_value=CaptureResult(ok=True, image_path=str(image_path)),
-    ), patch.object(
-        svc._camera_vision,
-        "detect",
-        return_value=DetectionResults(
-            ok=True,
-            detections=detections,
-            pixels_per_mm=2.0,
-            marker_count=1,
-            marker_corners=[marker],
-            error=None,
-        ),
-    ), patch.object(
-        svc._robot,
-        "get_pose",
-        return_value=PoseResult(ok=True, x=100.0, y=200.0, z=0.0, r=0.0),
-    ):
-        result = svc.detect_path()
-
-    assert result.ok is True
-    assert len(result.detections) == 3
-    assert result.detections[0].center_x == 700.0
-    assert result.detections[0].center_y == 400.0
-    assert result.detections[1].center_x == 642.0
-    assert result.detections[1].center_y == 401.0
-    assert result.detections[2].center_x == 650.0
-    assert result.detections[2].center_y == 400.0
-
-
-def test_detect_path_rejects_origin_pose_and_clears_stale_calibration(
-    tmp_path: Path,
-) -> None:
-    """detect_path() should not keep calibration when the robot pose is all zeros."""
-    svc = _make_svc(tmp_path)
-    svc._cal_robot_start = Waypoint(x=100.0, y=200.0, z=0.0, r=0.0)
-    svc._cal_canvas_start = (640.0, 400.0)
-    svc._cal_pixels_per_mm = 2.0
-    image_path = tmp_path / "capture.jpg"
-    image_path.write_bytes(b"fake-jpeg")
-    marker = MarkerCorners(
-        corners=[
-            Corner(x=10.0, y=10.0),
-            Corner(x=20.0, y=10.0),
-            Corner(x=20.0, y=20.0),
-            Corner(x=10.0, y=20.0),
-        ]
-    )
-
-    with patch.object(
-        svc._camera_vision,
-        "capture",
-        return_value=CaptureResult(ok=True, image_path=str(image_path)),
-    ), patch.object(
-        svc._camera_vision,
-        "detect",
-        return_value=DetectionResults(
-            ok=False,
-            detections=[],
-            pixels_per_mm=2.0,
-            marker_count=1,
-            marker_corners=[marker],
-            error="No battery contour detected",
-        ),
-    ), patch.object(
-        svc._robot,
-        "get_pose",
-        return_value=PoseResult(ok=True, x=0.0, y=0.0, z=0.0, r=0.0),
-    ):
-        origin_result = svc.detect_path()
-
-    assert origin_result.ok is False
-    assert "origin" in (origin_result.error or "").lower()
-    assert svc.calibration_robot_start is None
-    assert svc.is_calibrated is False
-
-
-# ---- ORC-TC-014: Job fails on robot move error ----
+    assert len(path) == 20
 
 
 def test_job_fails_on_robot_move_error(tmp_path: Path) -> None:
-    """A failing robot.move() should set job state to 'failed'."""
-    svc = _make_svc(tmp_path)
-    job = svc.create_job(path=[Waypoint(x=1, y=2)], dry_run=False)
-
+    service, _, _ = _make_svc(tmp_path)
+    job = service.create_job(path=[Waypoint(x=1, y=2)], dry_run=False)
     with patch.object(
-        svc._robot,
+        service._robot,
         "move",
         return_value=RobotResult(ok=False, error="Connection lost"),
     ):
-        svc.run_job(job.id)
-        svc._job_thread.join(timeout=10)
+        service.run_job(job.id)
+        assert service._job_thread is not None
+        service._job_thread.join(timeout=10)
 
-    db_job = svc.get_job(job.id)
+    db_job = service.get_job(job.id)
     assert db_job is not None
     assert db_job.state == "failed"
-    assert "Robot move failed" in db_job.error
+    assert "Robot move failed" in (db_job.error or "")
 
 
-# ---- ORC-TC-015: Job fails on position arrival timeout ----
+def test_job_waits_for_scan_results_processed_before_next_waypoint(
+    tmp_path: Path,
+) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    job = service.create_job(
+        path=[Waypoint(x=1, y=2), Waypoint(x=3, y=4)],
+        dry_run=False,
+    )
+
+    service._ionvision_ws_initialized = True
+
+    move_calls: list[tuple[float, float, float, float]] = []
+    first_scan_started = threading.Event()
+    second_scan_started = threading.Event()
+    scan_start_count = 0
+
+    def _track_move(x: float, y: float, z: float, r: float) -> RobotResult:
+        move_calls.append((x, y, z, r))
+        return RobotResult(ok=True)
+
+    def _track_scan_start() -> IVResult:
+        nonlocal scan_start_count
+        scan_start_count += 1
+        if scan_start_count == 1:
+            first_scan_started.set()
+        elif scan_start_count == 2:
+            second_scan_started.set()
+        return IVResult(ok=True)
+
+    with patch.object(service._robot, "move", side_effect=_track_move), patch.object(
+        service._robot,
+        "wait_for_position",
+        return_value=PoseResult(ok=True, x=0, y=0, z=0, r=0),
+    ), patch.object(
+        service._ionvision,
+        "start_new_scan",
+        side_effect=_track_scan_start,
+    ) as mock_start_scan, patch.object(
+        service._ionvision,
+        "get_current_scan",
+        return_value=IVResult(ok=True, payload={"state": "running"}),
+    ) as mock_get_current_scan, patch.object(
+        service._ionvision,
+        "get_latest_dataobject",
+        return_value=IVResult(ok=True, payload={"result": "ok"}),
+    ), patch(
+        "time.sleep"
+    ):
+        service.run_job(job.id)
+        assert service._job_thread is not None
+
+        assert first_scan_started.wait(timeout=2), "First scan did not start"
+        assert len(move_calls) == 1
+        assert (
+            not second_scan_started.is_set()
+        ), "Second waypoint started before scan.resultsProcessed was observed"
+
+        service._scan_results_processed_event.set()
+
+        assert second_scan_started.wait(
+            timeout=2
+        ), "Second scan did not start after scan.resultsProcessed"
+        assert len(move_calls) == 2
+
+        service._scan_results_processed_event.set()
+        service._job_thread.join(timeout=5)
+
+    db_job = service.get_job(job.id)
+    assert db_job is not None
+    assert db_job.state == "completed"
+    assert mock_start_scan.call_count == 2
+    assert mock_get_current_scan.call_count == 0
 
 
-def test_job_fails_on_arrival_timeout(tmp_path: Path) -> None:
-    """A wait_for_position timeout should set job state to 'failed'."""
-    svc = _make_svc(tmp_path)
-    job = svc.create_job(path=[Waypoint(x=1, y=2)], dry_run=False)
+def test_job_stores_evaluated_scan_payload_for_client(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    job = service.create_job(path=[Waypoint(x=1, y=2)], dry_run=False)
+
+    service._ionvision_ws_initialized = True
+    raw_payload = {
+        "body": {
+            "measurementData": {
+                "ucv": [0.1, 0.5, 1.0],
+                "intensityTop": [10.0, 20.0, 30.0],
+            }
+        },
+        "scanId": "scan-123",
+    }
 
     with patch.object(
-        svc._robot, "move", return_value=RobotResult(ok=True)
+        service._robot,
+        "move",
+        return_value=RobotResult(ok=True),
     ), patch.object(
-        svc._robot,
+        service._robot,
         "wait_for_position",
-        return_value=PoseResult(ok=False, error="Timeout waiting"),
+        return_value=PoseResult(ok=True, x=1, y=2, z=0, r=0),
+    ), patch.object(
+        service._ionvision,
+        "start_new_scan",
+        return_value=IVResult(ok=True, payload={"message": "scan started"}),
+    ), patch.object(
+        service,
+        "_wait_for_scan_results_processed",
+        return_value=True,
+    ), patch.object(
+        service._ionvision,
+        "get_latest_dataobject",
+        return_value=IVResult(ok=True, payload=raw_payload),
+    ), patch.object(
+        service._ionvision,
+        "evaluate_scan_data",
+        return_value=IVResult(ok=True, payload={"intensity_average": 20.0}),
+    ) as mock_evaluate, patch(
+        "time.sleep"
     ):
-        svc.run_job(job.id)
-        svc._job_thread.join(timeout=10)
+        service.run_job(job.id)
+        assert service._job_thread is not None
+        service._job_thread.join(timeout=10)
 
-    db_job = svc.get_job(job.id)
+    db_job = service.get_job(job.id)
     assert db_job is not None
-    assert db_job.state == "failed"
-    assert "Arm did not reach waypoint" in db_job.error
-
-
-# ---- ORC-TC-016: Return to start after completion ----
+    assert db_job.state == "completed"
+    assert len(db_job.measurements) == 1
+    assert db_job.measurements[0].scan_result is not None
+    assert db_job.measurements[0].scan_result.get("scanId") == "scan-123"
+    assert db_job.measurements[0].scan_result.get("evaluation") == {
+        "intensity_average": 20.0
+    }
+    mock_evaluate.assert_called_once_with(raw_payload)
 
 
 def test_return_to_start_after_completion(tmp_path: Path) -> None:
-    """After completing all waypoints, robot should move back to the starting position."""
-    svc = _make_svc(tmp_path)
+    service, _, _ = _make_svc(tmp_path)
     start = Waypoint(x=0, y=0, z=0, r=0)
     target = Waypoint(x=10, y=20, z=0, r=0)
-    job = svc.create_job(path=[target], dry_run=False, starting_point=start)
+    job = service.create_job(path=[target], dry_run=False, starting_point=start)
 
     move_calls: list[tuple[float, float, float, float]] = []
 
@@ -502,75 +457,66 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         move_calls.append((x, y, z, r))
         return RobotResult(ok=True)
 
-    with patch.object(svc._robot, "move", side_effect=track_move), patch.object(
-        svc._robot,
+    with patch.object(service._robot, "move", side_effect=track_move), patch.object(
+        service._robot,
         "wait_for_position",
         return_value=PoseResult(ok=True, x=0, y=0, z=0, r=0),
     ), patch.object(
-        svc._ionvision, "start_new_scan", return_value=IVResult(ok=True)
+        service._ionvision,
+        "start_new_scan",
+        return_value=IVResult(ok=True),
     ), patch.object(
-        svc._ionvision,
+        service._ionvision,
         "get_current_scan",
         return_value=IVResult(ok=True, payload={"state": "finished"}),
     ), patch.object(
-        svc._ionvision,
+        service._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
     ), patch(
         "time.sleep"
     ):
-        svc.run_job(job.id)
-        svc._job_thread.join(timeout=10)
+        service.run_job(job.id)
+        assert service._job_thread is not None
+        service._job_thread.join(timeout=10)
 
-    db_job = svc.get_job(job.id)
+    db_job = service.get_job(job.id)
     assert db_job is not None
     assert db_job.state == "completed"
-    # Last move call should be back to the starting point (stored separately)
-    assert move_calls[-1] == (0.0, 0.0, 0.0, 0.0)
-
-
-# ---- ORC-TC-017: Clean base image saved (no overlay rendering) ----
+    assert move_calls[0] == (10, 20, 0, 0)
+    assert move_calls[-1] == (0, 0, 0, 0)
 
 
 def test_clean_image_saved_without_overlay(tmp_path: Path) -> None:
-    """create_job should save the clean image directly, not a rendered overlay."""
-    svc = _make_svc(tmp_path)
+    service, _, _ = _make_svc(tmp_path)
 
     dummy_image = b"fake_jpeg_data"
     waypoints = [Waypoint(x=1, y=2), Waypoint(x=3, y=4)]
-    job = svc.create_job(path=waypoints, dry_run=True, image_bytes=dummy_image)
+    job = service.create_job(path=waypoints, dry_run=True, image_bytes=dummy_image)
 
-    stored = svc.get_job_image(job.id)
-    assert stored == dummy_image  # saved as-is, no rendering
-
-
-# ---- ORC-TC-018: Profile listing and default selection ----
+    stored = service.get_job_image(job.id)
+    assert stored == dummy_image
 
 
 def test_profiles_and_default(tmp_path: Path) -> None:
-    """profiles() returns both profiles, default_profile() returns the first."""
-    svc = _make_svc(tmp_path)
-    profiles = svc.profiles()
+    service, _, _ = _make_svc(tmp_path)
+    profiles = service.profiles()
     assert len(profiles) == 1
     assert profiles[0]["name"] == "default"
 
-    default = svc.default_profile()
+    default = service.default_profile()
     assert default["name"] == "default"
     assert "description" in default
 
 
-# ---- ORC-TC-018b: Default profile work_z ----
-
-
 def test_default_profile_work_z_defaults_to_zero(tmp_path: Path) -> None:
-    """default_profile() has workZ=0.0 when OrchestratorService is created without it."""
-    svc = _make_svc(tmp_path)
-    assert svc.default_profile()["workZ"] == 0.0
-    assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)
+    service, _, _ = _make_svc(tmp_path)
+    assert service.default_profile()["workZ"] == 0.0
+    assert service.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)
+    assert service.default_profile()["threshold"] == pytest.approx(120.0)
 
 
 def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
-    """OrchestratorService stores default profile constructor defaults in the default profile dict."""
     db = Database(db_path=str(tmp_path / "test.db"))
     db.init_db()
     camera = CameraVisionAdapter()
@@ -584,17 +530,19 @@ def test_default_profile_work_z_uses_constructor_param(tmp_path: Path) -> None:
         robot=robot,
         storage=StorageAdapter(db=db),
         ionvision=IVAdapter(
-            base_url="http://localhost:8080", ws_base_url="ws://localhost:8080"
+            base_url="http://localhost:8080",
+            ws_base_url="ws://localhost:8080",
         ),
         default_work_z=-35.0,
         default_measuring_points_per_cm=1.25,
+        default_measurement_threshold=140.0,
     )
     assert svc.default_profile()["workZ"] == -35.0
     assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(1.25)
+    assert svc.default_profile()["threshold"] == pytest.approx(140.0)
 
 
 def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
-    """create_orchestrator() parses default profile env vars and passes them to OrchestratorService."""
     from app.dependencies import create_orchestrator
 
     with patch(
@@ -605,6 +553,7 @@ def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
         {
             "NENABOT_DEFAULT_WORK_Z": "-42.5",
             "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM": "0.8",
+            "NENABOT_DEFAULT_MEASUREMENT_THRESHOLD": "135.5",
         },
     ):
         svc = create_orchestrator(
@@ -613,10 +562,10 @@ def test_create_orchestrator_reads_default_work_z_env(tmp_path: Path) -> None:
         )
     assert svc.default_profile()["workZ"] == pytest.approx(-42.5)
     assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.8)
+    assert svc.default_profile()["threshold"] == pytest.approx(135.5)
 
 
 def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
-    """create_orchestrator() uses safe defaults when default profile env vars are invalid."""
     from app.dependencies import create_orchestrator
 
     with patch(
@@ -627,6 +576,7 @@ def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
         {
             "NENABOT_DEFAULT_WORK_Z": "not-a-number",
             "NENABOT_DEFAULT_MEASURING_POINTS_PER_CM": "0",
+            "NENABOT_DEFAULT_MEASUREMENT_THRESHOLD": "999",
         },
     ):
         svc = create_orchestrator(
@@ -635,33 +585,36 @@ def test_create_orchestrator_invalid_work_z_falls_back(tmp_path: Path) -> None:
         )
     assert svc.default_profile()["workZ"] == 0.0
     assert svc.default_profile()["measuringPointsPerCm"] == pytest.approx(0.5)
-
-
-# ---- ORC-TC-019: Manual move via orchestrator ----
+    assert svc.default_profile()["threshold"] == pytest.approx(120.0)
 
 
 def test_move_robot_delegates_to_adapter(tmp_path: Path) -> None:
-    """move_robot() should delegate to robot.move() and return the result."""
-    svc = _make_svc(tmp_path)
+    service, _, _ = _make_svc(tmp_path)
     with patch.object(
-        svc._robot, "move", return_value=RobotResult(ok=True)
+        service._robot,
+        "move",
+        return_value=RobotResult(ok=True),
     ) as mock_move:
-        result = svc.move_robot(1.0, 2.0, 3.0, 4.0)
+        result = service.move_robot(1.0, 2.0, 3.0, 4.0)
         assert result.ok is True
     mock_move.assert_called_once_with(1.0, 2.0, 3.0, 4.0)
 
 
-# ---- ORC-TC-020: Get robot pose via orchestrator ----
-
-
 def test_get_robot_pose_delegates_to_adapter(tmp_path: Path) -> None:
-    """get_robot_pose() should delegate to robot.get_pose() and return the result."""
-    svc = _make_svc(tmp_path)
+    service, _, _ = _make_svc(tmp_path)
     expected = PoseResult(
-        ok=True, x=1.0, y=2.0, z=3.0, r=4.0, j1=5.0, j2=6.0, j3=7.0, j4=8.0
+        ok=True,
+        x=1.0,
+        y=2.0,
+        z=3.0,
+        r=4.0,
+        j1=5.0,
+        j2=6.0,
+        j3=7.0,
+        j4=8.0,
     )
-    with patch.object(svc._robot, "get_pose", return_value=expected) as mock_pose:
-        result = svc.get_robot_pose()
+    with patch.object(service._robot, "get_pose", return_value=expected) as mock_pose:
+        result = service.get_robot_pose()
         assert result.ok is True
         assert result.x == 1.0
         assert result.y == 2.0

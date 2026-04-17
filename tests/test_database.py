@@ -1,6 +1,7 @@
 """Unit tests for Database and StorageAdapter."""
 
 import datetime
+import threading
 from pathlib import Path
 
 from app.adapters.database import Database
@@ -193,3 +194,51 @@ def test_delete_cascades(tmp_path: Path) -> None:
     assert store.get_job("j-1") is None
     assert store.get_measurements("j-1") == []
     assert store.get_job_image("j-1") is None
+
+
+def test_concurrent_job_reads_and_updates_do_not_raise(tmp_path: Path) -> None:
+    store = _make_storage(tmp_path)
+    store.save_job(_sample_job())
+
+    start = threading.Barrier(5)
+    errors: list[Exception] = []
+    errors_lock = threading.Lock()
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(200):
+            try:
+                job = store.get_job("j-1")
+                assert job is not None
+            except Exception as exc:  # pragma: no cover - exercised on failure
+                with errors_lock:
+                    errors.append(exc)
+                return
+
+    def writer() -> None:
+        start.wait()
+        for i in range(200):
+            try:
+                store.update_job_state(
+                    "j-1",
+                    state="running" if i % 2 else "created",
+                    last_point_processed=i,
+                )
+            except Exception as exc:  # pragma: no cover - exercised on failure
+                with errors_lock:
+                    errors.append(exc)
+                return
+
+    threads = [
+        threading.Thread(target=reader),
+        threading.Thread(target=reader),
+        threading.Thread(target=reader),
+        threading.Thread(target=writer),
+        threading.Thread(target=writer),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []

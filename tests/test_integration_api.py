@@ -38,7 +38,7 @@ class TestHealthAndStatus:
         assert health["uptimeSeconds"] >= 0
 
         # Each component should report status
-        for component in ("camera", "robot", "dms"):
+        for component in ("camera", "robot", "ionvision"):
             assert component in health
             assert "status" in health[component]
             assert health[component]["status"] in {
@@ -192,11 +192,14 @@ class TestHealthComponentStatus:
         assert response.status_code == 200
 
         health = response.json()
-        # IonVision is reported as 'dms' in the health check
-        assert "dms" in health
-        assert "status" in health["dms"]
+        assert "ionvision" in health
+        assert "status" in health["ionvision"]
         # Status should be one of these values
-        assert health["dms"]["status"] in {"connected", "disconnected", "error"}
+        assert health["ionvision"]["status"] in {
+            "connected",
+            "disconnected",
+            "error",
+        }
 
     def test_health_reports_camera_status(self):
         """GET /api/health should include camera component status."""

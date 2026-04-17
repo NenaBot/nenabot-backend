@@ -27,6 +27,12 @@ its mechanical home position. Blocks until finished.
 Uses `SetHOMECmdEx` when available; falls back to `SetHOMECmd` only when
 `DOBOT_ENABLE_LEGACY_HOMING=1` is set (see env vars below).
 
+## Application Startup
+
+The API connects to the robot during startup, but startup homing is disabled by
+default. Set `NENABOT_ENABLE_STARTUP_HOMING=1` to opt in to automatic homing
+after the robot connection succeeds.
+
 **`move(x, y, z, r, wait=True)`** / **`move_to_coordinates(coords, wait=True)`** <br>
 Move the end-effector to a Cartesian position. With `wait=True` (default) the
 call uses `SetPTPCmdEx` when available (blocking path). If `SetPTPCmdEx` is
@@ -104,6 +110,7 @@ is skipped with a clear message.
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `RUN_ROBOT_HARDWARE_TESTS` | — | Set to `1` to enable the suite |
+| `NENABOT_ENABLE_STARTUP_HOMING` | `0` | Set to `1` to home the arm automatically during app startup after connect |
 | `DOBOT_ENABLE_LEGACY_HOMING` | `0` | Set to `1` to use `SetHOMECmd` instead of `SetHOMECmdEx` (known to crash on some Windows setups — only enable if `SetHOMECmdEx` is unavailable) |
 
 ### What the tests cover

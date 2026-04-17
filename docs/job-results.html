@@ -260,6 +260,46 @@
         .meta-grid dd {
             margin: 0 0 6px;
         }
+
+        .scan-result-cell {
+            min-width: 320px;
+            max-width: 520px;
+            vertical-align: top;
+        }
+
+        .scan-result {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: rgba(137, 180, 250, 0.05);
+            padding: 4px 6px;
+        }
+
+        .scan-result summary {
+            cursor: pointer;
+            color: var(--accent);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.3;
+        }
+
+        .scan-result pre {
+            margin: 8px 0 2px;
+            padding: 8px;
+            border-radius: 4px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 11px;
+            line-height: 1.35;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 220px;
+            overflow: auto;
+        }
+
+        .scan-empty {
+            color: var(--dim);
+        }
     </style>
 </head>
 
@@ -289,19 +329,109 @@
         const api = () => $('apiUrl').value.replace(/\/+$/, '') + '/api';
         let selectedJobId = null;
         let autoTimer = null;
+        let currentJobs = [];
+
+        function jobPath(jobId = '') {
+            const suffix = jobId ? `/${encodeURIComponent(jobId)}` : '';
+            return `${api()}/job${suffix}`;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function formatNumber(value, digits = 1) {
+            return typeof value === 'number' ? value.toFixed(digits) : '—';
+        }
+
+        function formatTimestamp(value) {
+            if (!value) return '—';
+            const parsed = new Date(value);
+            return Number.isNaN(parsed.valueOf()) ? escapeHtml(value) : parsed.toLocaleString();
+        }
+
+        function summarizeScanResult(scanResult) {
+            if (!scanResult || typeof scanResult !== 'object') {
+                return 'View scan payload';
+            }
+
+            const parts = [];
+            if (typeof scanResult.id === 'string' && scanResult.id) {
+                parts.push(`id: ${scanResult.id}`);
+            }
+            if (typeof scanResult.status === 'string' && scanResult.status) {
+                parts.push(`status: ${scanResult.status}`);
+            }
+            if (typeof scanResult.measurements === 'number') {
+                parts.push(`measurements: ${scanResult.measurements}`);
+            }
+            return parts.length > 0 ? parts.join(' | ') : 'View scan payload';
+        }
+
+        function renderScanResultCell(scanResult) {
+            if (scanResult == null) {
+                return '<span class="scan-empty">—</span>';
+            }
+
+            let payload = '';
+            try {
+                payload = escapeHtml(JSON.stringify(scanResult, null, 2));
+            } catch {
+                payload = escapeHtml(String(scanResult));
+            }
+            const summary = escapeHtml(summarizeScanResult(scanResult));
+            return `<details class="scan-result"><summary>${summary}</summary><pre>${payload}</pre></details>`;
+        }
+
+        function renderListMessage(message) {
+            $('jobListItems').innerHTML = `<div class="job-item" style="cursor:default;color:var(--dim)">${escapeHtml(message)}</div>`;
+        }
+
+        function renderDetailMessage(message) {
+            $('detailPanel').innerHTML = `<div class="detail-empty">${escapeHtml(message)}</div>`;
+        }
+
+        function stopAutoRefresh() {
+            clearInterval(autoTimer);
+            autoTimer = null;
+        }
+
+        function highlightSelectedJob() {
+            document.querySelectorAll('.job-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.jobId === selectedJobId);
+            });
+        }
 
         async function loadJobs() {
             try {
-                const res = await fetch(`${api()}/jobs`);
+                const res = await fetch(jobPath());
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
                 const jobs = await res.json();
+                currentJobs = Array.isArray(jobs) ? jobs.slice().reverse() : [];
                 const container = $('jobListItems');
                 container.innerHTML = '';
-                // Show newest first
-                jobs.reverse();
-                for (const j of jobs) {
+                if (currentJobs.length === 0) {
+                    selectedJobId = null;
+                    stopAutoRefresh();
+                    renderListMessage('No jobs found');
+                    renderDetailMessage('No jobs yet');
+                    return;
+                }
+
+                let selectedExists = false;
+                for (const j of currentJobs) {
+                    if (j.id === selectedJobId) selectedExists = true;
                     const s = j.status || {};
                     const div = document.createElement('div');
                     div.className = 'job-item' + (j.id === selectedJobId ? ' active' : '');
+                    div.dataset.jobId = j.id;
                     div.innerHTML = `
         <span class="jid">${j.id.slice(0, 8)}…</span>
         <span class="status-pill state-${s.state || 'created'}">${(s.state || 'created').toUpperCase()}</span>
@@ -310,57 +440,88 @@
                     div.onclick = () => selectJob(j.id);
                     container.appendChild(div);
                 }
+
+                if (selectedJobId && !selectedExists) {
+                    selectedJobId = null;
+                    stopAutoRefresh();
+                    renderDetailMessage('Select a job to view results');
+                }
             } catch (e) {
                 console.error('loadJobs', e);
+                renderListMessage(`Failed to load jobs: ${e.message}`);
             }
         }
 
         async function selectJob(jobId) {
+            stopAutoRefresh();
             selectedJobId = jobId;
-            // Re-highlight
-            document.querySelectorAll('.job-item').forEach(el => el.classList.remove('active'));
-            const items = document.querySelectorAll('.job-item');
-            items.forEach(el => {
-                if (el.querySelector('.jid')?.textContent.startsWith(jobId.slice(0, 8))) el.classList.add('active');
-            });
+            highlightSelectedJob();
             await renderDetail(jobId);
-            // Auto-refresh if running
-            clearInterval(autoTimer);
+        }
+
+        function startAutoRefresh() {
+            stopAutoRefresh();
             autoTimer = setInterval(async () => {
                 if (!selectedJobId) return;
-                const res = await fetch(`${api()}/jobs/${selectedJobId}`);
-                const j = await res.json();
-                if (['completed', 'failed', 'stopped'].includes(j.status?.state)) {
-                    clearInterval(autoTimer);
-                    loadJobs();  // refresh list pills
+                try {
+                    const res = await fetch(jobPath(selectedJobId));
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status}`);
+                    }
+                    const job = await res.json();
+                    if (['completed', 'failed', 'stopped'].includes(job.status?.state)) {
+                        stopAutoRefresh();
+                        await loadJobs();
+                    }
+                    await renderDetail(selectedJobId, job);
+                } catch (e) {
+                    console.error('autoRefresh', e);
+                    stopAutoRefresh();
                 }
-                renderDetail(selectedJobId);
             }, 1200);
         }
 
-        async function renderDetail(jobId) {
-            try {
-                const res = await fetch(`${api()}/jobs/${jobId}`);
-                const job = await res.json();
-                const s = job.status || {};
-                const panel = $('detailPanel');
-
-                // Build measurements rows
-                let rows = '';
-                for (const m of (job.measurements || [])) {
-                    const w = m.waypoint || {};
-                    const scan = m.scanResult ? JSON.stringify(m.scanResult).slice(0, 120) : '—';
-                    rows += `<tr>
+        function measurementRows(job) {
+            let rows = '';
+            for (const m of (job.measurements || [])) {
+                const w = m.waypoint || {};
+                rows += `<tr>
         <td>${(m.waypointIndex ?? 0) + 1}</td>
-        <td>${w.robotX?.toFixed(1)}</td><td>${w.robotY?.toFixed(1)}</td>
-        <td>${w.robotZ?.toFixed(1)}</td><td>${w.robotR?.toFixed(1)}</td>
+        <td>${m.pixelX != null ? formatNumber(m.pixelX, 0) : '—'}</td>
+        <td>${m.pixelY != null ? formatNumber(m.pixelY, 0) : '—'}</td>
+        <td>${formatNumber(w.robotX)}</td><td>${formatNumber(w.robotY)}</td>
+        <td>${formatNumber(w.robotZ)}</td><td>${formatNumber(w.robotR)}</td>
         <td>${m.simulated ? 'Yes' : 'No'}</td>
-        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${scan}</td>
-        <td>${m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '—'}</td>
+        <td class="scan-result-cell">${renderScanResultCell(m.scanResult)}</td>
+        <td>${formatTimestamp(m.timestamp)}</td>
       </tr>`;
+            }
+            return rows || '<tr><td colspan="10" style="color:var(--dim)">No measurements yet</td></tr>';
+        }
+
+        async function renderDetail(jobId, prefetchedJob = null) {
+            try {
+                const job = prefetchedJob || await (async () => {
+                    const res = await fetch(jobPath(jobId));
+                    if (!res.ok) {
+                        if (res.status === 404) {
+                            return null;
+                        }
+                        throw new Error(`HTTP ${res.status}`);
+                    }
+                    return await res.json();
+                })();
+
+                if (!job) {
+                    stopAutoRefresh();
+                    renderDetailMessage('Job not found');
+                    return;
                 }
 
-                const imgUrl = `${api()}/jobs/${jobId}/image?t=${Date.now()}`;
+                const s = job.status || {};
+                const panel = $('detailPanel');
+                const imgUrl = `${jobPath(jobId)}/image?t=${Date.now()}`;
+                const options = job.options ? `<pre style="margin-top:10px;background:var(--bg);padding:8px;border-radius:4px;overflow:auto;font-size:12px;">${escapeHtml(JSON.stringify(job.options, null, 2))}</pre>` : '';
 
                 panel.innerHTML = `
       <div class="detail-grid">
@@ -372,11 +533,12 @@
           </div>
           <div class="card-body">
             <dl class="meta-grid">
-              <div><dt>State</dt><dd>${s.state}</dd></div>
+              <div><dt>State</dt><dd>${escapeHtml(s.state || 'created')}</dd></div>
               <div><dt>Points</dt><dd>${s.lastPointProcessed ?? 0} / ${job.path?.length ?? 0}</dd></div>
               <div><dt>Mode</dt><dd>${job.dryRun ? 'Dry Run' : 'Real'}</dd></div>
             </dl>
-            ${s.error ? `<div style="color:var(--red);margin-top:6px">Error: ${s.error}</div>` : ''}
+            ${s.error ? `<div style="color:var(--red);margin-top:6px">Error: ${escapeHtml(s.error)}</div>` : ''}
+            ${options ? `<div style="margin-top:8px;font-size:12px;color:var(--dim)">Options</div>${options}` : ''}
           </div>
         </div>
 
@@ -401,8 +563,8 @@
           <div class="card-hdr">Measurements (${job.measurements?.length ?? 0})</div>
           <div class="card-body" style="padding:0;overflow-x:auto">
             <table>
-              <thead><tr><th>#</th><th>X</th><th>Y</th><th>Z</th><th>R</th><th>Sim</th><th>Scan Result</th><th>Time</th></tr></thead>
-              <tbody>${rows || '<tr><td colspan="8" style="color:var(--dim)">No measurements yet</td></tr>'}</tbody>
+              <thead><tr><th>#</th><th>Pixel X</th><th>Pixel Y</th><th>Robot X</th><th>Robot Y</th><th>Z</th><th>R</th><th>Sim</th><th>Scan Result</th><th>Time</th></tr></thead>
+              <tbody>${measurementRows(job)}</tbody>
             </table>
           </div>
         </div>
@@ -415,8 +577,16 @@
                 if (img && img.complete && img.naturalWidth > 0) {
                     drawMeasurements();
                 }
+
+                if (s.state === 'running') {
+                    startAutoRefresh();
+                } else {
+                    stopAutoRefresh();
+                }
             } catch (e) {
                 console.error('renderDetail', e);
+                stopAutoRefresh();
+                renderDetailMessage(`Failed to load job: ${e.message}`);
             }
         }
 

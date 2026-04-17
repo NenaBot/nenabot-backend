@@ -1,16 +1,22 @@
 from __future__ import annotations
 
-import base64
+import json
 import logging
 import math
 import queue
 import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.adapters.camera_vision import CameraVisionAdapter, DetectionResults
+from app.adapters.camera_vision import (
+    FIXED_CALIBRATION_POINTS,
+    CalibrationTarget,
+    CameraVisionAdapter,
+    DetectionResults,
+)
 from app.adapters.ionVision import IVAdapter
 from app.adapters.robot import PoseResult, RobotAdapter, RobotResult
 from app.adapters.storage import StorageAdapter
@@ -18,10 +24,34 @@ from app.domain.models import Job, Measurement, Waypoint
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
+
+def _format_payload_for_log(payload: object, limit: int = 3000) -> str:
+    try:
+        rendered = json.dumps(payload, separators=(",", ":"), default=str)
+    except Exception:
+        rendered = repr(payload)
+    if len(rendered) > limit:
+        return f"{rendered[:limit]}...<truncated {len(rendered) - limit} chars>"
+    return rendered
+
 
 MAX_MEASURING_POINTS_PER_CM = 10.0
 MAX_POPULATED_PATH_POINTS = 20000
+TOTAL_CALIBRATION_STEPS = len(FIXED_CALIBRATION_POINTS)
+
+
+@dataclass
+class CalibrationSession:
+    reference_image_base64: str
+    targets: list[CalibrationTarget]
+    start_pose: Waypoint
+    captured_robot_points: list[tuple[float, float, float]] = field(
+        default_factory=list
+    )
+
+    @property
+    def current_step(self) -> int:
+        return len(self.captured_robot_points)
 
 
 class OrchestratorService:
@@ -31,70 +61,88 @@ class OrchestratorService:
         robot: RobotAdapter,
         ionvision: IVAdapter,
         storage: StorageAdapter,
+        mapping_path: str = "data/calibration/robot_mapping.json",
         max_jobs: int = 0,
         default_work_z: float = 0.0,
         default_measuring_points_per_cm: float = 0.5,
+        default_measurement_threshold: float = 120.0,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
         self._ionvision = ionvision
         self._storage = storage
-        self._max_jobs = max_jobs  # 0 = unlimited
+        self._mapping_path = Path(mapping_path)
         self._started_at = time.monotonic()
+        self._max_jobs = max(0, int(max_jobs))
+        measuring_points_per_cm = float(default_measuring_points_per_cm)
+        if measuring_points_per_cm <= 0:
+            measuring_points_per_cm = 0.5
+        measurement_threshold = float(default_measurement_threshold)
+        if not (0.0 <= measurement_threshold <= 255.0):
+            measurement_threshold = 120.0
         self._profiles = [
             {
                 "name": "default",
                 "description": "Default inspection profile",
-                "workZ": default_work_z,
-                "measuringPointsPerCm": default_measuring_points_per_cm,
+                "workZ": float(default_work_z),
+                "measuringPointsPerCm": measuring_points_per_cm,
+                "threshold": measurement_threshold,
             }
         ]
         self._running_job_id: str | None = None
         self._stop_requested = False
         self._job_thread: threading.Thread | None = None
 
-        # Calibration state — populated by detect_path()
-        self._cal_robot_start: Waypoint | None = None
-        self._cal_canvas_start: tuple[float, float] | None = None
-        self._cal_pixels_per_mm: float | None = None
+        self._calibration_lock = threading.Lock()
+        self._calibration_session: CalibrationSession | None = None
+        self._mapping_data: dict | None = self._load_mapping_file()
 
-        # Per-job pixel path for measurement pixel coordinates
         self._pixel_paths: dict[str, list[tuple[float, float]]] = {}
-
-        # Per-job starting positions for return-to-start
         self._starting_waypoints: dict[str, Waypoint] = {}
 
-        # SSE subscribers: job_id → list of queues (one per connected client)
         self._job_subscribers: dict[str, list[queue.Queue]] = {}
         self._subscribers_lock = threading.Lock()
+        self._ionvision_ws_initialized = False
+        self._scan_results_processed_event = threading.Event()
+        self._scan_stopped_event = threading.Event()
 
     # ---- Job CRUD (DB-backed) ----
 
     def subscribe(self, job_id: str) -> queue.Queue:
-        """Subscribe to SSE events for a job. Returns a Queue that receives event dicts."""
         q: queue.Queue = queue.Queue()
         with self._subscribers_lock:
             self._job_subscribers.setdefault(job_id, []).append(q)
         return q
 
     def unsubscribe(self, job_id: str, q: queue.Queue) -> None:
-        """Remove a subscriber queue for a job."""
         with self._subscribers_lock:
-            subs = self._job_subscribers.get(job_id, [])
+            subscribers = self._job_subscribers.get(job_id, [])
             try:
-                subs.remove(q)
+                subscribers.remove(q)
             except ValueError:
                 pass
-            if not subs:
+            if not subscribers:
                 self._job_subscribers.pop(job_id, None)
 
     def _publish_event(self, job_id: str, event: dict) -> None:
-        """Push an event dict to all subscribers of a job."""
         with self._subscribers_lock:
-            for q in self._job_subscribers.get(job_id, []):
+            subscribers = self._job_subscribers.get(job_id, [])
+            logger.info(
+                "SSE publish job_id=%s type=%s state=%s subscribers=%d",
+                job_id,
+                event.get("type"),
+                event.get("state"),
+                len(subscribers),
+            )
+            for subscriber in subscribers:
                 try:
-                    q.put_nowait(event)
+                    subscriber.put_nowait(event)
                 except queue.Full:
+                    logger.warning(
+                        "SSE subscriber queue full job_id=%s type=%s",
+                        job_id,
+                        event.get("type"),
+                    )
                     pass
 
     def create_job(
@@ -111,15 +159,9 @@ class OrchestratorService:
         job = Job(id=job_id, options=options, path=path or [], dry_run=dry_run)
         self._storage.save_job(job)
 
-        # Store the pixel path for measurement pixel coordinates
         self._pixel_paths[job_id] = pixel_path or []
-
-        # Store starting position separately (used for return-to-start,
-        # but not included in the measurement loop)
         if starting_point:
             self._starting_waypoints[job_id] = starting_point
-
-        # Store the clean base image (frontend renders points on top)
         if image_bytes:
             self._storage.save_job_image(job_id, image_bytes)
 
@@ -143,11 +185,9 @@ class OrchestratorService:
     # ---- Job execution ----
 
     def run_job(self, job_id: str) -> Job:
-        """Start job execution in a background thread. Returns the job immediately."""
         job = self._storage.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} not found")
-
         if self._running_job_id:
             raise RuntimeError("Another job is already running")
 
@@ -158,7 +198,9 @@ class OrchestratorService:
         self._storage.update_job_state(job_id, "running", job.last_point_processed)
 
         self._job_thread = threading.Thread(
-            target=self._execute_job, args=(job,), daemon=True
+            target=self._execute_job,
+            args=(job,),
+            daemon=True,
         )
         self._job_thread.start()
 
@@ -173,11 +215,9 @@ class OrchestratorService:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
-
         return job
 
     def stop_job(self) -> bool:
-        """Request the running job to stop. Returns True if a job was running."""
         if not self._running_job_id:
             return False
         self._stop_requested = True
@@ -185,44 +225,29 @@ class OrchestratorService:
         return True
 
     def get_robot_pose(self) -> PoseResult:
-        """Read the current position of the robot arm."""
         return self._robot.get_pose()
 
-    def move_robot(
-        self,
-        x: float,
-        y: float,
-        z: float,
-        r: float,
-    ) -> RobotResult:
-        """Send the robot to a specific position (for calibration / testing)."""
-        logger.info(
-            "Manual move → (%.1f, %.1f, %.1f, %.1f)",
-            x,
-            y,
-            z,
-            r,
-        )
+    def move_robot(self, x: float, y: float, z: float, r: float) -> RobotResult:
+        logger.info("Manual move → (%.1f, %.1f, %.1f, %.1f)", x, y, z, r)
         return self._robot.move(x, y, z, r)
 
     def _execute_job(self, job: Job) -> None:
-        """Run the job waypoints sequentially (called in background thread)."""
         try:
-            for i, wp in enumerate(job.path):
+            for index, waypoint in enumerate(job.path):
                 if self._stop_requested:
                     job.state = "stopped"
-                    logger.info("Job %s stopped at waypoint %d", job.id, i)
+                    logger.info("Job %s stopped at waypoint %d", job.id, index)
                     break
 
                 logger.info(
                     "Job %s — WP %d/%d (%.1f, %.1f, %.1f, %.1f) dry=%s",
                     job.id,
-                    i + 1,
+                    index + 1,
                     len(job.path),
-                    wp.x,
-                    wp.y,
-                    wp.z,
-                    wp.r,
+                    waypoint.x,
+                    waypoint.y,
+                    waypoint.z,
+                    waypoint.r,
                     job.dry_run,
                 )
 
@@ -234,96 +259,118 @@ class OrchestratorService:
                         "state": "running",
                         "last_point_processed": job.last_point_processed,
                         "total_points": len(job.path),
-                        "waypoint_index": i,
+                        "waypoint_index": index,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
                 )
 
-                scan_result: dict | None = None
-
-                # Look up pixel coordinates for this waypoint
-                pp = self._pixel_paths.get(job.id, [])
                 pixel_coords: tuple[float, float] | None = None
-                if i < len(pp):
-                    pixel_coords = pp[i]
+                if index < len(self._pixel_paths.get(job.id, [])):
+                    pixel_coords = self._pixel_paths[job.id][index]
 
+                scan_result: dict | None = None
                 if not job.dry_run:
-                    # Move robot to waypoint
-                    move_res = self._robot.move(wp.x, wp.y, wp.z, wp.r)
-                    if not move_res.ok:
-                        raise RuntimeError(f"Robot move failed: {move_res.error}")
+                    move_result = self._robot.move(
+                        waypoint.x,
+                        waypoint.y,
+                        waypoint.z,
+                        waypoint.r,
+                    )
+                    if not move_result.ok:
+                        raise RuntimeError(f"Robot move failed: {move_result.error}")
 
-                    # Validate the arm actually reached the target position
                     arrival = self._robot.wait_for_position(
-                        wp.x,
-                        wp.y,
-                        wp.z,
-                        wp.r,
+                        waypoint.x,
+                        waypoint.y,
+                        waypoint.z,
+                        waypoint.r,
                         tolerance_mm=1.0,
                         timeout_s=30.0,
                     )
                     if not arrival.ok:
-                        logger.warning(
-                            "Job %s — WP %d arrival validation failed: %s",
-                            job.id,
-                            i + 1,
-                            arrival.error,
+                        raise RuntimeError(
+                            f"Arm did not reach waypoint {index + 1}: {arrival.error}"
                         )
-                        msg = f"Arm did not reach waypoint {i + 1}: {arrival.error}"
-                        raise RuntimeError(msg)
-                    logger.info(
-                        "Job %s — WP %d reached: (%.1f, %.1f, %.1f) — dwelling 1.5 s",
-                        job.id,
-                        i + 1,
-                        arrival.x,
-                        arrival.y,
-                        arrival.z,
-                    )
 
-                    # Dwell at the waypoint for 1.5 seconds
                     time.sleep(1.5)
-
-                    # Here comes the reading from IonVision
+                    self._scan_results_processed_event.clear()
+                    self._scan_stopped_event.clear()
+                    logger.info(
+                        "Job %s waypoint=%d starting IonVision scan",
+                        job.id,
+                        index + 1,
+                    )
                     scan_start = self._ionvision.start_new_scan()
                     if scan_start.ok:
-                        # # --- SSE: emit scan-started event (uncomment when IonVision is connected) ---
-                        # self._publish_event(job.id, {
-                        #     "type": "job:scanning",
-                        #     "job_id": job.id,
-                        #     "state": "running",
-                        #     "last_point_processed": job.last_point_processed,
-                        #     "total_points": len(job.path),
-                        #     "waypoint_index": i,
-                        #     "timestamp": datetime.now(timezone.utc).isoformat(),
-                        # })
-                        for _ in range(120):
-                            time.sleep(1.5)
-                            status = self._ionvision.get_current_scan()
-                            if not status.ok:
-                                break
-                            payload = status.payload or {}
-                            if payload.get("state") == "finished":
-                                break
-                            # # --- SSE: emit scan-progress event (uncomment when IonVision is connected) ---
-                            # self._publish_event(job.id, {
-                            #     "type": "job:scan_progress",
-                            #     "job_id": job.id,
-                            #     "state": "running",
-                            #     "last_point_processed": job.last_point_processed,
-                            #     "total_points": len(job.path),
-                            #     "waypoint_index": i,
-                            #     "scan_state": payload.get("state"),
-                            #     "timestamp": datetime.now(timezone.utc).isoformat(),
-                            # })
-                        latest = self._ionvision.get_latest_dataobject()
-                        if latest.ok:
-                            scan_result = latest.payload
+                        logger.info(
+                            "Job %s waypoint=%d IonVision scan start accepted payload=%s",
+                            job.id,
+                            index + 1,
+                            _format_payload_for_log(scan_start.payload),
+                        )
+                        if self._wait_for_scan_results_processed(timeout_s=45.0):
+                            logger.info(
+                                "Job %s waypoint=%d polling IonVision latest data object",
+                                job.id,
+                                index + 1,
+                            )
+                            scan_result = self._poll_latest_dataobject(timeout_s=30.0)
+                            if scan_result is not None:
+                                logger.info(
+                                    "Job %s waypoint=%d IonVision latest payload=%s",
+                                    job.id,
+                                    index + 1,
+                                    _format_payload_for_log(scan_result),
+                                )
+                                evaluation = self._ionvision.evaluate_scan_data(
+                                    scan_result
+                                )
+                                if evaluation.ok and evaluation.payload is not None:
+                                    if isinstance(scan_result, dict):
+                                        scan_result = dict(scan_result)
+                                        scan_result["evaluation"] = evaluation.payload
+                                    else:
+                                        scan_result = {
+                                            "raw": scan_result,
+                                            "evaluation": evaluation.payload,
+                                        }
+
+                                    logger.info(
+                                        "Job %s waypoint=%d IonVision payload evaluated intensity_average=%s",
+                                        job.id,
+                                        index + 1,
+                                        evaluation.payload.get("intensity_average"),
+                                    )
+                                else:
+                                    logger.warning(
+                                        "Job %s waypoint=%d IonVision payload evaluation failed: %s",
+                                        job.id,
+                                        index + 1,
+                                        evaluation.error,
+                                    )
+                            else:
+                                logger.warning(
+                                    "Job %s waypoint=%d IonVision latest payload unavailable after scan.resultsProcessed",
+                                    job.id,
+                                    index + 1,
+                                )
+                        else:
+                            logger.warning(
+                                "IonVision scan did not report scan.resultsProcessed for waypoint %d",
+                                index + 1,
+                            )
+                    else:
+                        logger.warning(
+                            "IonVision scan did not start for waypoint %d: %s",
+                            index + 1,
+                            scan_start.error,
+                        )
                 else:
-                    time.sleep(0.3)  # simulate settle time in dry run
+                    time.sleep(0.3)
 
                 measurement = Measurement(
-                    waypoint_index=i,
-                    waypoint=wp,
+                    waypoint_index=index,
+                    waypoint=waypoint,
                     pixel_x=pixel_coords[0] if pixel_coords else None,
                     pixel_y=pixel_coords[1] if pixel_coords else None,
                     scan_result=scan_result,
@@ -331,13 +378,15 @@ class OrchestratorService:
                     timestamp=datetime.now(timezone.utc).isoformat(),
                 )
                 job.measurements.append(measurement)
-                job.last_point_processed = i + 1
+                job.last_point_processed = index + 1
                 job.updated_at = datetime.now(timezone.utc)
 
-                # Persist measurement + state to DB
                 self._storage.save_measurement(job.id, measurement)
                 self._storage.update_job_state(
-                    job.id, job.state, job.last_point_processed, job.error
+                    job.id,
+                    job.state,
+                    job.last_point_processed,
+                    job.error,
                 )
 
                 self._publish_event(
@@ -348,10 +397,15 @@ class OrchestratorService:
                         "state": "running",
                         "last_point_processed": job.last_point_processed,
                         "total_points": len(job.path),
-                        "waypoint_index": i,
+                        "waypoint_index": index,
                         "measurement": {
                             "waypointIndex": measurement.waypoint_index,
-                            "waypoint": {"x": wp.x, "y": wp.y, "z": wp.z, "r": wp.r},
+                            "waypoint": {
+                                "x": waypoint.x,
+                                "y": waypoint.y,
+                                "z": waypoint.z,
+                                "r": waypoint.r,
+                            },
                             "pixelX": measurement.pixel_x,
                             "pixelY": measurement.pixel_y,
                             "scanResult": measurement.scan_result,
@@ -362,57 +416,15 @@ class OrchestratorService:
                     },
                 )
 
+                logger.info(
+                    "Job %s waypoint=%d completed scan_result_present=%s",
+                    job.id,
+                    index + 1,
+                    scan_result is not None,
+                )
+
             if job.state == "running":
-                # Return to the starting position captured during calibration
-                sp = self._starting_waypoints.get(job.id)
-                if sp:
-                    if not job.dry_run:
-                        logger.info(
-                            "Job %s — returning to start (%.1f, %.1f, %.1f, %.1f)",
-                            job.id,
-                            sp.x,
-                            sp.y,
-                            sp.z,
-                            sp.r,
-                        )
-                        move_res = self._robot.move(sp.x, sp.y, sp.z, sp.r)
-                        if not move_res.ok:
-                            logger.warning(
-                                "Return-to-start failed: %s",
-                                move_res.error,
-                            )
-                        else:
-                            arrival = self._robot.wait_for_position(
-                                sp.x,
-                                sp.y,
-                                sp.z,
-                                sp.r,
-                                tolerance_mm=1.0,
-                                timeout_s=30.0,
-                            )
-                            if not arrival.ok:
-                                logger.warning(
-                                    "Return-to-start validation failed: %s",
-                                    arrival.error,
-                                )
-                            else:
-                                logger.info(
-                                    "Job %s — back at start (%.1f, %.1f, %.1f)",
-                                    job.id,
-                                    arrival.x,
-                                    arrival.y,
-                                    arrival.z,
-                                )
-                    else:
-                        logger.info(
-                            "Job %s (dry run) — would return "
-                            "to start (%.1f, %.1f, %.1f, %.1f)",
-                            job.id,
-                            sp.x,
-                            sp.y,
-                            sp.z,
-                            sp.r,
-                        )
+                self._return_job_to_start(job)
                 job.state = "completed"
 
         except Exception as exc:
@@ -427,7 +439,10 @@ class OrchestratorService:
             self._starting_waypoints.pop(job.id, None)
             job.updated_at = datetime.now(timezone.utc)
             self._storage.update_job_state(
-                job.id, job.state, job.last_point_processed, job.error
+                job.id,
+                job.state,
+                job.last_point_processed,
+                job.error,
             )
             self._prune_old_data()
 
@@ -444,107 +459,153 @@ class OrchestratorService:
                 },
             )
 
-    # ---- Data retention ----
-
-    def _prune_image_files(self) -> None:
-        """Delete the oldest ``capture_*.jpg`` files beyond *max_jobs*.
-
-        Captured JPEG files accumulate every time ``detect_path()`` is called
-        (i.e. on every ``POST /paths`` calibration request), regardless of
-        whether a job is running.  This helper is therefore called both after
-        each capture *and* at the end of every job so that the output
-        directory never grows without bound.
-
-        The ``max_jobs`` newest files (sorted by modification time) are kept;
-        everything older is removed.  A failed ``unlink`` is logged as a
-        warning and does not raise so that a transient OS error never causes
-        a calibration or job failure.
-
-        When ``max_jobs`` is 0 (unlimited) this is a no-op.
-        """
-        if self._max_jobs <= 0:
+    def _return_job_to_start(self, job: Job) -> None:
+        start_point = self._starting_waypoints.get(job.id)
+        if not start_point:
             return
-        image_dir: Path = self._camera_vision.output_dir
-        if not image_dir.is_dir():
-            return
-        file_mtimes: list[tuple[float, Path]] = []
-        for f in image_dir.glob("capture_*.jpg"):
-            try:
-                file_mtimes.append((f.stat().st_mtime, f))
-            except OSError as exc:
-                logger.debug(
-                    "Retention policy: skipping image file %s during stat - %s",
-                    f,
-                    exc,
-                )
-        files = [f for _, f in sorted(file_mtimes, key=lambda item: item[0])]
-        excess = len(files) - self._max_jobs
-        if excess <= 0:
-            return
-        for f in files[:excess]:
-            try:
-                f.unlink()
-                logger.debug("Retention policy: deleted image file %s", f)
-            except OSError as exc:
-                logger.warning("Retention policy: could not delete %s — %s", f, exc)
-
-    def _prune_old_data(self) -> None:
-        """Remove excess jobs (DB) and captured image files (disk).
-
-        Called automatically at the end of every job execution.  When
-        ``max_jobs`` is 0 (the default) this is a no-op.
-
-        DB cleanup
-        ----------
-        The oldest jobs beyond the limit are hard-deleted.  Because the
-        ``waypoints``, ``measurements``, and ``job_images`` tables all
-        reference ``jobs`` with ``ON DELETE CASCADE``, a single
-        ``DELETE FROM jobs`` removes every related row automatically.
-
-        Disk cleanup
-        ------------
-        Delegates to :meth:`_prune_image_files`.
-        """
-        if self._max_jobs <= 0:
-            return
-
-        deleted_ids = self._storage.prune_jobs(self._max_jobs)
-        if deleted_ids:
+        if job.dry_run:
             logger.info(
-                "Retention policy: pruned %d old job(s) — %s",
-                len(deleted_ids),
-                deleted_ids,
+                "Job %s (dry run) — would return to start (%.1f, %.1f, %.1f, %.1f)",
+                job.id,
+                start_point.x,
+                start_point.y,
+                start_point.z,
+                start_point.r,
             )
+            return
 
-        self._prune_image_files()
+        logger.info(
+            "Job %s — returning to start (%.1f, %.1f, %.1f, %.1f)",
+            job.id,
+            start_point.x,
+            start_point.y,
+            start_point.z,
+            start_point.r,
+        )
+        move_result = self._robot.move(
+            start_point.x,
+            start_point.y,
+            start_point.z,
+            start_point.r,
+        )
+        if not move_result.ok:
+            logger.warning("Return-to-start failed: %s", move_result.error)
+            return
+
+        arrival = self._robot.wait_for_position(
+            start_point.x,
+            start_point.y,
+            start_point.z,
+            start_point.r,
+            tolerance_mm=1.0,
+            timeout_s=30.0,
+        )
+        if not arrival.ok:
+            logger.warning("Return-to-start validation failed: %s", arrival.error)
+
+    def _wait_for_scan_results_processed(self, timeout_s: float) -> bool:
+        if not self._ionvision_ws_initialized:
+            logger.warning(
+                "Cannot wait for IonVision scan.resultsProcessed because websocket is not initialized"
+            )
+            return False
+
+        started_at = time.monotonic()
+        logger.info(
+            "Waiting for IonVision scan.resultsProcessed timeout_s=%.2f",
+            timeout_s,
+        )
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._scan_stopped_event.is_set():
+                elapsed = time.monotonic() - started_at
+                logger.warning(
+                    "IonVision reported scan.stopped before results processing elapsed_s=%.3f",
+                    elapsed,
+                )
+                return False
+            if self._scan_results_processed_event.wait(timeout=0.25):
+                elapsed = time.monotonic() - started_at
+                logger.info(
+                    "IonVision scan.resultsProcessed received elapsed_s=%.3f",
+                    elapsed,
+                )
+                return True
+
+        elapsed = time.monotonic() - started_at
+        logger.warning(
+            "Timed out waiting for IonVision scan.resultsProcessed elapsed_s=%.3f",
+            elapsed,
+        )
+        return False
+
+    def _poll_latest_dataobject(self, timeout_s: float) -> dict | None:
+        logger.info(
+            "Polling IonVision latest data object timeout_s=%.2f",
+            timeout_s,
+        )
+        started_at = time.monotonic()
+        deadline = time.monotonic() + timeout_s
+        attempt = 0
+        last_error: str | None = None
+        while time.monotonic() < deadline:
+            attempt += 1
+            latest = self._ionvision.get_latest_dataobject()
+            if latest.ok:
+                elapsed = time.monotonic() - started_at
+                logger.info(
+                    "IonVision latest data object received attempt=%d elapsed_s=%.3f payload=%s",
+                    attempt,
+                    elapsed,
+                    _format_payload_for_log(latest.payload),
+                )
+                return latest.payload
+            last_error = latest.error
+            logger.debug(
+                "IonVision latest data object pending attempt=%d error=%s",
+                attempt,
+                latest.error,
+            )
+            if self._stop_requested:
+                elapsed = time.monotonic() - started_at
+                logger.warning(
+                    "Stopped waiting for IonVision latest data object due to stop request elapsed_s=%.3f",
+                    elapsed,
+                )
+                return None
+            time.sleep(0.5)
+
+        elapsed = time.monotonic() - started_at
+        logger.warning(
+            "Timed out waiting for IonVision latest scan data object elapsed_s=%.3f last_error=%s",
+            elapsed,
+            last_error,
+        )
+        return None
 
     # ---- Misc ----
 
     def health(self) -> dict[str, object]:
-        """Probe every subsystem and return a structured health report."""
         components: dict[str, dict[str, str | None]] = {}
 
-        # Robot
         try:
-            res = self._robot.ping()
+            result = self._robot.ping()
             components["robot"] = {
-                "status": "connected" if res.ok else "disconnected",
-                "error": res.error,
+                "status": "connected" if result.ok else "disconnected",
+                "error": result.error,
             }
         except Exception as exc:
             components["robot"] = {"status": "error", "error": str(exc)}
 
-        # Camera
         try:
-            res = self._camera_vision.ping()
+            result = self._camera_vision.ping()
             components["camera"] = {
-                "status": "connected" if res.ok else "disconnected",
-                "error": res.error,
+                "status": "connected" if result.ok else "disconnected",
+                "error": result.error,
             }
         except Exception as exc:
             components["camera"] = {"status": "error", "error": str(exc)}
 
-        # IonVision
         try:
             res = self._ionvision.ping()
             components["ionvision"] = {
@@ -554,8 +615,11 @@ class OrchestratorService:
         except Exception as exc:
             components["ionvision"] = {"status": "error", "error": str(exc)}
 
-        any_error = any(c["status"] == "error" for c in components.values())
-        overall = "degraded" if any_error else "ok"
+        overall = (
+            "degraded"
+            if any(component["status"] == "error" for component in components.values())
+            else "ok"
+        )
 
         return {
             "status": overall,
@@ -563,10 +627,21 @@ class OrchestratorService:
             **components,
         }
 
-    def status(self) -> str:
-        if self._running_job_id:
-            return "busy"
-        return "ready"
+    def status(self) -> dict[str, object]:
+        checkerboard = self._camera_vision.checkerboard_status()
+        session = self._calibration_session
+        return {
+            "state": "busy" if self._running_job_id else "ready",
+            "calibration": {
+                "intrinsics_loaded": self._camera_vision.intrinsics_loaded,
+                "checkerboard_visible": bool(checkerboard["visible"]),
+                "calibration_in_progress": session is not None,
+                "current_step": session.current_step if session else 0,
+                "total_steps": TOTAL_CALIBRATION_STEPS,
+                "calibrated": self.is_calibrated,
+                "last_calibrated_at": self.last_calibrated_at,
+            },
+        }
 
     def profiles(self) -> list[dict]:
         return list(self._profiles)
@@ -574,113 +649,582 @@ class OrchestratorService:
     def default_profile(self) -> dict:
         return self._profiles[0]
 
+    def validate_job_waypoints(
+        self,
+        path: list[Waypoint],
+        dry_run: bool,
+    ) -> None:
+        if not path:
+            raise ValueError("Job path is empty")
+
+        for index, waypoint in enumerate(path, start=1):
+            coords = (waypoint.x, waypoint.y, waypoint.z, waypoint.r)
+            if any(not math.isfinite(value) for value in coords):
+                raise ValueError(f"Waypoint {index} contains non-finite values")
+
+        if dry_run:
+            return
+
+        robot_status = self._robot.ping()
+        if not robot_status.ok:
+            raise RuntimeError(
+                f"Robot not ready: {robot_status.error or 'unknown error'}"
+            )
+
     # ---- Calibration ----
-
-    def _compute_canvas_start(
-        self, result: DetectionResults, offset_mm: float = 50.0
-    ) -> tuple[float, float] | None:
-        """Compute canvas start marker 50 mm below the first ArUco marker center.
-
-        Camera is mounted behind the arm, so "below" in the image (Y+)
-        corresponds to the arm being offset away from the marker.
-        """
-        if not result.marker_corners:
-            return None
-        mc = result.marker_corners[0].corners
-        if len(mc) < 4:
-            return None
-
-        cx = sum(c.x for c in mc) / len(mc)
-        cy = sum(c.y for c in mc) / len(mc)
-
-        ppm = result.pixels_per_mm
-        offset_px = (offset_mm * ppm) if ppm else 50.0
-        return (cx, cy + offset_px)
 
     @staticmethod
     def _pose_is_origin(pose: PoseResult, tolerance: float = 1e-6) -> bool:
-        """Treat an all-zero Cartesian pose as an invalid calibration start."""
         return all(
             abs(value) <= tolerance for value in (pose.x, pose.y, pose.z, pose.r)
         )
 
     @property
     def is_calibrated(self) -> bool:
-        return all(
-            [
-                self._cal_robot_start is not None,
-                self._cal_canvas_start is not None,
-                self._cal_pixels_per_mm is not None,
-            ]
-        )
+        return self._camera_vision.intrinsics_loaded and self._mapping_data is not None
 
     @property
     def calibration_robot_start(self) -> Waypoint | None:
-        return self._cal_robot_start
+        if not self._mapping_data:
+            return None
+        start_pose = self._mapping_data.get("start_pose") or {}
+        return Waypoint(
+            x=float(start_pose["x"]),
+            y=float(start_pose["y"]),
+            z=float(start_pose["z"]),
+            r=float(start_pose["r"]),
+        )
 
     @property
-    def calibration_canvas_start(self) -> tuple[float, float] | None:
-        return self._cal_canvas_start
+    def last_calibrated_at(self) -> str | None:
+        if not self._mapping_data:
+            return None
+        return self._mapping_data.get("calibrated_at")
 
-    @property
-    def calibration_pixels_per_mm(self) -> float | None:
-        return self._cal_pixels_per_mm
+    def calibration_action(self, action: str) -> dict[str, object]:
+        action = action.strip().lower()
+        if action == "start":
+            return self._start_calibration()
+        if action == "capture":
+            return self._capture_calibration_point()
+        return self._calibration_response(
+            ok=False,
+            message=f"Unsupported calibration action: {action}",
+            checkerboard_visible=False,
+        )
 
-    def sort_pixel_path_from_canvas_start(
-        self,
-        waypoints: list[tuple[float, float]],
-    ) -> list[tuple[float, float]]:
-        """Order waypoints by direct distance to the calibrated canvas start."""
-        if self._cal_canvas_start is None:
-            raise RuntimeError(
-                "Not calibrated — call POST /path/detect first "
-                "(with robot arm at starting position)"
+    def _start_calibration(self) -> dict[str, object]:
+        frame = self._camera_vision.get_latest_frame()
+        if frame is None:
+            return self._calibration_response(
+                ok=False,
+                message="No camera frame available",
+                checkerboard_visible=False,
             )
 
-        if not waypoints:
-            return []
+        checkerboard = self._camera_vision.find_checkerboard(frame)
+        if not checkerboard.ok:
+            return self._calibration_response(
+                ok=False,
+                message=checkerboard.error or "Checkerboard not found",
+                checkerboard_visible=False,
+            )
 
-        start = self._cal_canvas_start
-        return sorted(
-            waypoints,
-            key=lambda p: math.hypot(p[0] - start[0], p[1] - start[1]),
+        pose = self._robot.get_pose()
+        if not pose.ok:
+            return self._calibration_response(
+                ok=False,
+                message=f"Could not read robot pose: {pose.error}",
+                checkerboard_visible=True,
+            )
+        if self._pose_is_origin(pose):
+            return self._calibration_response(
+                ok=False,
+                message="Robot pose is still at origin (0, 0, 0, 0)",
+                checkerboard_visible=True,
+            )
+
+        session = CalibrationSession(
+            reference_image_base64=self._camera_vision.frame_to_base64(frame),
+            targets=checkerboard.target_specs
+            or [
+                CalibrationTarget(
+                    x=point.x,
+                    y=point.y,
+                    row=row,
+                    col=col,
+                    step=step,
+                )
+                for step, ((row, col), point) in enumerate(
+                    zip(FIXED_CALIBRATION_POINTS, checkerboard.target_points),
+                    start=1,
+                )
+            ],
+            start_pose=Waypoint(x=pose.x, y=pose.y, z=pose.z, r=pose.r),
         )
+        with self._calibration_lock:
+            self._calibration_session = session
+
+        return self._calibration_response(
+            ok=True,
+            message=(
+                "Calibration started. Move the robot tip to "
+                f"{session.targets[0].label} and press Capture Current Point."
+            ),
+            checkerboard_visible=True,
+            session=session,
+            include_reference=True,
+        )
+
+    def _capture_calibration_point(self) -> dict[str, object]:
+        with self._calibration_lock:
+            session = self._calibration_session
+
+        if session is None:
+            return self._calibration_response(
+                ok=False,
+                message="Calibration has not been started",
+                checkerboard_visible=self._camera_vision.checkerboard_visible(),
+            )
+
+        pose = self._robot.get_pose()
+        if not pose.ok:
+            return self._calibration_response(
+                ok=False,
+                message=f"Could not read robot pose: {pose.error}",
+                checkerboard_visible=self._camera_vision.checkerboard_visible(),
+                session=session,
+            )
+        if self._pose_is_origin(pose):
+            return self._calibration_response(
+                ok=False,
+                message="Robot pose is still at origin (0, 0, 0, 0)",
+                checkerboard_visible=self._camera_vision.checkerboard_visible(),
+                session=session,
+            )
+
+        session.captured_robot_points.append((pose.x, pose.y, pose.z))
+        if session.current_step < TOTAL_CALIBRATION_STEPS:
+            next_target = session.targets[session.current_step]
+            return self._calibration_response(
+                ok=True,
+                message=(
+                    f"Captured point {session.current_step}/{TOTAL_CALIBRATION_STEPS}. "
+                    f"Move to {next_target.label} and press Capture Current Point."
+                ),
+                checkerboard_visible=self._camera_vision.checkerboard_visible(),
+                session=session,
+            )
+
+        try:
+            mapping = self._solve_and_store_calibration(session)
+        except Exception as exc:
+            logger.exception("Calibration solve failed: %s", exc)
+            with self._calibration_lock:
+                self._calibration_session = None
+            return self._calibration_response(
+                ok=False,
+                message=f"Calibration solve failed: {exc}",
+                checkerboard_visible=self._camera_vision.checkerboard_visible(),
+            )
+
+        with self._calibration_lock:
+            self._mapping_data = mapping
+            self._calibration_session = None
+
+        return self._calibration_response(
+            ok=True,
+            message="Calibration completed",
+            checkerboard_visible=self._camera_vision.checkerboard_visible(),
+            current_step=TOTAL_CALIBRATION_STEPS,
+            captured_targets=session.targets,
+            calibrated=True,
+            last_calibrated_at=mapping["calibrated_at"],
+        )
+
+    def _calibration_response(
+        self,
+        ok: bool,
+        message: str,
+        checkerboard_visible: bool,
+        session: CalibrationSession | None = None,
+        include_reference: bool = False,
+        current_step: int | None = None,
+        captured_points: list[tuple[float, float]] | None = None,
+        captured_targets: list[CalibrationTarget] | None = None,
+        calibrated: bool | None = None,
+        last_calibrated_at: str | None = None,
+    ) -> dict[str, object]:
+        active_session = session or self._calibration_session
+        if captured_targets is not None:
+            captured = captured_targets
+        elif captured_points is not None:
+            captured = [
+                CalibrationTarget(
+                    x=point[0],
+                    y=point[1],
+                    row=row,
+                    col=col,
+                    step=step,
+                )
+                for step, ((row, col), point) in enumerate(
+                    zip(FIXED_CALIBRATION_POINTS, captured_points),
+                    start=1,
+                )
+            ]
+        elif active_session is not None:
+            captured = active_session.targets[: active_session.current_step]
+        else:
+            captured = []
+
+        step = current_step
+        if step is None:
+            step = active_session.current_step if active_session else 0
+
+        target_point: CalibrationTarget | None = None
+        if active_session and active_session.current_step < TOTAL_CALIBRATION_STEPS:
+            target_point = active_session.targets[active_session.current_step]
+
+        response: dict[str, object] = {
+            "ok": ok,
+            "message": message,
+            "checkerboardVisible": checkerboard_visible,
+            "currentStep": step,
+            "totalSteps": TOTAL_CALIBRATION_STEPS,
+            "targetPoint": (
+                {
+                    "pixelX": target_point.x,
+                    "pixelY": target_point.y,
+                    "gridRow": target_point.row,
+                    "gridCol": target_point.col,
+                    "step": target_point.step,
+                    "label": target_point.label,
+                }
+                if target_point is not None
+                else None
+            ),
+            "capturedPoints": [
+                {
+                    "pixelX": point.x,
+                    "pixelY": point.y,
+                    "gridRow": point.row,
+                    "gridCol": point.col,
+                    "step": point.step,
+                    "label": point.label,
+                }
+                for point in captured
+            ],
+            "calibrated": self.is_calibrated if calibrated is None else calibrated,
+            "lastCalibratedAt": (
+                self.last_calibrated_at
+                if last_calibrated_at is None
+                else last_calibrated_at
+            ),
+        }
+        if include_reference and active_session is not None:
+            response["referenceImageBase64"] = active_session.reference_image_base64
+        return response
+
+    def _solve_and_store_calibration(self, session: CalibrationSession) -> dict:
+        import cv2
+        import numpy as np
+
+        if not self._camera_vision.intrinsics_loaded:
+            raise RuntimeError(
+                self._camera_vision.intrinsics_error or "Intrinsics missing"
+            )
+
+        image_points = np.array(
+            [[target.x, target.y] for target in session.targets], dtype=np.float64
+        ).reshape(-1, 1, 2)
+        robot_points = np.array(
+            session.captured_robot_points, dtype=np.float64
+        ).reshape(-1, 3)
+        success, rvec, tvec = cv2.solvePnP(
+            robot_points,
+            image_points,
+            self._camera_vision.camera_matrix,
+            self._camera_vision.dist_coeff,
+        )
+        if not success:
+            raise RuntimeError("solvePnP failed")
+
+        plane = self._build_plane_metadata(robot_points, rvec, tvec)
+
+        calibrated_at = datetime.now(timezone.utc).isoformat()
+        mapping = {
+            "calibrated_at": calibrated_at,
+            "intrinsics_path": self._camera_vision.intrinsics_path,
+            "resolution": list(self._camera_vision.intrinsics_resolution or []),
+            "checkerboard": {
+                "inner_corners": list(self._camera_vision.checkerboard_size),
+                "square_size_mm": self._camera_vision.checkerboard_square_mm,
+                "fixed_points": [list(point) for point in FIXED_CALIBRATION_POINTS],
+            },
+            "image_points": [
+                {
+                    "row": target.row,
+                    "col": target.col,
+                    "pixelX": target.x,
+                    "pixelY": target.y,
+                }
+                for target in session.targets
+            ],
+            "robot_points": [
+                {
+                    "row": row,
+                    "col": col,
+                    "robotX": point[0],
+                    "robotY": point[1],
+                    "robotZ": point[2],
+                }
+                for (row, col), point in zip(
+                    FIXED_CALIBRATION_POINTS,
+                    session.captured_robot_points,
+                )
+            ],
+            "start_pose": {
+                "x": session.start_pose.x,
+                "y": session.start_pose.y,
+                "z": session.start_pose.z,
+                "r": session.start_pose.r,
+            },
+            "rvec": rvec.tolist(),
+            "tvec": tvec.tolist(),
+            "plane": plane,
+        }
+
+        self._mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        self._mapping_path.write_text(json.dumps(mapping, indent=4))
+        return mapping
+
+    def _load_mapping_file(self) -> dict | None:
+        if not self._mapping_path.exists():
+            return None
+        try:
+            data = json.loads(self._mapping_path.read_text())
+            required = [
+                "calibrated_at",
+                "intrinsics_path",
+                "resolution",
+                "checkerboard",
+                "image_points",
+                "robot_points",
+                "start_pose",
+                "rvec",
+                "tvec",
+            ]
+            for key in required:
+                if key not in data:
+                    raise ValueError(f"Missing mapping key: {key}")
+            fixed_points = data.get("checkerboard", {}).get("fixed_points") or [
+                list(point) for point in FIXED_CALIBRATION_POINTS
+            ]
+            if fixed_points != [list(point) for point in FIXED_CALIBRATION_POINTS]:
+                raise ValueError("Unsupported checkerboard point order")
+            if self._camera_vision.intrinsics_loaded:
+                current_intrinsics_path = self._camera_vision.intrinsics_path
+                if (
+                    current_intrinsics_path
+                    and data.get("intrinsics_path") != current_intrinsics_path
+                ):
+                    raise ValueError("Mapping intrinsics do not match current camera")
+                expected_resolution = list(
+                    self._camera_vision.intrinsics_resolution or []
+                )
+                if (
+                    expected_resolution
+                    and data.get("resolution") != expected_resolution
+                ):
+                    raise ValueError("Mapping resolution does not match intrinsics")
+            return data
+        except Exception as exc:
+            logger.warning(
+                "Ignoring invalid mapping file %s: %s", self._mapping_path, exc
+            )
+            return None
+
+    def _build_plane_metadata(self, robot_points, rvec, tvec) -> dict[str, list[float]]:
+        import cv2
+        import numpy as np
+
+        if len(robot_points) != TOTAL_CALIBRATION_STEPS:
+            raise RuntimeError("Calibration requires four robot points")
+
+        targets = [
+            CalibrationTarget(
+                x=0.0,
+                y=0.0,
+                row=row,
+                col=col,
+                step=step,
+            )
+            for step, (row, col) in enumerate(FIXED_CALIBRATION_POINTS, start=1)
+        ]
+        orientation = self._camera_vision._orientation_targets(targets)
+        if orientation is None:
+            raise RuntimeError("Calibration points do not define board orientation")
+
+        origin_target, col_target, row_target = orientation
+        robot_by_grid = {
+            (target.row, target.col): np.array(robot_point, dtype=np.float64)
+            for target, robot_point in zip(targets, robot_points)
+        }
+
+        origin = robot_by_grid[(origin_target.row, origin_target.col)]
+        x_direction = robot_by_grid[(col_target.row, col_target.col)] - origin
+        y_direction = robot_by_grid[(row_target.row, row_target.col)] - origin
+
+        x_norm = np.linalg.norm(x_direction)
+        y_direction = (
+            y_direction
+            - (np.dot(y_direction, x_direction) / max(x_norm**2, 1e-12)) * x_direction
+        )
+        y_norm = np.linalg.norm(y_direction)
+
+        if x_norm <= 1e-9 or y_norm <= 1e-9:
+            raise RuntimeError("Calibration points do not define a stable board plane")
+
+        x_axis = x_direction / x_norm
+        y_axis = y_direction / y_norm
+        normal = np.cross(x_axis, y_axis)
+        normal_norm = np.linalg.norm(normal)
+        if normal_norm <= 1e-9:
+            raise RuntimeError("Calibration plane is degenerate")
+        normal = normal / normal_norm
+
+        rotation, _ = cv2.Rodrigues(np.array(rvec, dtype=np.float64))
+        tvec_array = np.array(tvec, dtype=np.float64).reshape(3, 1)
+        camera_origin = (-rotation.T @ tvec_array).reshape(3)
+        if np.dot(normal, camera_origin - origin) < 0:
+            normal = -normal
+
+        return {
+            "origin": origin.tolist(),
+            "x_axis": x_axis.tolist(),
+            "y_axis": y_axis.tolist(),
+            "normal": normal.tolist(),
+        }
+
+    def _plane_geometry(self) -> tuple[object, object, object]:
+        import cv2
+        import numpy as np
+
+        if not self.is_calibrated or not self._mapping_data:
+            raise RuntimeError("Not calibrated")
+
+        rvec = np.array(self._mapping_data["rvec"], dtype=np.float64)
+        tvec = np.array(self._mapping_data["tvec"], dtype=np.float64).reshape(3, 1)
+        rotation, _ = cv2.Rodrigues(rvec)
+        camera_origin = (-rotation.T @ tvec).reshape(3)
+
+        plane_meta = self._mapping_data.get("plane") or {}
+        if plane_meta:
+            origin = np.array(plane_meta["origin"], dtype=np.float64)
+            normal = np.array(plane_meta["normal"], dtype=np.float64)
+        else:
+            robot_points = np.array(
+                [
+                    [
+                        point["robotX"],
+                        point["robotY"],
+                        point["robotZ"],
+                    ]
+                    for point in self._mapping_data["robot_points"]
+                ],
+                dtype=np.float64,
+            )
+            plane_meta = self._build_plane_metadata(robot_points, rvec, tvec)
+            origin = np.array(plane_meta["origin"], dtype=np.float64)
+            normal = np.array(plane_meta["normal"], dtype=np.float64)
+
+        if np.dot(normal, camera_origin - origin) < 0:
+            normal = -normal
+
+        return rotation, camera_origin, (origin, normal)
+
+    def _plane_point_from_pixel(
+        self, px: float, py: float
+    ) -> tuple[float, float, float]:
+        import cv2
+        import numpy as np
+
+        if not self.is_calibrated or not self._mapping_data:
+            raise RuntimeError("Not calibrated")
+
+        undistorted = cv2.undistortPoints(
+            np.array([[[px, py]]], dtype=np.float64),
+            self._camera_vision.camera_matrix,
+            self._camera_vision.dist_coeff,
+        )
+        ray_camera = np.array(
+            [undistorted[0][0][0], undistorted[0][0][1], 1.0],
+            dtype=np.float64,
+        )
+
+        rotation, camera_origin, plane = self._plane_geometry()
+        origin, normal = plane
+        ray_world = (rotation.T @ ray_camera.reshape(3, 1)).reshape(3)
+
+        denominator = float(np.dot(normal, ray_world))
+        if abs(denominator) <= 1e-9:
+            raise RuntimeError("Pixel ray does not intersect calibration plane")
+
+        scale = float(np.dot(normal, origin - camera_origin) / denominator)
+        if scale <= 0:
+            raise RuntimeError("Pixel ray intersects behind the camera")
+
+        point = camera_origin + (ray_world * scale)
+        return (float(point[0]), float(point[1]), float(point[2]))
+
+    def pixel_to_robot(
+        self, px: float, py: float, work_z: float, work_r: float
+    ) -> Waypoint:
+        plane_point = self._plane_point_from_pixel(px, py)
+        return Waypoint(
+            x=plane_point[0],
+            y=plane_point[1],
+            z=work_z,
+            r=work_r,
+        )
+
+    def _distance_from_start(self, px: float, py: float) -> float:
+        start = self.calibration_robot_start
+        if start is None:
+            raise RuntimeError("Not calibrated")
+        plane_point = self._plane_point_from_pixel(px, py)
+        return math.hypot(plane_point[0] - start.x, plane_point[1] - start.y)
 
     def _normalize_corners_clockwise_start_nearest(
         self,
         corners: list[tuple[float, float]],
-        start: tuple[float, float],
     ) -> list[tuple[float, float]]:
-        """Return corners ordered clockwise and rotated to start nearest to canvas start."""
         if len(corners) < 2:
             return list(corners)
 
-        cx = sum(x for x, _ in corners) / len(corners)
-        cy = sum(y for _, y in corners) / len(corners)
-
-        # Ascending angle yields clockwise order in image coordinates (Y grows down).
-        ordered = sorted(corners, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
-
-        nearest_idx = min(
+        center_x = sum(x for x, _ in corners) / len(corners)
+        center_y = sum(y for _, y in corners) / len(corners)
+        ordered = sorted(
+            corners,
+            key=lambda point: math.atan2(point[1] - center_y, point[0] - center_x),
+        )
+        nearest_index = min(
             range(len(ordered)),
-            key=lambda i: math.hypot(
-                ordered[i][0] - start[0],
-                ordered[i][1] - start[1],
+            key=lambda index: self._distance_from_start(
+                ordered[index][0], ordered[index][1]
             ),
         )
-        return ordered[nearest_idx:] + ordered[:nearest_idx]
+        return ordered[nearest_index:] + ordered[:nearest_index]
 
     def populate_pixel_path_from_batteries(
         self,
         batteries: list[list[tuple[float, float]]],
         measuring_points_per_cm: float,
     ) -> list[dict[str, float | int | str]]:
-        """Generate perimeter measurement points for frontend-provided battery corners."""
-        if self._cal_canvas_start is None or self._cal_pixels_per_mm is None:
-            raise RuntimeError(
-                "Not calibrated — call POST /path/detect first "
-                "(with robot arm at starting position)"
-            )
+        import numpy as np
+
+        if not self.is_calibrated:
+            raise RuntimeError("Not calibrated")
         if measuring_points_per_cm <= 0:
             raise ValueError("measuring_points_per_cm must be > 0")
         if measuring_points_per_cm > MAX_MEASURING_POINTS_PER_CM:
@@ -688,169 +1232,120 @@ class OrchestratorService:
                 f"measuring_points_per_cm must be <= {MAX_MEASURING_POINTS_PER_CM}"
             )
 
-        canvas_start = self._cal_canvas_start
-        step_px = (10.0 / measuring_points_per_cm) * self._cal_pixels_per_mm
+        logger.info(
+            "Populate start batteries=%d measuring_points_per_cm=%.3f calibrated=%s",
+            len(batteries),
+            measuring_points_per_cm,
+            self.is_calibrated,
+        )
 
+        step_mm = 10.0 / measuring_points_per_cm
         ordered_batteries: list[tuple[float, list[tuple[float, float]]]] = []
-        for corners in batteries:
-            clean = [(float(x), float(y)) for x, y in corners]
+
+        for battery in batteries:
+            clean = [(float(x), float(y)) for x, y in battery]
             if len(clean) < 2:
                 continue
-
-            normalized = self._normalize_corners_clockwise_start_nearest(
-                clean,
-                canvas_start,
+            normalized = self._normalize_corners_clockwise_start_nearest(clean)
+            nearest_distance = min(
+                self._distance_from_start(x, y) for x, y in normalized
             )
-            nearest_dist = min(
-                math.hypot(px - canvas_start[0], py - canvas_start[1])
-                for px, py in normalized
-            )
-            ordered_batteries.append((nearest_dist, normalized))
+            ordered_batteries.append((nearest_distance, normalized))
 
         ordered_batteries.sort(key=lambda item: item[0])
 
         path: list[dict[str, float | int | str]] = []
-        for battery_nr, (_, corners) in enumerate(ordered_batteries):
+        for battery_number, (_distance, corners) in enumerate(ordered_batteries):
             corner_count = len(corners)
-            for corner_idx in range(corner_count):
-                x1, y1 = corners[corner_idx]
-                x2, y2 = corners[(corner_idx + 1) % corner_count]
-                edge_len = math.hypot(x2 - x1, y2 - y1)
-                if edge_len == 0:
+            for corner_index in range(corner_count):
+                x1, y1 = corners[corner_index]
+                x2, y2 = corners[(corner_index + 1) % corner_count]
+                point_a = np.array(self._plane_point_from_pixel(x1, y1))
+                point_b = np.array(self._plane_point_from_pixel(x2, y2))
+                edge_length_mm = float(np.linalg.norm(point_b - point_a))
+                if edge_length_mm == 0:
                     continue
 
-                sample_count = max(1, math.ceil(edge_len / step_px))
+                sample_count = max(1, int(math.ceil(edge_length_mm / step_mm)))
                 if len(path) + sample_count > MAX_POPULATED_PATH_POINTS:
                     raise ValueError(
                         "Requested path is too dense; reduce measuringPointsPerCm or battery count"
                     )
-                for measurement_idx in range(sample_count):
-                    t = measurement_idx / sample_count
-                    px = x1 + (x2 - x1) * t
-                    py = y1 + (y2 - y1) * t
+
+                for measurement_index in range(sample_count):
+                    t = measurement_index / sample_count
+                    pixel_x = x1 + ((x2 - x1) * t)
+                    pixel_y = y1 + ((y2 - y1) * t)
                     path.append(
                         {
-                            "index": f"{battery_nr}-{corner_idx}-{measurement_idx}",
-                            "batteryNr": battery_nr,
-                            "cornerIndex": corner_idx,
-                            "measurementIndex": measurement_idx,
-                            "pixelX": px,
-                            "pixelY": py,
+                            "index": f"{battery_number}-{corner_index}-{measurement_index}",
+                            "batteryNr": battery_number,
+                            "cornerIndex": corner_index,
+                            "measurementIndex": measurement_index,
+                            "pixelX": pixel_x,
+                            "pixelY": pixel_y,
                         }
                     )
 
-        return path
-
-    def pixel_to_robot(
-        self, px: float, py: float, work_z: float, work_r: float
-    ) -> Waypoint:
-        """Convert canvas pixel coordinates → robot mm coordinates.
-
-        Uses the calibration state captured during ``detect_path()``.
-        Camera orientation (mounted behind the arm):
-          • image Y decreasing (up) → robot +X
-          • image X increasing (right) → robot −Y
-        """
-        if not self.is_calibrated:
-            raise RuntimeError(
-                "Not calibrated — call POST /paths first "
-                "(with robot arm at starting position)"
-            )
-        cs_x, cs_y = self._cal_canvas_start  # type: ignore[misc]
-        rs = self._cal_robot_start  # type: ignore[union-attr]
-        ppm = self._cal_pixels_per_mm  # type: ignore[assignment]
-
-        dpx = px - cs_x  # pixel delta X (+ = right)
-        dpy = py - cs_y  # pixel delta Y (+ = down)
-        return Waypoint(
-            x=rs.x - (dpy / ppm),  # pixel Y↑ → robot +X
-            y=rs.y - (dpx / ppm),  # pixel X→ → robot −Y
-            z=work_z,
-            r=work_r,
+        logger.info(
+            "Populate success batteries_in=%d batteries_used=%d points_out=%d step_mm=%.3f",
+            len(batteries),
+            len(ordered_batteries),
+            len(path),
+            step_mm,
         )
 
+        return path
+
     def detect_path(self) -> DetectionResults:
-        """Capture an image, detect battery corners, and calibrate.
+        try:
+            return self._camera_vision.detect_latest()
+        finally:
+            self._prune_image_files()
 
-        This also reads the robot’s current pose (assumed to be at the
-        starting position) and computes the canvas start point from the
-        first ArUco marker.  All three calibration ingredients are stored
-        so that ``pixel_to_robot()`` can convert coordinates.
-        """
-        capture = self._camera_vision.capture()
-        if not capture.ok or not capture.image_path:
-            return DetectionResults(ok=False, error=capture.error or "Capture failed")
-
-        # Prune old capture files immediately after writing a new one so the
-        # output directory never grows without bound even when no jobs are run.
+    def _prune_old_data(self) -> None:
+        if self._max_jobs <= 0:
+            return
+        self._storage.prune_jobs(max_jobs=self._max_jobs)
         self._prune_image_files()
 
-        # Replace any previous calibration with values derived from this capture.
-        self._cal_robot_start = None
-        self._cal_canvas_start = None
-        self._cal_pixels_per_mm = None
+    def _prune_image_files(self) -> None:
+        if self._max_jobs <= 0:
+            return
 
-        result = self._camera_vision.detect(capture.image_path)
-        messages = [result.error] if result.error else []
+        output_dir = getattr(self._camera_vision, "_output_dir", None)
+        image_dir = Path(output_dir) if output_dir else Path("data/images")
+        if not image_dir.exists():
+            return
 
         try:
-            raw = Path(capture.image_path).read_bytes()
-            result.image_base64 = base64.b64encode(raw).decode("ascii")
-        except Exception:
-            logger.debug("Image encoding failed", exc_info=True)
-
-        # --- Calibration: capture robot pose + canvas start ----
-        pose = self._robot.get_pose()
-        if pose.ok and not self._pose_is_origin(pose):
-            self._cal_robot_start = Waypoint(x=pose.x, y=pose.y, z=pose.z, r=pose.r)
-            logger.info(
-                "Calibration: robot start → (%.1f, %.1f, %.1f, %.1f)",
-                pose.x,
-                pose.y,
-                pose.z,
-                pose.r,
+            captures = sorted(
+                image_dir.glob("capture_*.jpg"),
+                key=lambda path: path.stat().st_mtime,
             )
-        elif pose.ok:
-            msg = (
-                "Robot pose is still at origin (0, 0, 0, 0) — "
-                "move the arm to the start position and retry"
-            )
-            messages.append(msg)
-            logger.warning("Calibration: %s", msg)
-        else:
-            msg = pose.error or "Could not read robot pose"
-            messages.append(f"Could not read robot pose: {msg}")
-            logger.warning("Calibration: could not read robot pose — %s", pose.error)
+        except OSError:
+            logger.debug("Failed to list capture files for pruning", exc_info=True)
+            return
 
-        self._cal_pixels_per_mm = result.pixels_per_mm
-        self._cal_canvas_start = self._compute_canvas_start(result)
+        excess = len(captures) - self._max_jobs
+        if excess <= 0:
+            return
 
-        if self._cal_canvas_start:
-            logger.info(
-                "Calibration: canvas start → (%.0f, %.0f) px, ppm=%.4f",
-                self._cal_canvas_start[0],
-                self._cal_canvas_start[1],
-                self._cal_pixels_per_mm or 0,
-            )
-        else:
-            msg = "No ArUco markers detected"
-            messages.append(msg)
-            logger.warning("Calibration: no ArUco markers — canvas start not set")
-
-        # Keep detector output order unchanged so frontend receives initial values as-is.
-
-        result.error = "; ".join(dict.fromkeys(msg for msg in messages if msg)) or None
-
-        return result
+        for path in captures[:excess]:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.debug("Failed to delete capture file %s", path, exc_info=True)
 
     @property
     def camera_vision(self) -> CameraVisionAdapter:
         return self._camera_vision
 
     def latest_result(self) -> dict | None:
-        return self._storage.latest_result()
+        return None
 
-    # WEBSOCKET SERVICES
+    # ---- WEBSOCKET SERVICES ----
+
     async def initialize_ionvision(self) -> None:
         """Initialize DMS WebSocket connection and register event handlers.
 
@@ -858,11 +1353,16 @@ class OrchestratorService:
         for scan lifecycle events. Must be called before any scan operations
         to enable real-time event monitoring.
         """
+        logger.info("Initializing IonVision websocket services")
         await self._ionvision.initialize_websocket()
         self._ionvision.on_event(
             "scan.resultsProcessed", self._handle_scan_results_processed
         )
         self._ionvision.on_event("scan.stopped", self._handle_scan_stopped)
+        self._ionvision_ws_initialized = True
+        logger.info(
+            "IonVision websocket services ready handlers=[scan.resultsProcessed, scan.stopped]"
+        )
 
     async def _close_ionvision(self) -> None:
         """Clean up DMS WebSocket connection and unregister event handlers.
@@ -871,11 +1371,18 @@ class OrchestratorService:
         event handlers. Should be called during orchestrator shutdown to
         prevent resource leaks.
         """
-        await self._ionvision.disconnect_websocket()
-        self._ionvision.off_event(
-            "scan.resultsProcessed", self._handle_scan_results_processed
-        )
-        self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
+        if self._ionvision_ws_initialized:
+            logger.info("Closing IonVision websocket services")
+            await self._ionvision.disconnect_websocket()
+            self._ionvision.off_event(
+                "scan.resultsProcessed", self._handle_scan_results_processed
+            )
+            self._ionvision.off_event("scan.stopped", self._handle_scan_stopped)
+            self._ionvision_ws_initialized = False
+            logger.info("IonVision websocket services closed")
+
+    async def close_ionvision(self) -> None:
+        await self._close_ionvision()
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         """Handle scan results processing completion event.
@@ -888,8 +1395,11 @@ class OrchestratorService:
             data: WebSocket message envelope containing event details
                 (has 'type', 'time', and 'body' keys)
         """
-        # Log the processed scan result details
-        logger.info("Scan results have been processed: %s", data.get("body"))
+        logger.info(
+            "IonVision event scan.resultsProcessed payload=%s",
+            _format_payload_for_log(data),
+        )
+        self._scan_results_processed_event.set()
 
     async def _handle_scan_stopped(self, data: dict) -> None:
         """Handle scan stop event.
@@ -902,8 +1412,11 @@ class OrchestratorService:
             data: WebSocket message envelope containing event details
                 (has 'type', 'time', and 'body' keys)
         """
-        # Log the scan stop event with provided reason/details
-        logger.info("Scan has been stopped: %s", data.get("body"))
+        logger.info(
+            "IonVision event scan.stopped payload=%s",
+            _format_payload_for_log(data),
+        )
+        self._scan_stopped_event.set()
 
     async def _handle_error(self, data: dict) -> None:
         """Handle DMS error event.
@@ -920,5 +1433,4 @@ class OrchestratorService:
             data: WebSocket message envelope containing error details
                 (has 'type', 'time', 'code', and other error info)
         """
-        # Log the error with the error code from the DMS
         logger.warning("An error occurred: %s", data.get("code"))
