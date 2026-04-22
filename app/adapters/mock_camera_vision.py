@@ -38,7 +38,7 @@ class MockCameraVisionAdapter:
         checkerboard_size: tuple[int, int] = (8, 6),
         checkerboard_square_mm: float = 34.0,
     ) -> None:
-        # Canonical mock detection points at 1280x720. These are scaled for other
+        # Canonical mock detection points at 1920x1080. These are scaled for other
         # resolutions so frontend overlays remain stable in mock mode.
         self._canonical_detection_corners = [
             (920, 434),
