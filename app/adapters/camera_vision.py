@@ -129,8 +129,8 @@ class CameraVisionAdapter:
         device_index: int = 0,
         output_dir: str = "data/images",
         intrinsics_path: str | None = None,
-        frame_width: int = 1280,
-        frame_height: int = 720,
+        frame_width: int = 1920,
+        frame_height: int = 1080,
         checkerboard_size: tuple[int, int] = (8, 6),
         checkerboard_square_mm: float = 34.0,
     ) -> None:

@@ -99,8 +99,8 @@ def test_move_to_coordinates_wait_and_nonwait(monkeypatch: pytest.MonkeyPatch) -
     adapter = RobotAdapter()
     adapter._api = object()
 
-    wait_result = adapter.move_to_coordinates((200, 0, -10, 40), wait=True)
-    queue_result = adapter.move_to_coordinates((210, 0, -10, 41), wait=False)
+    wait_result = adapter.move_to_coordinates((200, 20, -10, 40), wait=True)
+    queue_result = adapter.move_to_coordinates((210, 20, -10, 41), wait=False)
 
     assert wait_result.ok is True
     assert queue_result.ok is True

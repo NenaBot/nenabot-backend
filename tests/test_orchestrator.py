@@ -286,12 +286,15 @@ def test_populate_pixel_path_from_batteries_generates_points(tmp_path: Path) -> 
             ]
         ],
         measuring_points_per_cm=0.5,
+        work_z=-48.0,
+        work_r=0.0,
     )
     assert path
     assert path[0]["index"] == "0-0-0"
     assert path[0]["batteryNr"] == 0
     assert path[0]["cornerIndex"] == 0
     assert path[0]["measurementIndex"] == 0
+    assert isinstance(path[0]["reachable"], bool)
     assert len(path) == 20
 
 
@@ -358,9 +361,7 @@ def test_job_waits_for_scan_results_processed_before_next_waypoint(
         service._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"result": "ok"}),
-    ), patch(
-        "time.sleep"
-    ):
+    ), patch("time.sleep"):
         service.run_job(job.id)
         assert service._job_thread is not None
 
@@ -426,9 +427,7 @@ def test_job_stores_evaluated_scan_payload_for_client(tmp_path: Path) -> None:
         service._ionvision,
         "evaluate_scan_data",
         return_value=IVResult(ok=True, payload={"intensity_average": 20.0}),
-    ) as mock_evaluate, patch(
-        "time.sleep"
-    ):
+    ) as mock_evaluate, patch("time.sleep"):
         service.run_job(job.id)
         assert service._job_thread is not None
         service._job_thread.join(timeout=10)
@@ -473,9 +472,7 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         service._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
-    ), patch(
-        "time.sleep"
-    ):
+    ), patch("time.sleep"):
         service.run_job(job.id)
         assert service._job_thread is not None
         service._job_thread.join(timeout=10)

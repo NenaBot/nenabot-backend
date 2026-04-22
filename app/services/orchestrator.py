@@ -671,6 +671,36 @@ class OrchestratorService:
                 f"Robot not ready: {robot_status.error or 'unknown error'}"
             )
 
+    def is_waypoint_reachable(self, waypoint: Waypoint) -> bool:
+        if not hasattr(self._robot, "is_reachable_mm"):
+            return True
+        return self._robot.is_reachable_mm(waypoint.x, waypoint.y, waypoint.z)
+
+    def is_pixel_reachable(
+        self,
+        px: float,
+        py: float,
+        work_z: float,
+        work_r: float,
+    ) -> bool:
+        waypoint = self.pixel_to_robot(px, py, work_z, work_r)
+        return self.is_waypoint_reachable(waypoint)
+
+    def find_unreachable_waypoints(
+        self,
+        waypoints: list[Waypoint],
+        labels: list[str] | None = None,
+    ) -> list[str]:
+        if labels is not None and len(labels) != len(waypoints):
+            raise ValueError("labels must match waypoints length")
+
+        unreachable: list[str] = []
+        for index, waypoint in enumerate(waypoints, start=1):
+            label = labels[index - 1] if labels is not None else str(index)
+            if not self.is_waypoint_reachable(waypoint):
+                unreachable.append(f"point {label} is not reachable")
+        return unreachable
+
     # ---- Calibration ----
 
     @staticmethod
@@ -1220,7 +1250,9 @@ class OrchestratorService:
         self,
         batteries: list[list[tuple[float, float]]],
         measuring_points_per_cm: float,
-    ) -> list[dict[str, float | int | str]]:
+        work_z: float = 0.0,
+        work_r: float = 0.0,
+    ) -> list[dict[str, float | int | str | bool]]:
         import numpy as np
 
         if not self.is_calibrated:
@@ -1254,7 +1286,7 @@ class OrchestratorService:
 
         ordered_batteries.sort(key=lambda item: item[0])
 
-        path: list[dict[str, float | int | str]] = []
+        path: list[dict[str, float | int | str | bool]] = []
         for battery_number, (_distance, corners) in enumerate(ordered_batteries):
             corner_count = len(corners)
             for corner_index in range(corner_count):
@@ -1276,6 +1308,12 @@ class OrchestratorService:
                     t = measurement_index / sample_count
                     pixel_x = x1 + ((x2 - x1) * t)
                     pixel_y = y1 + ((y2 - y1) * t)
+                    reachable = self.is_pixel_reachable(
+                        pixel_x,
+                        pixel_y,
+                        work_z,
+                        work_r,
+                    )
                     path.append(
                         {
                             "index": f"{battery_number}-{corner_index}-{measurement_index}",
@@ -1284,6 +1322,7 @@ class OrchestratorService:
                             "measurementIndex": measurement_index,
                             "pixelX": pixel_x,
                             "pixelY": pixel_y,
+                            "reachable": reachable,
                         }
                     )
 

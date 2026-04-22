@@ -17,7 +17,6 @@ from app.schemas import (
     CalibrationActionRequest,
     CalibrationFlowResponse,
     ComponentHealth,
-    CornerSchema,
     Health,
     Job,
     JobCreateRequest,
@@ -29,6 +28,7 @@ from app.schemas import (
     PathResponse,
     PopulatedPathPointSchema,
     Profile,
+    ReachableCornerSchema,
     RobotMoveRequest,
     RobotMoveResponse,
     RobotPoseResponse,
@@ -110,6 +110,14 @@ def create_job(
         waypoint.corner_index = point.corner_index
         waypoint.measurement_index = point.measurement_index
         robot_waypoints.append(waypoint)
+
+    labels = [
+        point.index or str(position)
+        for position, point in enumerate(payload.path, start=1)
+    ]
+    unreachable_points = svc.find_unreachable_waypoints(robot_waypoints, labels=labels)
+    if unreachable_points:
+        raise HTTPException(status_code=422, detail="; ".join(unreachable_points))
 
     try:
         svc.validate_job_waypoints(robot_waypoints, dry_run=payload.dry_run)
@@ -223,6 +231,12 @@ def detect_path(
     payload: PathRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> PathResponse:
+    if not svc.is_calibrated:
+        raise HTTPException(
+            status_code=409,
+            detail="Not calibrated — complete POST /calibration first",
+        )
+
     logger.info("Path detect start options=%s", payload.options)
     result = svc.detect_path()
     logger.info(
@@ -236,7 +250,16 @@ def detect_path(
         detections=[
             PathItem(
                 corners=[
-                    CornerSchema(pixel_x=corner.x, pixel_y=corner.y)
+                    ReachableCornerSchema(
+                        pixel_x=corner.x,
+                        pixel_y=corner.y,
+                        reachable=svc.is_pixel_reachable(
+                            corner.x,
+                            corner.y,
+                            payload.work_z,
+                            payload.work_r,
+                        ),
+                    )
                     for corner in detection.corners
                 ],
                 width_mm=detection.width_mm,
@@ -431,6 +454,8 @@ def populate_path(
         populated = svc.populate_pixel_path_from_batteries(
             batteries,
             payload.measuring_points_per_cm,
+            payload.work_z,
+            payload.work_r,
         )
     except ValueError as exc:
         logger.warning("Path populate validation error: %s", exc)

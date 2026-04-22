@@ -98,8 +98,20 @@ class CornerSchema(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ReachableCornerSchema(BaseModel):
+    pixel_x: float = Field(alias="pixelX")
+    pixel_y: float = Field(alias="pixelY")
+    reachable: bool
+
+    model_config = {"populate_by_name": True}
+
+
 class PathRequest(BaseModel):
     options: dict[str, Any] | None = None
+    work_z: float = Field(0.0, alias="workZ")
+    work_r: float = Field(0.0, alias="workR")
+
+    model_config = {"populate_by_name": True}
 
 
 class BatteryCornersSchema(BaseModel):
@@ -113,6 +125,7 @@ class PopulatedPathPointSchema(BaseModel):
     measurement_index: int = Field(alias="measurementIndex")
     pixel_x: float = Field(alias="pixelX")
     pixel_y: float = Field(alias="pixelY")
+    reachable: bool
 
     model_config = {"populate_by_name": True}
 
@@ -124,6 +137,8 @@ class PathPopulateRequest(BaseModel):
         gt=0.0,
         le=10.0,
     )
+    work_z: float = Field(0.0, alias="workZ")
+    work_r: float = Field(0.0, alias="workR")
 
     model_config = {"populate_by_name": True}
 
@@ -135,7 +150,7 @@ class PathPopulateResponse(BaseModel):
 
 
 class PathItem(BaseModel):
-    corners: list[CornerSchema] = Field(default_factory=list)
+    corners: list[ReachableCornerSchema] = Field(default_factory=list)
     width_mm: float = 0.0
     height_mm: float = 0.0
     center_x: float = Field(0.0, alias="pixelCenterX")

@@ -80,9 +80,9 @@ class RobotAdapter:
     LEGACY_HOMING_ENV = "DOBOT_ENABLE_LEGACY_HOMING"
     MAX_REACH_RADIUS_MM = 320
     MIN_REACH_RADIUS_MM = 180
-    MIN_Z_HEIGHT_MM = -30
+    MIN_Z_HEIGHT_MM = -70
     MAX_Z_HEIGHT_MM = 0
-    MIN_X_POSITION_MM = 10
+    MIN_Y_POSITION_MM = 10
 
     def __init__(self, baud: int = 115200) -> None:
         self._baud = baud
@@ -497,7 +497,7 @@ class RobotAdapter:
         if (
             z_mm > self.MAX_Z_HEIGHT_MM
             or z_mm < self.MIN_Z_HEIGHT_MM
-            or x_mm < self.MIN_X_POSITION_MM
+            or y_mm < self.MIN_Y_POSITION_MM
         ):
             return False
 
