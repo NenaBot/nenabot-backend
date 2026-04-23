@@ -226,7 +226,9 @@ def test_status_supports_legacy_checkerboard_status_without_keyword(
 def test_status_does_not_swallow_internal_typeerror(tmp_path: Path) -> None:
     service, _, _ = _make_svc(tmp_path)
 
-    def checkerboard_status(*, ensure_capture: bool = True) -> dict[str, bool | str | None]:
+    def checkerboard_status(
+        *, ensure_capture: bool = True
+    ) -> dict[str, bool | str | None]:
         _ = ensure_capture
         raise TypeError("boom")
 
@@ -419,7 +421,9 @@ def test_job_waits_for_scan_results_processed_before_next_waypoint(
         service._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"result": "ok"}),
-    ), patch("time.sleep"):
+    ), patch(
+        "time.sleep"
+    ):
         service.run_job(job.id)
         assert service._job_thread is not None
 
@@ -485,7 +489,9 @@ def test_job_stores_evaluated_scan_payload_for_client(tmp_path: Path) -> None:
         service._ionvision,
         "evaluate_scan_data",
         return_value=IVResult(ok=True, payload={"intensity_average": 20.0}),
-    ) as mock_evaluate, patch("time.sleep"):
+    ) as mock_evaluate, patch(
+        "time.sleep"
+    ):
         service.run_job(job.id)
         assert service._job_thread is not None
         service._job_thread.join(timeout=10)
@@ -530,7 +536,9 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         service._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
-    ), patch("time.sleep"):
+    ), patch(
+        "time.sleep"
+    ):
         service.run_job(job.id)
         assert service._job_thread is not None
         service._job_thread.join(timeout=10)
