@@ -1,5 +1,6 @@
 import json
 import os
+import asyncio
 import threading
 import time
 from pathlib import Path
@@ -209,6 +210,63 @@ def test_status_reflects_running_job(tmp_path: Path) -> None:
     assert service.status()["state"] == "ready"
 
 
+def test_status_supports_legacy_checkerboard_status_without_keyword(
+    tmp_path: Path,
+) -> None:
+    service, _, _ = _make_svc(tmp_path)
+
+    def legacy_checkerboard_status() -> dict[str, bool | str | None]:
+        return {"visible": True, "error": None}
+
+    service._camera_vision.checkerboard_status = legacy_checkerboard_status
+
+    assert service.status()["calibration"]["checkerboard_visible"] is True
+
+
+def test_status_does_not_swallow_internal_typeerror(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path)
+
+    def checkerboard_status(*, ensure_capture: bool = True) -> dict[str, bool | str | None]:
+        _ = ensure_capture
+        raise TypeError("boom")
+
+    service._camera_vision.checkerboard_status = checkerboard_status
+
+    with pytest.raises(TypeError, match="boom"):
+        service.status()
+
+
+def test_close_camera_calls_sync_adapter_close(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    close_mock = MagicMock(return_value=None)
+    service._camera_vision.close = close_mock
+
+    asyncio.run(service.close_camera())
+
+    close_mock.assert_called_once_with()
+
+
+def test_close_camera_calls_async_adapter_close(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    close_calls = {"count": 0}
+
+    async def close_async() -> None:
+        close_calls["count"] += 1
+
+    service._camera_vision.close = close_async
+
+    asyncio.run(service.close_camera())
+
+    assert close_calls["count"] == 1
+
+
+def test_close_camera_is_noop_when_adapter_has_no_close(tmp_path: Path) -> None:
+    service, _, _ = _make_svc(tmp_path)
+    service._camera_vision = object()
+
+    asyncio.run(service.close_camera())
+
+
 def test_calibration_flow_writes_mapping_file_and_status_date(tmp_path: Path) -> None:
     service, intrinsics_path, mapping_path = _make_svc(tmp_path)
     image_points, robot_points = sample_correspondences()
@@ -361,9 +419,7 @@ def test_job_waits_for_scan_results_processed_before_next_waypoint(
         service._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"result": "ok"}),
-    ), patch(
-        "time.sleep"
-    ):
+    ), patch("time.sleep"):
         service.run_job(job.id)
         assert service._job_thread is not None
 
@@ -429,9 +485,7 @@ def test_job_stores_evaluated_scan_payload_for_client(tmp_path: Path) -> None:
         service._ionvision,
         "evaluate_scan_data",
         return_value=IVResult(ok=True, payload={"intensity_average": 20.0}),
-    ) as mock_evaluate, patch(
-        "time.sleep"
-    ):
+    ) as mock_evaluate, patch("time.sleep"):
         service.run_job(job.id)
         assert service._job_thread is not None
         service._job_thread.join(timeout=10)
@@ -476,9 +530,7 @@ def test_return_to_start_after_completion(tmp_path: Path) -> None:
         service._ionvision,
         "get_latest_dataobject",
         return_value=IVResult(ok=True, payload={"data": "test"}),
-    ), patch(
-        "time.sleep"
-    ):
+    ), patch("time.sleep"):
         service.run_job(job.id)
         assert service._job_thread is not None
         service._job_thread.join(timeout=10)

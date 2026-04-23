@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import logging
 import math
@@ -628,7 +630,25 @@ class OrchestratorService:
         }
 
     def status(self) -> dict[str, object]:
-        checkerboard = self._camera_vision.checkerboard_status()
+        checkerboard_status = self._camera_vision.checkerboard_status
+        try:
+            signature = inspect.signature(checkerboard_status)
+        except (TypeError, ValueError):
+            signature = None
+
+        supports_ensure_capture = False
+        if signature is not None:
+            supports_ensure_capture = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                or parameter.name == "ensure_capture"
+                for parameter in signature.parameters.values()
+            )
+
+        if supports_ensure_capture:
+            checkerboard = checkerboard_status(ensure_capture=False)
+        else:
+            checkerboard = checkerboard_status()
+
         session = self._calibration_session
         return {
             "state": "busy" if self._running_job_id else "ready",
@@ -1422,6 +1442,19 @@ class OrchestratorService:
 
     async def close_ionvision(self) -> None:
         await self._close_ionvision()
+
+    async def close_camera(self) -> None:
+        close_method = getattr(self._camera_vision, "close", None)
+        if close_method is None:
+            return
+
+        if inspect.iscoroutinefunction(close_method):
+            await close_method()
+            return
+
+        result = await asyncio.to_thread(close_method)
+        if inspect.isawaitable(result):
+            await result
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         """Handle scan results processing completion event.

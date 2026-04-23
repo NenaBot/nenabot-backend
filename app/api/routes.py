@@ -6,6 +6,7 @@ import json
 import logging
 import queue
 from datetime import datetime, timezone
+from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -202,22 +203,63 @@ def default_profile(svc: OrchestratorService = Depends(get_orchestrator)) -> Pro
     return Profile(**svc.default_profile())
 
 
+async def _disconnect_aware_mjpeg_stream(
+    request: Request,
+    source_stream: AsyncGenerator[bytes, None],
+    *,
+    stream_name: str,
+) -> AsyncGenerator[bytes, None]:
+    try:
+        while True:
+            if await request.is_disconnected():
+                logger.info("MJPEG client disconnected stream=%s", stream_name)
+                return
+            try:
+                yield await anext(source_stream)
+            except StopAsyncIteration:
+                return
+    except asyncio.CancelledError:
+        logger.debug("MJPEG stream cancelled stream=%s", stream_name)
+        raise
+    finally:
+        try:
+            await source_stream.aclose()
+        except Exception:
+            logger.debug(
+                "MJPEG stream close raised stream=%s",
+                stream_name,
+                exc_info=True,
+            )
+
+
 @router.get("/stream/camera/feed")
 async def camera_feed(
+    request: Request,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
-    return StreamingResponse(
+    stream = _disconnect_aware_mjpeg_stream(
+        request,
         svc.camera_vision.stream_camera(),
+        stream_name="camera",
+    )
+    return StreamingResponse(
+        stream,
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
 
 @router.get("/stream/detection/feed")
 async def detection_feed(
+    request: Request,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
-    return StreamingResponse(
+    stream = _disconnect_aware_mjpeg_stream(
+        request,
         svc.camera_vision.stream_detection(),
+        stream_name="detection",
+    )
+    return StreamingResponse(
+        stream,
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 

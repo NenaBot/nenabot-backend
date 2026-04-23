@@ -121,17 +121,42 @@ def test_detect_latest_refreshes_detection_outputs(monkeypatch) -> None:
 
 def test_stream_camera_emits_multipart_jpeg_frame() -> None:
     adapter = MockCameraVisionAdapter()
+    active_stream_counts: list[int] = []
 
     async def consume_first_chunk() -> bytes:
         stream = adapter.stream_camera()
         try:
-            return await anext(stream)
+            chunk = await anext(stream)
+            active_stream_counts.append(adapter.active_stream_count)
+            return chunk
         finally:
             await stream.aclose()
 
     chunk = asyncio.run(consume_first_chunk())
     assert chunk.startswith(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n")
     assert b"\xff\xd8" in chunk
+    assert active_stream_counts == [1]
+    assert adapter.active_stream_count == 0
+
+
+def test_stream_detection_emits_multipart_jpeg_frame_and_cleans_up() -> None:
+    adapter = MockCameraVisionAdapter()
+    active_stream_counts: list[int] = []
+
+    async def consume_first_chunk() -> bytes:
+        stream = adapter.stream_detection()
+        try:
+            chunk = await anext(stream)
+            active_stream_counts.append(adapter.active_stream_count)
+            return chunk
+        finally:
+            await stream.aclose()
+
+    chunk = asyncio.run(consume_first_chunk())
+    assert chunk.startswith(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n")
+    assert b"\xff\xd8" in chunk
+    assert active_stream_counts == [1]
+    assert adapter.active_stream_count == 0
 
 
 def test_detect_latest_uses_expected_mock_points() -> None:

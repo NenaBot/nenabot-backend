@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator
@@ -84,7 +85,27 @@ class MockCameraVisionAdapter:
         self._camera_jpeg_bytes = self._encode_jpeg(self._camera_frame)
         self._detection_frame = self._render_detection_frame(self._frame)
         self._detection_jpeg_bytes = self._encode_jpeg(self._detection_frame)
+        self._active_streams_lock = threading.Lock()
+        self._active_streams = 0
         self._refresh_detection_outputs()
+
+    @property
+    def active_stream_count(self) -> int:
+        with self._active_streams_lock:
+            return self._active_streams
+
+    def _open_stream(self) -> None:
+        with self._active_streams_lock:
+            self._active_streams += 1
+
+    def _close_stream(self) -> None:
+        with self._active_streams_lock:
+            if self._active_streams > 0:
+                self._active_streams -= 1
+
+    def close(self) -> None:
+        with self._active_streams_lock:
+            self._active_streams = 0
 
     def _resolve_mock_image_path(self) -> Path | None:
         if self._mock_image_path:
@@ -380,20 +401,28 @@ class MockCameraVisionAdapter:
         return min(candidates, key=lambda item: (item[0].row, item[0].col))
 
     async def stream_camera(self) -> AsyncGenerator[bytes, None]:
-        while True:
-            yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                + self._camera_jpeg_bytes
-                + b"\r\n"
-            )
-            await asyncio.sleep(0.1)
+        self._open_stream()
+        try:
+            while True:
+                yield (
+                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                    + self._camera_jpeg_bytes
+                    + b"\r\n"
+                )
+                await asyncio.sleep(0.1)
+        finally:
+            self._close_stream()
 
     async def stream_detection(self) -> AsyncGenerator[bytes, None]:
-        while True:
-            self._refresh_detection_outputs()
-            yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                + self._detection_jpeg_bytes
-                + b"\r\n"
-            )
-            await asyncio.sleep(0.15)
+        self._open_stream()
+        try:
+            while True:
+                self._refresh_detection_outputs()
+                yield (
+                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                    + self._detection_jpeg_bytes
+                    + b"\r\n"
+                )
+                await asyncio.sleep(0.15)
+        finally:
+            self._close_stream()

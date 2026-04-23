@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.adapters.camera_vision import (
 )
 from app.adapters.ionVision import IVResult
 from app.adapters.robot import PoseResult, RobotResult
+from app.api.routes import _disconnect_aware_mjpeg_stream
 from app.dependencies import create_orchestrator, get_orchestrator
 from app.main import app
 from tests.calibration_helpers import (
@@ -23,6 +25,29 @@ from tests.calibration_helpers import (
     write_intrinsics,
     write_mapping,
 )
+
+
+class _TrackableAsyncStream:
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+        self.closed = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        return self._payload
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _FakeRequest:
+    def __init__(self, disconnected_sequence: list[bool]) -> None:
+        self._sequence = iter(disconnected_sequence)
+
+    async def is_disconnected(self) -> bool:
+        return next(self._sequence, True)
 
 
 def _make_bundle(tmp_path: Path, calibrated: bool) -> dict[str, object]:
@@ -376,6 +401,42 @@ def test_job_sse_events(calibrated_bundle) -> None:
     assert events[0]["type"] == "job:snapshot"
     assert events[-1]["state"] == "completed"
     assert any(event["type"] == "job:waypoint_completed" for event in events)
+
+
+def test_disconnect_aware_stream_closes_source_when_client_disconnects() -> None:
+    tracked_stream = _TrackableAsyncStream(b"fake-camera")
+    request = _FakeRequest([True])
+
+    async def consume() -> None:
+        stream = _disconnect_aware_mjpeg_stream(
+            request,
+            tracked_stream,
+            stream_name="camera",
+        )
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+
+    asyncio.run(consume())
+    assert tracked_stream.closed is True
+
+
+def test_disconnect_aware_stream_closes_source_on_consumer_aclose() -> None:
+    tracked_stream = _TrackableAsyncStream(b"fake-detection")
+    request = _FakeRequest([False, False])
+
+    async def consume() -> bytes:
+        stream = _disconnect_aware_mjpeg_stream(
+            request,
+            tracked_stream,
+            stream_name="detection",
+        )
+        try:
+            return await anext(stream)
+        finally:
+            await stream.aclose()
+
+    assert asyncio.run(consume()) == b"fake-detection"
+    assert tracked_stream.closed is True
 
 
 def test_job_image_endpoint_returns_404_when_missing_image(calibrated_bundle) -> None:
