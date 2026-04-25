@@ -72,7 +72,18 @@ if the DLL has been loaded and a connection established.
 **`disconnect()`** <br>
 Disconnect from the arm and release the DLL handle.
 
----
+## Motion Constraints
+
+Allowed workspace is validated in software before sending movement commands.
+
+A target is rejected if it violates any of these limits: 
+- MAX_REACH_RADIUS_MM = 320 : maximum 320 mm radial distance from the robot base center in the XY plane
+- MIN_REACH_RADIUS_MM = 180 : minimum 180 mm radial distance from the robot base center in the XY plane
+- MIN_Z_HEIGHT_MM = -30 : minimum -30 mm height
+- MAX_Z_HEIGHT_MM = 0 : maximum 0 mm height
+- MIN_X_POSITION_MM = 10 : x coordinate minimum 10 mm in front of the robot base center
+
+If a target is outside these limits, move_to_coordinates returns an unreachable-area error instead of sending the command to the arm.
 
 ## Hardware Integration Tests
 
