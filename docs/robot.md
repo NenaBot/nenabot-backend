@@ -152,7 +152,7 @@ RUN_ROBOT_HARDWARE_TESTS=1 pytest -s -v tests/test_robot_hardware.py::test_live_
 ### Safety notes
 
 - The arm runs the homing routine at the start of every test; make sure the
-  work area is clear before enabling tests. During homing, the arm typically
+  work area is clear before enabling tests. During homing, the arm
   moves toward the rear-left corner from the robot's point of view.
 - `stop()` clears the queue; use `pause()`/`resume()` if you want to preserve
   queued commands across an interruption.
