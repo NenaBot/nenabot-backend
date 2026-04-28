@@ -10,6 +10,7 @@ talks directly to the arm. It lives at `app/adapters/robot.py`.
 - Built-in homing routine
 - Command queue control: pause, resume, stop (clear)
 - Pose read-back for arrival validation
+- Reachability checks before sending movement commands
 
 ## Core Methods
 
@@ -25,7 +26,8 @@ Useful when the port is known in advance or auto-detection fails.
 Runs the Dobot's built-in homing routine. Calibrates the arm and moves it to
 its mechanical home position. Blocks until finished.
 Uses `SetHOMECmdEx` when available; falls back to `SetHOMECmd` only when
-`DOBOT_ENABLE_LEGACY_HOMING=1` is set (see env vars below).
+`SetHOMECmdEx` is unavailable. On Windows, the `SetHOMECmd` fallback is gated
+behind `DOBOT_ENABLE_LEGACY_HOMING=1` (see env vars below).
 
 ## Application Startup
 
@@ -72,7 +74,18 @@ if the DLL has been loaded and a connection established.
 **`disconnect()`** <br>
 Disconnect from the arm and release the DLL handle.
 
----
+## Motion Constraints
+
+Allowed workspace is validated in software before sending movement commands.
+
+A target is rejected if it violates any of these limits: 
+- MAX_REACH_RADIUS_MM = 320 : maximum 320 mm radial distance from the robot base center in the XY plane
+- MIN_REACH_RADIUS_MM = 180 : minimum 180 mm radial distance from the robot base center in the XY plane
+- MIN_Z_HEIGHT_MM = -30 : minimum -30 mm height
+- MAX_Z_HEIGHT_MM = 0 : maximum 0 mm height
+- MIN_X_POSITION_MM = 10 : x coordinate minimum 10 mm in front of the robot base center
+
+If a target is outside these limits, move_to_coordinates returns an unreachable-area error instead of sending the command to the arm.
 
 ## Hardware Integration Tests
 
@@ -138,8 +151,9 @@ RUN_ROBOT_HARDWARE_TESTS=1 pytest -s -v tests/test_robot_hardware.py::test_live_
 
 ### Safety notes
 
-- The arm runs the homing routine at the start of every test — make sure the
-  work area is clear before enabling tests.
+- The arm runs the homing routine at the start of every test; make sure the
+  work area is clear before enabling tests. During homing, the arm
+  moves toward the rear-left corner from the robot's point of view.
 - `stop()` clears the queue; use `pause()`/`resume()` if you want to preserve
   queued commands across an interruption.
 - The legacy `SetHOMECmd` path is gated behind `DOBOT_ENABLE_LEGACY_HOMING`
