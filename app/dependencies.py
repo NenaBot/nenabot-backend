@@ -90,6 +90,10 @@ def create_orchestrator(
         "NENABOT_ENABLE_STARTUP_HOMING",
         default=False,
     )
+    reachability_check_enabled = _env_flag(
+        "NENABOT_REACHABILITY_CHECK",
+        default=True,
+    )
 
     max_jobs_raw = _first_env("NENABOT_MAX_JOBS")
     try:
@@ -149,7 +153,7 @@ def create_orchestrator(
         db = Database(db_path=db_path)
         db.init_db()
         camera = CameraVisionAdapter(intrinsics_path=intrinsics_path)
-        robot = RobotAdapter()
+        robot = RobotAdapter(reachability_check_enabled=reachability_check_enabled)
         ionvision = IVAdapter(
             base_url=ionvision_base_url,
             ws_base_url=ionvision_ws_base_url,
@@ -199,6 +203,7 @@ def create_orchestrator(
         default_work_z=default_work_z,
         default_measuring_points_per_cm=default_measuring_points_per_cm,
         default_measurement_threshold=default_measurement_threshold,
+        reachability_check_enabled=reachability_check_enabled,
     )
 
 

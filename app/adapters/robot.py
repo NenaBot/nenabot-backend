@@ -84,8 +84,13 @@ class RobotAdapter:
     MAX_Z_HEIGHT_MM = 0
     MIN_Y_POSITION_MM = 10
 
-    def __init__(self, baud: int = 115200) -> None:
+    def __init__(
+        self,
+        baud: int = 115200,
+        reachability_check_enabled: bool = True,
+    ) -> None:
         self._baud = baud
+        self.reachability_check_enabled = bool(reachability_check_enabled)
         self._connected_port: str | None = None
         self._api = None
 
@@ -223,7 +228,7 @@ class RobotAdapter:
         if self._api is None:
             return RobotResult(ok=False, error="No Dobot connection")
         x, y, z, r = coords
-        if not self.is_reachable_mm(x, y, z):
+        if self.reachability_check_enabled and not self.is_reachable_mm(x, y, z):
             return RobotResult(
                 ok=False,
                 error=(

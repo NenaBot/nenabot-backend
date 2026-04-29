@@ -121,6 +121,19 @@ def test_move_to_coordinates_rejects_unreachable_without_queueing(
     assert [name for name, _ in fake.calls] == []
 
 
+def test_move_to_coordinates_allows_unreachable_when_check_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_dobot(monkeypatch)
+    adapter = RobotAdapter(reachability_check_enabled=False)
+    adapter._api = object()
+
+    result = adapter.move_to_coordinates((5, 10, -10, 0), wait=True)
+
+    assert result.ok is True
+    assert [name for name, _ in fake.calls] == ["SetPTPCmdEx"]
+
+
 def test_execute_route_moves_then_home(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = RobotAdapter()
 

@@ -53,6 +53,25 @@ def test_create_orchestrator_homes_robot_when_startup_homing_enabled(
     home.assert_called_once()
 
 
+def test_create_orchestrator_reads_reachability_check_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("NENABOT_REACHABILITY_CHECK", "0")
+
+    connect_first_available = MagicMock(
+        return_value=RobotResult(ok=False, error="no robot")
+    )
+    monkeypatch.setattr(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        connect_first_available,
+    )
+
+    orchestrator = create_orchestrator(db_path=str(tmp_path / "test.db"))
+
+    assert orchestrator.reachability_check_enabled is False
+    assert orchestrator._robot.reachability_check_enabled is False
+
+
 def test_create_orchestrator_uses_mock_adapters_when_mock_mode_enabled(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

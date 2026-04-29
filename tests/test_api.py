@@ -314,6 +314,28 @@ def test_job_creation_rejects_all_unreachable_points(calibrated_bundle) -> None:
     assert "point 2 is not reachable" in detail
 
 
+def test_job_creation_allows_unreachable_points_when_check_disabled(
+    calibrated_bundle,
+) -> None:
+    client = calibrated_bundle["client"]
+    service = calibrated_bundle["service"]
+    service.reachability_check_enabled = False
+    service._robot.is_reachable_mm = MagicMock(return_value=False)
+
+    response = client.post(
+        "/api/job",
+        json={
+            "path": [{"pixelX": 100.0, "pixelY": 100.0}],
+            "dryRun": True,
+            "workZ": -48,
+            "workR": 0,
+        },
+    )
+
+    assert response.status_code == 201
+    service._robot.is_reachable_mm.assert_not_called()
+
+
 def test_calibration_flow_endpoint_writes_mapping_and_updates_status(
     uncalibrated_bundle,
 ) -> None:

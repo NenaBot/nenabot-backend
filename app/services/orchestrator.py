@@ -68,6 +68,7 @@ class OrchestratorService:
         default_work_z: float = 0.0,
         default_measuring_points_per_cm: float = 0.5,
         default_measurement_threshold: float = 120.0,
+        reachability_check_enabled: bool = True,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
@@ -76,6 +77,7 @@ class OrchestratorService:
         self._mapping_path = Path(mapping_path)
         self._started_at = time.monotonic()
         self._max_jobs = max(0, int(max_jobs))
+        self.reachability_check_enabled = bool(reachability_check_enabled)
         measuring_points_per_cm = float(default_measuring_points_per_cm)
         if measuring_points_per_cm <= 0:
             measuring_points_per_cm = 0.5
@@ -692,6 +694,8 @@ class OrchestratorService:
             )
 
     def is_waypoint_reachable(self, waypoint: Waypoint) -> bool:
+        if not self.reachability_check_enabled:
+            return True
         if not hasattr(self._robot, "is_reachable_mm"):
             return True
         return self._robot.is_reachable_mm(waypoint.x, waypoint.y, waypoint.z)
@@ -711,6 +715,9 @@ class OrchestratorService:
         waypoints: list[Waypoint],
         labels: list[str] | None = None,
     ) -> list[str]:
+        if not self.reachability_check_enabled:
+            return []
+
         if labels is not None and len(labels) != len(waypoints):
             raise ValueError("labels must match waypoints length")
 
