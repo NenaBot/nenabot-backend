@@ -108,6 +108,13 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("Application lifespan shutdown begin")
         try:
+            await orchestrator.close_camera()
+        except Exception:
+            logging.getLogger("app").warning(
+                "Camera shutdown failed",
+                exc_info=True,
+            )
+        try:
             await orchestrator.close_ionvision()
         except Exception:
             logging.getLogger("app").warning(

@@ -6,6 +6,7 @@ import json
 import logging
 import queue
 from datetime import datetime, timezone
+from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -17,7 +18,6 @@ from app.schemas import (
     CalibrationActionRequest,
     CalibrationFlowResponse,
     ComponentHealth,
-    CornerSchema,
     Health,
     Job,
     JobCreateRequest,
@@ -29,6 +29,7 @@ from app.schemas import (
     PathResponse,
     PopulatedPathPointSchema,
     Profile,
+    ReachableCornerSchema,
     RobotMoveRequest,
     RobotMoveResponse,
     RobotPoseResponse,
@@ -110,6 +111,14 @@ def create_job(
         waypoint.corner_index = point.corner_index
         waypoint.measurement_index = point.measurement_index
         robot_waypoints.append(waypoint)
+
+    labels = [
+        point.index or str(position)
+        for position, point in enumerate(payload.path, start=1)
+    ]
+    unreachable_points = svc.find_unreachable_waypoints(robot_waypoints, labels=labels)
+    if unreachable_points:
+        raise HTTPException(status_code=422, detail="; ".join(unreachable_points))
 
     try:
         svc.validate_job_waypoints(robot_waypoints, dry_run=payload.dry_run)
@@ -194,22 +203,63 @@ def default_profile(svc: OrchestratorService = Depends(get_orchestrator)) -> Pro
     return Profile(**svc.default_profile())
 
 
+async def _disconnect_aware_mjpeg_stream(
+    request: Request,
+    source_stream: AsyncGenerator[bytes, None],
+    *,
+    stream_name: str,
+) -> AsyncGenerator[bytes, None]:
+    try:
+        while True:
+            if await request.is_disconnected():
+                logger.info("MJPEG client disconnected stream=%s", stream_name)
+                return
+            try:
+                yield await anext(source_stream)
+            except StopAsyncIteration:
+                return
+    except asyncio.CancelledError:
+        logger.debug("MJPEG stream cancelled stream=%s", stream_name)
+        raise
+    finally:
+        try:
+            await source_stream.aclose()
+        except Exception:
+            logger.debug(
+                "MJPEG stream close raised stream=%s",
+                stream_name,
+                exc_info=True,
+            )
+
+
 @router.get("/stream/camera/feed")
 async def camera_feed(
+    request: Request,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
-    return StreamingResponse(
+    stream = _disconnect_aware_mjpeg_stream(
+        request,
         svc.camera_vision.stream_camera(),
+        stream_name="camera",
+    )
+    return StreamingResponse(
+        stream,
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
 
 @router.get("/stream/detection/feed")
 async def detection_feed(
+    request: Request,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> StreamingResponse:
-    return StreamingResponse(
+    stream = _disconnect_aware_mjpeg_stream(
+        request,
         svc.camera_vision.stream_detection(),
+        stream_name="detection",
+    )
+    return StreamingResponse(
+        stream,
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
@@ -223,6 +273,12 @@ def detect_path(
     payload: PathRequest,
     svc: OrchestratorService = Depends(get_orchestrator),
 ) -> PathResponse:
+    if not svc.is_calibrated:
+        raise HTTPException(
+            status_code=409,
+            detail="Not calibrated — complete POST /calibration first",
+        )
+
     logger.info("Path detect start options=%s", payload.options)
     result = svc.detect_path()
     logger.info(
@@ -236,7 +292,16 @@ def detect_path(
         detections=[
             PathItem(
                 corners=[
-                    CornerSchema(pixel_x=corner.x, pixel_y=corner.y)
+                    ReachableCornerSchema(
+                        pixel_x=corner.x,
+                        pixel_y=corner.y,
+                        reachable=svc.is_pixel_reachable(
+                            corner.x,
+                            corner.y,
+                            payload.work_z,
+                            payload.work_r,
+                        ),
+                    )
                     for corner in detection.corners
                 ],
                 width_mm=detection.width_mm,
@@ -431,6 +496,8 @@ def populate_path(
         populated = svc.populate_pixel_path_from_batteries(
             batteries,
             payload.measuring_points_per_cm,
+            payload.work_z,
+            payload.work_r,
         )
     except ValueError as exc:
         logger.warning("Path populate validation error: %s", exc)

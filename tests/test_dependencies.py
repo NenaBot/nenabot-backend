@@ -53,6 +53,25 @@ def test_create_orchestrator_homes_robot_when_startup_homing_enabled(
     home.assert_called_once()
 
 
+def test_create_orchestrator_reads_reachability_check_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("NENABOT_REACHABILITY_CHECK", "0")
+
+    connect_first_available = MagicMock(
+        return_value=RobotResult(ok=False, error="no robot")
+    )
+    monkeypatch.setattr(
+        "app.adapters.robot.RobotAdapter.connect_first_available",
+        connect_first_available,
+    )
+
+    orchestrator = create_orchestrator(db_path=str(tmp_path / "test.db"))
+
+    assert orchestrator.reachability_check_enabled is False
+    assert orchestrator._robot.reachability_check_enabled is False
+
+
 def test_create_orchestrator_uses_mock_adapters_when_mock_mode_enabled(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -63,8 +82,6 @@ def test_create_orchestrator_uses_mock_adapters_when_mock_mode_enabled(
 
     orchestrator = create_orchestrator(
         db_path=str(tmp_path / "test.db"),
-        intrinsics_path=str(tmp_path / "mock_intrinsics.json"),
-        mapping_path=str(tmp_path / "mock_mapping.json"),
     )
 
     assert isinstance(orchestrator._camera_vision, MockCameraVisionAdapter)
@@ -113,8 +130,6 @@ def test_mock_mode_job_measurement_uses_realistic_ionvision_payload(
 
     orchestrator = create_orchestrator(
         db_path=str(tmp_path / "test.db"),
-        intrinsics_path=str(tmp_path / "mock_intrinsics.json"),
-        mapping_path=str(tmp_path / "mock_mapping.json"),
     )
 
     asyncio.run(orchestrator.initialize_ionvision())
@@ -165,8 +180,6 @@ def test_mock_mode_job_has_scan_for_each_waypoint(
 
     orchestrator = create_orchestrator(
         db_path=str(tmp_path / "test.db"),
-        intrinsics_path=str(tmp_path / "mock_intrinsics.json"),
-        mapping_path=str(tmp_path / "mock_mapping.json"),
     )
 
     asyncio.run(orchestrator.initialize_ionvision())
@@ -207,3 +220,21 @@ def test_mock_mode_job_has_scan_for_each_waypoint(
         assert len(set(scan_ids)) == 2
     finally:
         asyncio.run(orchestrator.close_ionvision())
+
+
+def test_mock_mode_uses_example_mapping_path_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NENABOT_MOCK_MODE", "1")
+    monkeypatch.delenv("NENABOT_MAPPING_PATH", raising=False)
+    monkeypatch.delenv("NENABOT_INTRINSICS_PATH", raising=False)
+
+    orchestrator = create_orchestrator(db_path=":memory:")
+    assert (
+        str(orchestrator._mapping_path) == "data/calibration/robot_mapping.json.example"
+    )
+    assert (
+        orchestrator._camera_vision.intrinsics_path
+        == "data/calibration/camera_params.json"
+    )
+    assert orchestrator.is_calibrated is True

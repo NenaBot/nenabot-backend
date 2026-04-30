@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import logging
 import math
@@ -66,6 +68,7 @@ class OrchestratorService:
         default_work_z: float = 0.0,
         default_measuring_points_per_cm: float = 0.5,
         default_measurement_threshold: float = 120.0,
+        reachability_check_enabled: bool = True,
     ) -> None:
         self._camera_vision = camera_vision
         self._robot = robot
@@ -74,6 +77,7 @@ class OrchestratorService:
         self._mapping_path = Path(mapping_path)
         self._started_at = time.monotonic()
         self._max_jobs = max(0, int(max_jobs))
+        self.reachability_check_enabled = bool(reachability_check_enabled)
         measuring_points_per_cm = float(default_measuring_points_per_cm)
         if measuring_points_per_cm <= 0:
             measuring_points_per_cm = 0.5
@@ -628,7 +632,25 @@ class OrchestratorService:
         }
 
     def status(self) -> dict[str, object]:
-        checkerboard = self._camera_vision.checkerboard_status()
+        checkerboard_status = self._camera_vision.checkerboard_status
+        try:
+            signature = inspect.signature(checkerboard_status)
+        except (TypeError, ValueError):
+            signature = None
+
+        supports_ensure_capture = False
+        if signature is not None:
+            supports_ensure_capture = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                or parameter.name == "ensure_capture"
+                for parameter in signature.parameters.values()
+            )
+
+        if supports_ensure_capture:
+            checkerboard = checkerboard_status(ensure_capture=False)
+        else:
+            checkerboard = checkerboard_status()
+
         session = self._calibration_session
         return {
             "state": "busy" if self._running_job_id else "ready",
@@ -670,6 +692,41 @@ class OrchestratorService:
             raise RuntimeError(
                 f"Robot not ready: {robot_status.error or 'unknown error'}"
             )
+
+    def is_waypoint_reachable(self, waypoint: Waypoint) -> bool:
+        if not self.reachability_check_enabled:
+            return True
+        if not hasattr(self._robot, "is_reachable_mm"):
+            return True
+        return self._robot.is_reachable_mm(waypoint.x, waypoint.y, waypoint.z)
+
+    def is_pixel_reachable(
+        self,
+        px: float,
+        py: float,
+        work_z: float,
+        work_r: float,
+    ) -> bool:
+        waypoint = self.pixel_to_robot(px, py, work_z, work_r)
+        return self.is_waypoint_reachable(waypoint)
+
+    def find_unreachable_waypoints(
+        self,
+        waypoints: list[Waypoint],
+        labels: list[str] | None = None,
+    ) -> list[str]:
+        if not self.reachability_check_enabled:
+            return []
+
+        if labels is not None and len(labels) != len(waypoints):
+            raise ValueError("labels must match waypoints length")
+
+        unreachable: list[str] = []
+        for index, waypoint in enumerate(waypoints, start=1):
+            label = labels[index - 1] if labels is not None else str(index)
+            if not self.is_waypoint_reachable(waypoint):
+                unreachable.append(f"point {label} is not reachable")
+        return unreachable
 
     # ---- Calibration ----
 
@@ -1220,7 +1277,9 @@ class OrchestratorService:
         self,
         batteries: list[list[tuple[float, float]]],
         measuring_points_per_cm: float,
-    ) -> list[dict[str, float | int | str]]:
+        work_z: float = 0.0,
+        work_r: float = 0.0,
+    ) -> list[dict[str, float | int | str | bool]]:
         import numpy as np
 
         if not self.is_calibrated:
@@ -1254,7 +1313,7 @@ class OrchestratorService:
 
         ordered_batteries.sort(key=lambda item: item[0])
 
-        path: list[dict[str, float | int | str]] = []
+        path: list[dict[str, float | int | str | bool]] = []
         for battery_number, (_distance, corners) in enumerate(ordered_batteries):
             corner_count = len(corners)
             for corner_index in range(corner_count):
@@ -1276,6 +1335,12 @@ class OrchestratorService:
                     t = measurement_index / sample_count
                     pixel_x = x1 + ((x2 - x1) * t)
                     pixel_y = y1 + ((y2 - y1) * t)
+                    reachable = self.is_pixel_reachable(
+                        pixel_x,
+                        pixel_y,
+                        work_z,
+                        work_r,
+                    )
                     path.append(
                         {
                             "index": f"{battery_number}-{corner_index}-{measurement_index}",
@@ -1284,6 +1349,7 @@ class OrchestratorService:
                             "measurementIndex": measurement_index,
                             "pixelX": pixel_x,
                             "pixelY": pixel_y,
+                            "reachable": reachable,
                         }
                     )
 
@@ -1383,6 +1449,19 @@ class OrchestratorService:
 
     async def close_ionvision(self) -> None:
         await self._close_ionvision()
+
+    async def close_camera(self) -> None:
+        close_method = getattr(self._camera_vision, "close", None)
+        if close_method is None:
+            return
+
+        if inspect.iscoroutinefunction(close_method):
+            await close_method()
+            return
+
+        result = await asyncio.to_thread(close_method)
+        if inspect.isawaitable(result):
+            await result
 
     async def _handle_scan_results_processed(self, data: dict) -> None:
         """Handle scan results processing completion event.

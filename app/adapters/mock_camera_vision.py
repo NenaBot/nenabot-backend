@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator
@@ -32,17 +33,19 @@ class MockCameraVisionAdapter:
         device_index: int = 0,
         output_dir: str = "data/images",
         intrinsics_path: str | None = None,
-        frame_width: int = 1280,
-        frame_height: int = 720,
+        mock_image_path: str | None = None,
+        frame_width: int = 1920,
+        frame_height: int = 1080,
         checkerboard_size: tuple[int, int] = (8, 6),
         checkerboard_square_mm: float = 34.0,
     ) -> None:
-        # Keep points deterministic so frontend overlays and payloads remain stable.
-        self._detection_corner_ratios = [
-            (0.455, 0.090),
-            (0.535, 0.090),
-            (0.530, 0.340),
-            (0.450, 0.340),
+        # Canonical mock detection points at 1920x1080. These are scaled for other
+        # resolutions so frontend overlays remain stable in mock mode.
+        self._canonical_detection_corners = [
+            (920, 434),
+            (1162, 438),
+            (1160, 754),
+            (919, 753),
         ]
         self._checkerboard_point_ratios = {
             (1, 0): (0.110, 0.700),
@@ -54,10 +57,13 @@ class MockCameraVisionAdapter:
         self._device_index = device_index
         self._output_dir = Path(output_dir)
         self._intrinsics_path = intrinsics_path or "data/calibration/camera_params.json"
+        self._mock_image_path = mock_image_path
         self._frame_width = frame_width
         self._frame_height = frame_height
         self._checkerboard_size = checkerboard_size
         self._checkerboard_square_mm = checkerboard_square_mm
+        self._source_image_bytes: bytes | None = None
+        self._detection_confidence = 0.95
 
         self._camera_matrix = np.array(
             [
@@ -73,17 +79,58 @@ class MockCameraVisionAdapter:
         )
 
         self._frame = self._load_mock_image_frame()
-        self._detection_corners = self._build_detection_corners()
+        self._detection_corners = self._build_default_detection_corners()
         self._checkerboard_points = self._build_checkerboard_points()
         self._camera_frame = self._render_camera_frame(self._frame)
-        self._detection_frame = self._render_detection_frame(self._frame)
         self._camera_jpeg_bytes = self._encode_jpeg(self._camera_frame)
+        self._detection_frame = self._render_detection_frame(self._frame)
         self._detection_jpeg_bytes = self._encode_jpeg(self._detection_frame)
+        self._active_streams_lock = threading.Lock()
+        self._active_streams = 0
+        self._refresh_detection_outputs()
+
+    @property
+    def active_stream_count(self) -> int:
+        with self._active_streams_lock:
+            return self._active_streams
+
+    def _open_stream(self) -> None:
+        with self._active_streams_lock:
+            self._active_streams += 1
+
+    def _close_stream(self) -> None:
+        with self._active_streams_lock:
+            if self._active_streams > 0:
+                self._active_streams -= 1
+
+    def close(self) -> None:
+        with self._active_streams_lock:
+            self._active_streams = 0
+
+    def _resolve_mock_image_path(self) -> Path | None:
+        if self._mock_image_path:
+            path = Path(self._mock_image_path)
+            if path.exists():
+                return path
+
+        backend_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            Path("data/calibration/mock.jpeg"),
+            backend_root / "data/calibration/mock.jpeg",
+            backend_root / "app/assets/mock.jpeg",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
 
     def _load_mock_image_frame(self) -> np.ndarray:
-        image_path = Path("data/calibration/mock.jpg")
-        if cv2 is not None and image_path.exists():
-            image_data = np.frombuffer(image_path.read_bytes(), dtype=np.uint8)
+        image_path = self._resolve_mock_image_path()
+        if image_path is not None:
+            self._source_image_bytes = image_path.read_bytes()
+
+        if cv2 is not None and self._source_image_bytes:
+            image_data = np.frombuffer(self._source_image_bytes, dtype=np.uint8)
             decoded = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
             if decoded is not None:
                 return cv2.resize(
@@ -93,11 +140,46 @@ class MockCameraVisionAdapter:
                 )
         return np.zeros((self._frame_height, self._frame_width, 3), dtype=np.uint8)
 
-    def _build_detection_corners(self) -> list[tuple[int, int]]:
+    def _build_default_detection_corners(self) -> list[tuple[int, int]]:
+        base_width = 1920.0
+        base_height = 1080.0
         return [
-            (int(self._frame_width * px), int(self._frame_height * py))
-            for px, py in self._detection_corner_ratios
+            (
+                int(round(self._frame_width * (x / base_width))),
+                int(round(self._frame_height * (y / base_height))),
+            )
+            for x, y in self._canonical_detection_corners
         ]
+
+    @staticmethod
+    def _estimate_size_from_corners(
+        corners: list[tuple[int, int]],
+    ) -> tuple[float, float]:
+        if len(corners) != 4:
+            return (80.0, 40.0)
+
+        points = np.array(corners, dtype=np.float64)
+        width = float(
+            (
+                np.linalg.norm(points[1] - points[0])
+                + np.linalg.norm(points[2] - points[3])
+            )
+            / 2.0
+        )
+        height = float(
+            (
+                np.linalg.norm(points[3] - points[0])
+                + np.linalg.norm(points[2] - points[1])
+            )
+            / 2.0
+        )
+        return (max(width, 1.0), max(height, 1.0))
+
+    def _refresh_detection_outputs(self) -> None:
+        self._detection_corners = self._build_default_detection_corners()
+        self._detection_confidence = 0.95
+        self._detection_frame = self._render_detection_frame(self._frame)
+        self._detection_jpeg_bytes = self._encode_jpeg(self._detection_frame)
 
     def _build_checkerboard_points(self) -> dict[tuple[int, int], tuple[float, float]]:
         return {
@@ -179,6 +261,8 @@ class MockCameraVisionAdapter:
             ok, encoded = cv2.imencode(".jpg", frame)
             if ok:
                 return bytes(encoded)
+        if self._source_image_bytes:
+            return self._source_image_bytes
         return self._fallback_jpeg_bytes
 
     @property
@@ -242,9 +326,11 @@ class MockCameraVisionAdapter:
         return self.detect_latest()
 
     def detect_latest(self) -> DetectionResults:
+        self._refresh_detection_outputs()
         corner_objects = [
             Corner(x=float(x), y=float(y)) for x, y in self._detection_corners
         ]
+        width_mm, height_mm = self._estimate_size_from_corners(self._detection_corners)
         center_x = float(sum(x for x, _ in self._detection_corners) / 4.0)
         center_y = float(sum(y for _, y in self._detection_corners) / 4.0)
         return DetectionResults(
@@ -252,11 +338,11 @@ class MockCameraVisionAdapter:
             detections=[
                 DetectionResult(
                     corners=corner_objects,
-                    width_mm=80.0,
-                    height_mm=40.0,
+                    width_mm=width_mm,
+                    height_mm=height_mm,
                     center_x=center_x,
                     center_y=center_y,
-                    confidence=0.95,
+                    confidence=self._detection_confidence,
                 )
             ],
             image_base64=base64.b64encode(self._detection_jpeg_bytes).decode("ascii"),
@@ -315,19 +401,28 @@ class MockCameraVisionAdapter:
         return min(candidates, key=lambda item: (item[0].row, item[0].col))
 
     async def stream_camera(self) -> AsyncGenerator[bytes, None]:
-        while True:
-            yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                + self._camera_jpeg_bytes
-                + b"\r\n"
-            )
-            await asyncio.sleep(0.1)
+        self._open_stream()
+        try:
+            while True:
+                yield (
+                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                    + self._camera_jpeg_bytes
+                    + b"\r\n"
+                )
+                await asyncio.sleep(0.1)
+        finally:
+            self._close_stream()
 
     async def stream_detection(self) -> AsyncGenerator[bytes, None]:
-        while True:
-            yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                + self._detection_jpeg_bytes
-                + b"\r\n"
-            )
-            await asyncio.sleep(0.15)
+        self._open_stream()
+        try:
+            while True:
+                self._refresh_detection_outputs()
+                yield (
+                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                    + self._detection_jpeg_bytes
+                    + b"\r\n"
+                )
+                await asyncio.sleep(0.15)
+        finally:
+            self._close_stream()

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.adapters.camera_vision import (
 )
 from app.adapters.ionVision import IVResult
 from app.adapters.robot import PoseResult, RobotResult
+from app.api.routes import _disconnect_aware_mjpeg_stream
 from app.dependencies import create_orchestrator, get_orchestrator
 from app.main import app
 from tests.calibration_helpers import (
@@ -23,6 +25,29 @@ from tests.calibration_helpers import (
     write_intrinsics,
     write_mapping,
 )
+
+
+class _TrackableAsyncStream:
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+        self.closed = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        return self._payload
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _FakeRequest:
+    def __init__(self, disconnected_sequence: list[bool]) -> None:
+        self._sequence = iter(disconnected_sequence)
+
+    async def is_disconnected(self) -> bool:
+        return next(self._sequence, True)
 
 
 def _make_bundle(tmp_path: Path, calibrated: bool) -> dict[str, object]:
@@ -121,7 +146,7 @@ def test_jobs_lifecycle(calibrated_bundle) -> None:
     client = calibrated_bundle["client"]
     path = [
         {"pixelX": 150.0, "pixelY": 150.0},
-        {"pixelX": 175.0, "pixelY": 175.0},
+        {"pixelX": 165.0, "pixelY": 165.0},
     ]
     response = client.post(
         "/api/job",
@@ -170,12 +195,28 @@ def test_path_detect_returns_detection_payload(calibrated_bundle) -> None:
         )
     )
 
-    response = client.post("/api/path/detect", json={"options": {}})
+    response = client.post(
+        "/api/path/detect",
+        json={"options": {}, "workZ": -48.0, "workR": 0.0},
+    )
     assert response.status_code == 201
     payload = response.json()
     assert payload["requestSucceeded"] is True
     assert len(payload["detections"]) == 1
+    assert payload["detections"][0]["corners"][0]["reachable"] is True
     assert payload["image_base64"] == "ZmFrZS1pbWFnZQ=="
+
+
+def test_path_detect_requires_calibration(uncalibrated_bundle) -> None:
+    client = uncalibrated_bundle["client"]
+
+    response = client.post(
+        "/api/path/detect",
+        json={"options": {}, "workZ": -48.0, "workR": 0.0},
+    )
+
+    assert response.status_code == 409
+    assert "calibrat" in response.json()["detail"].lower()
 
 
 def test_job_creation_requires_calibration(uncalibrated_bundle) -> None:
@@ -222,7 +263,7 @@ def test_real_job_creation_allows_wide_reach_waypoints(calibrated_bundle) -> Non
     response = client.post(
         "/api/job",
         json={
-            "path": [{"pixelX": 1.0, "pixelY": 1.0}],
+            "path": [{"pixelX": 205.0, "pixelY": 80.0}],
             "dryRun": False,
             "workZ": -48,
             "workR": 0,
@@ -247,6 +288,52 @@ def test_job_creation_rejects_empty_path_with_422(calibrated_bundle) -> None:
 
     assert response.status_code == 422
     assert "path is empty" in response.json()["detail"].lower()
+
+
+def test_job_creation_rejects_all_unreachable_points(calibrated_bundle) -> None:
+    client = calibrated_bundle["client"]
+    service = calibrated_bundle["service"]
+    service._robot.is_reachable_mm = MagicMock(side_effect=[False, False])
+
+    response = client.post(
+        "/api/job",
+        json={
+            "path": [
+                {"pixelX": 100.0, "pixelY": 100.0, "index": "0-0-0"},
+                {"pixelX": 200.0, "pixelY": 100.0},
+            ],
+            "dryRun": True,
+            "workZ": -48,
+            "workR": 0,
+        },
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "point 0-0-0 is not reachable" in detail
+    assert "point 2 is not reachable" in detail
+
+
+def test_job_creation_allows_unreachable_points_when_check_disabled(
+    calibrated_bundle,
+) -> None:
+    client = calibrated_bundle["client"]
+    service = calibrated_bundle["service"]
+    service.reachability_check_enabled = False
+    service._robot.is_reachable_mm = MagicMock(return_value=False)
+
+    response = client.post(
+        "/api/job",
+        json={
+            "path": [{"pixelX": 100.0, "pixelY": 100.0}],
+            "dryRun": True,
+            "workZ": -48,
+            "workR": 0,
+        },
+    )
+
+    assert response.status_code == 201
+    service._robot.is_reachable_mm.assert_not_called()
 
 
 def test_calibration_flow_endpoint_writes_mapping_and_updates_status(
@@ -310,7 +397,7 @@ def test_job_sse_events(calibrated_bundle) -> None:
         json={
             "path": [
                 {"pixelX": 150.0, "pixelY": 150.0},
-                {"pixelX": 175.0, "pixelY": 175.0},
+                {"pixelX": 165.0, "pixelY": 165.0},
             ],
             "dryRun": True,
             "workZ": 0,
@@ -336,6 +423,42 @@ def test_job_sse_events(calibrated_bundle) -> None:
     assert events[0]["type"] == "job:snapshot"
     assert events[-1]["state"] == "completed"
     assert any(event["type"] == "job:waypoint_completed" for event in events)
+
+
+def test_disconnect_aware_stream_closes_source_when_client_disconnects() -> None:
+    tracked_stream = _TrackableAsyncStream(b"fake-camera")
+    request = _FakeRequest([True])
+
+    async def consume() -> None:
+        stream = _disconnect_aware_mjpeg_stream(
+            request,
+            tracked_stream,
+            stream_name="camera",
+        )
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+
+    asyncio.run(consume())
+    assert tracked_stream.closed is True
+
+
+def test_disconnect_aware_stream_closes_source_on_consumer_aclose() -> None:
+    tracked_stream = _TrackableAsyncStream(b"fake-detection")
+    request = _FakeRequest([False, False])
+
+    async def consume() -> bytes:
+        stream = _disconnect_aware_mjpeg_stream(
+            request,
+            tracked_stream,
+            stream_name="detection",
+        )
+        try:
+            return await anext(stream)
+        finally:
+            await stream.aclose()
+
+    assert asyncio.run(consume()) == b"fake-detection"
+    assert tracked_stream.closed is True
 
 
 def test_job_image_endpoint_returns_404_when_missing_image(calibrated_bundle) -> None:
@@ -375,6 +498,8 @@ def test_path_populate_generates_perimeter_points(calibrated_bundle) -> None:
         "/api/path/populate",
         json={
             "measuringPointsPerCm": 0.5,
+            "workZ": -48,
+            "workR": 0,
             "batteries": [
                 {
                     "corners": [
@@ -394,6 +519,7 @@ def test_path_populate_generates_perimeter_points(calibrated_bundle) -> None:
     assert payload["path"][0]["batteryNr"] == 0
     assert payload["path"][0]["cornerIndex"] == 0
     assert payload["path"][0]["measurementIndex"] == 0
+    assert isinstance(payload["path"][0]["reachable"], bool)
 
 
 def test_job_creation_accepts_populated_path_shape(calibrated_bundle) -> None:

@@ -129,8 +129,8 @@ class CameraVisionAdapter:
         device_index: int = 0,
         output_dir: str = "data/images",
         intrinsics_path: str | None = None,
-        frame_width: int = 1280,
-        frame_height: int = 720,
+        frame_width: int = 1920,
+        frame_height: int = 1080,
         checkerboard_size: tuple[int, int] = (8, 6),
         checkerboard_square_mm: float = 34.0,
     ) -> None:
@@ -150,6 +150,8 @@ class CameraVisionAdapter:
         self._capture_thread: threading.Thread | None = None
         self._capture_lock = threading.Lock()
         self._frame_lock = threading.Lock()
+        self._active_streams_lock = threading.Lock()
+        self._active_streams = 0
         self._latest_frame: np.ndarray | None = None
         self._capture_ready = threading.Event()
         self._capture_running = False
@@ -308,6 +310,20 @@ class CameraVisionAdapter:
     def _touch_capture(self) -> None:
         self._capture_last_access = time.monotonic()
 
+    @property
+    def active_stream_count(self) -> int:
+        with self._active_streams_lock:
+            return self._active_streams
+
+    def _open_stream(self) -> None:
+        with self._active_streams_lock:
+            self._active_streams += 1
+
+    def _close_stream(self) -> None:
+        with self._active_streams_lock:
+            if self._active_streams > 0:
+                self._active_streams -= 1
+
     def _cache_checkerboard_status(
         self,
         *,
@@ -399,6 +415,28 @@ class CameraVisionAdapter:
             return CaptureResult(False, error=self._capture_error)
         return CaptureResult(True)
 
+    def close(self, join_timeout_s: float = 2.0) -> None:
+        with self._capture_lock:
+            self._capture_running = False
+            capture_thread = self._capture_thread
+
+        if capture_thread and capture_thread.is_alive():
+            capture_thread.join(timeout=max(join_timeout_s, 0.0))
+            if capture_thread.is_alive():
+                logger.warning("Camera capture thread did not stop before timeout")
+                return
+
+        with self._capture_lock:
+            if self._capture_thread is capture_thread:
+                self._capture_thread = None
+
+        with self._frame_lock:
+            self._latest_frame = None
+
+        self._capture_last_access = 0.0
+        self._checkerboard_status_cache = None
+        self._checkerboard_status_cached_at = 0.0
+
     # ---- health check ----
 
     def ping(self) -> CaptureResult:
@@ -422,6 +460,7 @@ class CameraVisionAdapter:
         timeout_s: float = 1.0,
         *,
         ensure_capture: bool = True,
+        touch_capture: bool = True,
     ) -> np.ndarray | None:
         if ensure_capture:
             result = self._ensure_capture_running()
@@ -430,7 +469,8 @@ class CameraVisionAdapter:
         elif not self._capture_alive():
             return None
 
-        self._touch_capture()
+        if touch_capture:
+            self._touch_capture()
 
         deadline = time.monotonic() + max(timeout_s, 0.0)
         while time.monotonic() <= deadline:
@@ -556,23 +596,32 @@ class CameraVisionAdapter:
     def checkerboard_visible(self) -> bool:
         return bool(self.checkerboard_status()["visible"])
 
-    def checkerboard_status(self) -> dict[str, bool | str | None]:
-        cached = self._cached_checkerboard_status()
-        if cached is not None:
-            return cached
-
-        frame, error = self._capture_frame_for_processing(timeout_s=0.1)
-        if frame is None:
-            return self._cache_checkerboard_status(
-                visible=False,
-                error=error,
+    def checkerboard_status(
+        self,
+        *,
+        ensure_capture: bool = True,
+    ) -> dict[str, bool | str | None]:
+        if ensure_capture:
+            cached = self._cached_checkerboard_status()
+            if cached is not None:
+                return cached
+            frame, error = self._capture_frame_for_processing(timeout_s=0.1)
+        else:
+            cached = self._cached_checkerboard_status()
+            if cached is not None:
+                return cached
+            frame = self.get_latest_frame(
+                timeout_s=0.0,
+                ensure_capture=False,
+                touch_capture=False,
             )
+            error = self._capture_error or "Camera capture inactive"
+
+        if frame is None:
+            return {"visible": False, "error": error}
 
         result = self.find_checkerboard(frame)
-        return self._cache_checkerboard_status(
-            visible=result.ok,
-            error=result.error,
-        )
+        return {"visible": result.ok, "error": result.error}
 
     def find_checkerboard(self, frame: np.ndarray) -> CheckerboardResult:
         import cv2
@@ -750,17 +799,21 @@ class CameraVisionAdapter:
         return self._multipart_frame(jpeg)
 
     async def stream_camera(self) -> AsyncGenerator[bytes, None]:
-        result = await asyncio.to_thread(self._ensure_capture_running)
-        if not result.ok:
-            yield await asyncio.to_thread(
-                self._stream_error_chunk,
-                result.error or "Camera not available",
-            )
-            return
+        self._open_stream()
+        try:
+            result = await asyncio.to_thread(self._ensure_capture_running)
+            if not result.ok:
+                yield await asyncio.to_thread(
+                    self._stream_error_chunk,
+                    result.error or "Camera not available",
+                )
+                return
 
-        while True:
-            yield await asyncio.to_thread(self._camera_stream_chunk)
-            await asyncio.sleep(CAMERA_STREAM_INTERVAL_S)
+            while True:
+                yield await asyncio.to_thread(self._camera_stream_chunk)
+                await asyncio.sleep(CAMERA_STREAM_INTERVAL_S)
+        finally:
+            self._close_stream()
 
     def _detection_stream_chunk(self) -> bytes:
         frame, error = self._capture_frame_for_processing(timeout_s=1.0)
@@ -774,17 +827,21 @@ class CameraVisionAdapter:
         return self._multipart_frame(jpeg)
 
     async def stream_detection(self) -> AsyncGenerator[bytes, None]:
-        result = await asyncio.to_thread(self._ensure_capture_running)
-        if not result.ok:
-            yield await asyncio.to_thread(
-                self._stream_error_chunk,
-                result.error or "Camera not available",
-            )
-            return
+        self._open_stream()
+        try:
+            result = await asyncio.to_thread(self._ensure_capture_running)
+            if not result.ok:
+                yield await asyncio.to_thread(
+                    self._stream_error_chunk,
+                    result.error or "Camera not available",
+                )
+                return
 
-        while True:
-            yield await asyncio.to_thread(self._detection_stream_chunk)
-            await asyncio.sleep(DETECTION_STREAM_INTERVAL_S)
+            while True:
+                yield await asyncio.to_thread(self._detection_stream_chunk)
+                await asyncio.sleep(DETECTION_STREAM_INTERVAL_S)
+        finally:
+            self._close_stream()
 
     def detect_live(self, frame: np.ndarray) -> np.ndarray:
         import cv2
