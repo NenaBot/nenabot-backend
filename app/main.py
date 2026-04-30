@@ -4,6 +4,7 @@ This module initializes the FastAPI application, sets up CORS middleware,
 and extends the OpenAPI specification to include SSE-related schemas for
 real-time job event streaming.
 """
+
 from __future__ import annotations
 
 import asyncio
